@@ -6,7 +6,7 @@ import argparse
 import sys
 import traceback
 from collections.abc import Callable
-from typing import NoReturn, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from facetmedia import __version__, contract
 from facetmedia.contract import FacetError
@@ -36,8 +36,24 @@ _REGISTRY_VERBS: tuple[tuple[str, str], ...] = (("validate", "validate a registr
 
 
 class FacetParser(argparse.ArgumentParser):
+    _facet_argv: list[str] | None = None
+
+    def parse_known_args(self, *args: Any, **kwargs: Any) -> Any:
+        raw = args[0] if args else kwargs.get("args")
+        if raw is None:
+            self._facet_argv = sys.argv[1:]
+        elif isinstance(raw, str):
+            self._facet_argv = [raw]
+        else:
+            try:
+                self._facet_argv = list(raw)
+            except TypeError:
+                self._facet_argv = sys.argv[1:]
+        return super().parse_known_args(*args, **kwargs)
+
     def error(self, message: str) -> NoReturn:
-        if "--json" in sys.argv:
+        argv = self._facet_argv if self._facet_argv is not None else sys.argv[1:]
+        if "--json" in argv:
             contract.emit(contract.failure(FacetError("invalid_input", message)), True)
         super().error(message)
 
