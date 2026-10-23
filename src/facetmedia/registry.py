@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from facetmedia.contract import FacetError
+from facetmedia.home import Home
 from facetmedia.manifest import RegistryLoader
 from facetmedia.registry_types import (
     PROTOCOL_VERSION,
@@ -120,7 +122,11 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
 
 
 def registry_dir() -> Path:
-    """The registry directory in use: ``FACET_REGISTRY``, else the snapshot."""
+    """The registry directory in use: ``FACET_REGISTRY``, else the snapshot.
+
+    An empty facet home fetches the registry once, before the first use, so a
+    fresh install works with one command.
+    """
 
     override = os.environ.get("FACET_REGISTRY")
     if override:
@@ -132,26 +138,48 @@ def registry_dir() -> Path:
                 details={"FACET_REGISTRY": override},
             )
         return path
-    home = Path(os.environ.get("FACET_HOME") or Path.home() / ".facet")
-    state_file = home / "state" / "registry.json"
+    home = Home.peek_env()
+    commit = _recorded_commit(home)
+    if commit is None:
+        commit = _first_use(home)
+    return home.registry_dir(commit)
+
+
+def _recorded_commit(home: Home) -> str | None:
+    """The commit ``state/registry.json`` records, or ``None`` when absent."""
+    state_file = home.state_file("registry.json")
     try:
         state = json.loads(state_file.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise FacetError(
-            "download_failed",
-            "no registry snapshot is available",
-            hint="run facet update when online",
-        ) from exc
+    except FileNotFoundError:
+        return None
     except (OSError, ValueError) as exc:
         raise FacetError("internal", f"{state_file}: corrupt registry state") from exc
     commit = state.get("commit") if isinstance(state, dict) else None
     if not isinstance(commit, str) or not commit:
+        return None
+    return commit
+
+
+def _first_use(home: Home) -> str:
+    """Fetch the registry once, then return the commit it recorded.
+
+    No lock is taken: a caller such as ``facet update`` already holds the
+    exclusive lock, and a second descriptor on the same file would deadlock.
+    """
+    print("fetching the registry (first use)", file=sys.stderr)
+    # Imported here because facetmedia.update imports this module: a top-level
+    # import would be a cycle.
+    from facetmedia import update  # noqa: PLC0415
+
+    update.update_registry(home.ensure(), update.default_ref())
+    commit = _recorded_commit(home)
+    if commit is None:
         raise FacetError(
             "download_failed",
-            "no registry snapshot is in use",
+            "no registry snapshot is available",
             hint="run facet update when online",
         )
-    return home / "registry" / commit
+    return commit
 
 
 def load_active_registry() -> Registry:

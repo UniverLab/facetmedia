@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, contract, registry
+from facetmedia import __version__, contract, lock, registry, update
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import validate_registry
@@ -20,7 +20,7 @@ Handler = Callable[[argparse.Namespace], int]
 _P = TypeVar("_P", bound=argparse.ArgumentParser)
 
 _VERBS: tuple[tuple[str, str], ...] = (
-    ("update", "refresh the registry index"),
+    ("update", "download the registry at a pinned commit"),
     ("pull", "install a tool into its own pinned environment"),
     ("list", "list installed and available tools"),
     ("describe", "show a tool's manifest"),
@@ -66,6 +66,29 @@ class FacetParser(argparse.ArgumentParser):
 
 def _not_implemented(_args: argparse.Namespace) -> int:
     raise FacetError("internal", "not implemented yet")
+
+
+def _handle_update(args: argparse.Namespace) -> int:
+    ref = args.ref or update.default_ref()
+    with lock.hold("exclusive", "facet update", *_lock_params(args)):
+        data = update.update_registry(Home.from_env(), ref)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        print(f"registry {data['commit']} (ref {data['ref']})")
+        for package in _packages(data):
+            suffix = " changed" if package["changed"] else ""
+            print(f"  {package['name']} {package['version']}{suffix}")
+    return 0
+
+
+def _packages(data: dict[str, object]) -> list[dict[str, object]]:
+    packages = data.get("packages")
+    if not isinstance(packages, list):
+        return []
+    return [package for package in packages if isinstance(package, dict)]
+
+
+_HANDLERS: dict[str, Handler] = {"update": _handle_update}
 
 
 def _handle_registry_validate(args: argparse.Namespace) -> int:
@@ -169,6 +192,15 @@ def _add_registry_group(subparsers: argparse._SubParsersAction[_P]) -> None:
     validate.set_defaults(handler=_handle_registry_validate)
 
 
+def _add_update_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ref",
+        default=None,
+        metavar="REF",
+        help="branch, tag, or commit to pin (default: $FACET_REGISTRY_REF or main)",
+    )
+
+
 def build_parser() -> FacetParser:
     parser = FacetParser(
         prog="facet",
@@ -179,7 +211,15 @@ def build_parser() -> FacetParser:
     parser.set_defaults(json=False)
     subparsers = parser.add_subparsers(dest="command", metavar="VERB", required=True)
     for verb, verb_help in _VERBS:
-        _add_verb(subparsers, verb, verb_help, lock=verb in _LOCK_VERBS)
+        verb_parser = _add_verb(
+            subparsers,
+            verb,
+            verb_help,
+            handler=_HANDLERS.get(verb, _not_implemented),
+            lock=verb in _LOCK_VERBS,
+        )
+        if verb == "update":
+            _add_update_flags(verb_parser)
     _add_group(
         subparsers,
         "license",

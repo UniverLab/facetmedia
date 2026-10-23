@@ -15,6 +15,7 @@ from facetmedia.registry import (
     registry_dir,
     validate_registry,
 )
+from tests.registry_server import dead_urls
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
 
@@ -299,24 +300,13 @@ def test_registry_dir_corrupt_state_raises(tmp_path: Path, monkeypatch: pytest.M
     assert "corrupt registry state" in exc.value.message
 
 
-def test_registry_dir_no_snapshot_raises() -> None:
-    old_home = os.environ.get("FACET_HOME")
-    old_registry = os.environ.get("FACET_REGISTRY")
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            home = Path(tmpdir)
-            os.environ["FACET_HOME"] = str(home)
-            os.environ.pop("FACET_REGISTRY", None)
-            with pytest.raises(FacetError) as exc:
-                registry_dir()
-            assert exc.value.code == "download_failed"
-            assert "facet update" in exc.value.hint
-    finally:
-        if old_home is None:
-            os.environ.pop("FACET_HOME", None)
-        else:
-            os.environ["FACET_HOME"] = old_home
-        if old_registry is None:
-            os.environ.pop("FACET_REGISTRY", None)
-        else:
-            os.environ["FACET_REGISTRY"] = old_registry
+def test_registry_dir_no_snapshot_raises(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dead_urls(monkeypatch)
+    monkeypatch.delenv("FACET_REGISTRY", raising=False)
+    with pytest.raises(FacetError) as exc:
+        registry_dir()
+    assert exc.value.code == "download_failed"
+    assert exc.value.hint == "run facet update when online"
+    assert "fetching the registry (first use)" in capsys.readouterr().err

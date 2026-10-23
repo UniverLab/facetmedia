@@ -6,8 +6,9 @@ A **package** is one directory in it, and its **manifest** is that directory's
 `package.toml`. Adding a tool means adding a package directory to the registry,
 never touching facet's core.
 
-facet reads a registry that is already on disk. Downloading it is `facet
-update`; validating a checkout is `facet registry validate`.
+facet reads a registry snapshot it already downloaded, offline. `facet update`
+downloads it at one pinned commit; validating a checkout is `facet registry
+validate`.
 
 ## Layout
 
@@ -199,7 +200,67 @@ stays in the registry but cannot be pulled or run: facet answers
 (useful for development, tests, and the registry's own CI). Otherwise facet
 uses the snapshot recorded by `facet update`: under `FACET_HOME` (default
 `~/.facet`), the commit in `state/registry.json` selects
-`registry/<commit>/`.
+`registry/<commit>/`. A snapshot is complete when it holds `.complete`.
+
+## `facet update`
+
+```bash
+facet update
+facet update --ref feature/v0.1
+facet update --ref <40-hex commit> --json
+```
+
+`facet update` resolves a reference to one exact commit and keeps that commit as
+an immutable snapshot under `FACET_HOME`. Package runners are code that arrives
+from the network, so the commit is always pinned and never changes silently.
+
+- `REF` defaults to `$FACET_REGISTRY_REF`, else `main`, and may be a branch, a
+  tag, or a 40-hex commit; `--ref` wins over the variable. During v0.1
+  development the registry's work lives on `feature/v0.1`, so
+  `FACET_REGISTRY_REF=feature/v0.1` is how facet is tested against it. The
+  snapshot in use keeps the ref it was fetched with until the next update.
+- The reference is resolved with
+  `GET https://api.github.com/repos/UniverLab/facetmedia-registry/commits/<REF>`.
+  Set `GITHUB_TOKEN` to lift the anonymous rate limit; facet sends it as
+  `Authorization: Bearer` only when it is set.
+- `https://codeload.github.com/UniverLab/facetmedia-registry/tar.gz/<commit>` is
+  downloaded into `<home>/tmp/` and unpacked there, with its one top directory
+  stripped. A member that is absolute, contains `..`, is a link, or is a device
+  is refused. The snapshot is then loaded: one whose manifests do not validate
+  is rejected and deleted.
+- A snapshot that already holds `.complete` is never downloaded again; updating
+  to the same commit only switches to it.
+- `state/registry.json` records `commit`, `ref`, `fetched_at`, and `source`, and
+  every later command reads that snapshot offline until the next update.
+  Installed environments are not touched: a package whose manifest version
+  changed is rebuilt by its next `pull` or `run`, and the output marks it
+  `changed`.
+
+The first command that needs the registry and finds no snapshot fetches it once,
+printing `fetching the registry (first use)` to stderr. With no network and no
+snapshot the error is `download_failed` (exit 8) with the hint `run facet update
+when online`. A failed update changes nothing: the previous snapshot stays in
+use.
+
+With `--json`:
+
+```json
+{"contract": 1, "data": {"commit": "e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca", "packages": [{"changed": true, "compatible": true, "name": "echo", "version": "0.1.0"}], "previous_commit": null, "ref": "feature/v0.1"}, "facet": "0.1.0.dev0", "ok": true}
+```
+
+Without `--json`:
+
+```console
+$ facet update --ref feature/v0.1
+registry e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca (ref feature/v0.1)
+  echo 0.1.0 changed
+  future 0.1.0 changed
+  termsy 0.1.0 changed
+```
+
+`FACET_GITHUB_API` and `FACET_GITHUB_CODELOAD` replace the two GitHub base
+URLs. They exist for the test suite, which serves both endpoints from
+`127.0.0.1`, and for nothing else.
 
 ## `facet registry validate`
 

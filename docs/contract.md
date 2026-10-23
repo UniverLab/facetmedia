@@ -43,7 +43,7 @@ Branch on the exit code without parsing prose:
 | `machine_cannot` | 5 | the machine does not meet the package requirements (RAM, disk, platform) |
 | `lock_busy` | 6 | the lock is held and `--no-wait` was given, or the wait timed out |
 | `not_installed` | 7 | the package is not installed and `--no-pull` was given |
-| `download_failed` | 8 | a model or environment download failed or its sha256 did not match |
+| `download_failed` | 8 | a model, environment, or registry download failed, or its sha256 did not match |
 | `runner_failed` | 9 | the package runner crashed or broke the runner protocol |
 | `license_needs_person` | 10 | `license accept` was run without an interactive terminal |
 

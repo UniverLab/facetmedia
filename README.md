@@ -16,7 +16,7 @@ Linux and WSL only. Everything facet installs or remembers lives under one direc
 
 | Command | Purpose |
 |---------|---------|
-| `facet update` | refresh the registry index |
+| `facet update` | download the registry at a pinned commit |
 | `facet pull` | install a tool into its own pinned environment |
 | `facet list` | list installed and available tools |
 | `facet describe` | show a tool's manifest |
