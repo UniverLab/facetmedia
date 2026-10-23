@@ -20,8 +20,6 @@ UNIMPLEMENTED_ARGV = [
     ["check"],
     ["run"],
     ["preview"],
-    ["license", "accept"],
-    ["license", "list"],
     ["gc"],
     ["rm"],
 ]

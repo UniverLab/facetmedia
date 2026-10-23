@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, contract, env, lock, registry, update
+from facetmedia import __version__, contract, env, licenses, lock, registry, update
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import load_active_registry, validate_registry
@@ -66,6 +66,36 @@ class FacetParser(argparse.ArgumentParser):
 
 def _not_implemented(_args: argparse.Namespace) -> int:
     raise FacetError("internal", "not implemented yet")
+
+
+def _handle_license_accept(args: argparse.Namespace) -> int:
+    with lock.hold("exclusive", "facet license accept", *_lock_params(args)):
+        record = licenses.accept(args.model, assume_yes=bool(args.yes))
+    if record is None:
+        contract.emit(contract.ok({"model": args.model, "accepted": False}), args.json)
+        if not args.json:
+            print("nothing to accept")
+        return 0
+    contract.emit(contract.ok(record), args.json)
+    if not args.json:
+        print(f"{args.model} accepted")
+    return 0
+
+
+def _handle_license_list(args: argparse.Namespace) -> int:
+    rows = licenses.list_status()
+    contract.emit(contract.ok({"models": rows}), args.json)
+    if not args.json:
+        for row in rows:
+            state = "accepted" if row["accepted"] else "not accepted"
+            print(f"{row['id']} {row['spdx']} {state}")
+    return 0
+
+
+_LICENSE_HANDLERS: dict[str, Handler] = {
+    "accept": _handle_license_accept,
+    "list": _handle_license_list,
+}
 
 
 def _handle_update(args: argparse.Namespace) -> int:
@@ -198,12 +228,16 @@ def _add_group(
     help_text: str,
     verbs: tuple[tuple[str, str], ...],
     lock_verbs: frozenset[str] = frozenset(),
-) -> None:
+    handlers: dict[str, Handler] | None = None,
+) -> dict[str, argparse.ArgumentParser]:
     group = subparsers.add_parser(name, help=help_text, description=help_text)
     _add_json(group)
     nested = group.add_subparsers(dest=f"{name}_command", metavar="VERB", required=True)
+    parsers: dict[str, argparse.ArgumentParser] = {}
     for verb, verb_help in verbs:
-        _add_verb(nested, verb, verb_help, lock=verb in lock_verbs)
+        handler = handlers.get(verb, _not_implemented) if handlers else _not_implemented
+        parsers[verb] = _add_verb(nested, verb, verb_help, handler, lock=verb in lock_verbs)
+    return parsers
 
 
 def _add_registry_group(subparsers: argparse._SubParsersAction[_P]) -> None:
@@ -226,6 +260,16 @@ def _add_update_flags(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="REF",
         help="branch, tag, or commit to pin (default: $FACET_REGISTRY_REF or main)",
+    )
+
+
+def _add_license_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
+    accept = parsers["accept"]
+    accept.add_argument("model", help="registry model id to accept")
+    accept.add_argument(
+        "--yes",
+        action="store_true",
+        help="accept without asking; for agents directed by the machine's governor",
     )
 
 
@@ -259,13 +303,15 @@ def build_parser() -> FacetParser:
             _add_update_flags(verb_parser)
         elif verb == "pull":
             _add_pull_flags(verb_parser)
-    _add_group(
+    license_parsers = _add_group(
         subparsers,
         "license",
         "manage tool licenses",
         _LICENSE_VERBS,
         lock_verbs=frozenset({"accept"}),
+        handlers=_LICENSE_HANDLERS,
     )
+    _add_license_flags(license_parsers)
     _add_registry_group(subparsers)
     return parser
 

@@ -31,8 +31,9 @@ from typing import IO, Any, Final
 import uv
 
 from facetmedia import __version__
+from facetmedia import licenses as licenses_module
 from facetmedia.contract import FacetError
-from facetmedia.home import Home, atomic_write_text, read_json, require_posix, uv_env
+from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import Model, Package
 
 __all__ = ["pull"]
@@ -91,7 +92,7 @@ def _preflight(package: Package, home: Home) -> None:
     _require_disk(home, package)
     package.require_compatible()
     _require_host_libs(package)
-    _require_accepted(home, package)
+    licenses_module.require(package.models)
 
 
 def _require_platform(package: Package) -> None:
@@ -176,51 +177,6 @@ def _require_host_libs(package: Package) -> None:
                 hint=package.requirements.host_hint or None,
                 details={"soname": soname},
             ) from exc
-
-
-def _require_accepted(home: Home, package: Package) -> None:
-    wanted = [model for model in package.models if model.requires_acceptance]
-    if not wanted:
-        return
-    records = _acceptance_records(home)
-    missing = [model for model in wanted if not _accepted(model, records)]
-    if not missing:
-        return
-    listed = [_missing_entry(model) for model in missing]
-    raise FacetError(
-        "license_not_accepted",
-        "license not accepted: "
-        + ", ".join(f"{entry['id']} ({entry['spdx']})" for entry in listed),
-        hint="; ".join(str(entry["command"]) for entry in listed),
-        details={"models": listed},
-    )
-
-
-def _acceptance_records(home: Home) -> list[object]:
-    """The ``accepted`` list of ``state/licenses.json`` (feat(license) shape)."""
-    state: object = read_json(home.licenses_file, {})
-    if not isinstance(state, dict):
-        return []
-    records = state.get("accepted")
-    return records if isinstance(records, list) else []
-
-
-def _accepted(model: Model, records: list[object]) -> bool:
-    return any(
-        isinstance(record, dict)
-        and record.get("model") == model.id
-        and record.get("spdx") == model.spdx
-        for record in records
-    )
-
-
-def _missing_entry(model: Model) -> dict[str, str]:
-    return {
-        "id": model.id,
-        "spdx": model.spdx,
-        "terms_url": model.terms_url,
-        "command": f"facet license accept {model.id}",
-    }
 
 
 # --- The plan, printed to stderr before anything happens.

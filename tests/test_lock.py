@@ -30,7 +30,7 @@ LOCKING_VERBS = [
     ["check"],
     ["rm"],
     ["gc"],
-    ["license", "accept"],
+    ["license", "accept", "termsy-weights"],
 ]
 
 LIGHT_VERBS = [["list"], ["describe"], ["preview"], ["license", "list"]]
