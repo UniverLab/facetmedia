@@ -23,8 +23,8 @@ Linux and WSL only. Everything facet installs or remembers lives under one direc
 | `facet check` | verify an installed tool |
 | `facet run` | run a tool through the --json contract |
 | `facet preview` | render a tool's output for a person |
-| `facet license accept` | accept the license of a tool |
-| `facet license list` | list the licenses of installed tools |
+| `facet license accept` | accept a model's terms before it may be used |
+| `facet license list` | list models that need acceptance, with status |
 | `facet registry validate` | validate a registry checkout |
 | `facet gc` | remove unused environments and caches |
 | `facet rm` | remove an installed tool |

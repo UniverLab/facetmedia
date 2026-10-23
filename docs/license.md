@@ -3,7 +3,7 @@
 Some models come with terms — a non-commercial licence, for example. Such a
 model is used only after the person who governs the machine has accepted its
 terms once, explicitly, with `facet license accept`. Only that verb accepts;
-`pull` and `run` never accept on their own and instead fail with the command
+`pull` never accepts on its own and instead fails with the command
 to run. No environment variable accepts licences.
 
 ```bash
