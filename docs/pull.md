@@ -19,7 +19,8 @@ facet pull kokoro --verify-models   # recompute sha256 of models already present
 ## What it checks first
 
 Nothing is written or downloaded until every check passes, in this order; each
-refusal is `machine_cannot` (exit 5):
+refusal is `machine_cannot` (exit 5), except the licence check, which has its
+own error:
 
 - the platform is in `requirements.platforms`;
 - total RAM (`/proc/meminfo` `MemTotal`) meets `requirements.ram_gb`;
@@ -35,9 +36,10 @@ refusal is `machine_cannot` (exit 5):
   (exit 4) lists each model, its licence, its `terms_url` and the command to
   run, `facet license accept <id>`. Nothing is downloaded in that case.
 
-The plan goes to stderr either way: the Python version, the environment path,
-each model with its size and whether it is already present, and the total to
-download.
+An unknown package is `invalid_input` (exit 2) and `details.known` lists the
+package names in the registry. Once every check passes, the plan goes to
+stderr: the Python version, the environment path, each model with its size and
+whether it is already present, and the total to download.
 
 ## What it builds
 
@@ -57,17 +59,22 @@ streams to stderr and to the run log; a non-zero exit is `download_failed`
 (exit 8) carrying the last 40 lines. When facet ships a runner SDK it is
 copied into the environment as `facet_runner_sdk.py`.
 
-Models are stored under `~/.facet/models/direct/`. A `url` model streams
-through `tmp/<model-id>.<random>.part` while hashing; a sha256 mismatch
-deletes the part file and fails with `download_failed` naming both hashes. An
-`hf_repo` model is fetched file by file from the pinned revision into its
-local directory (`.gitattributes` and `README.md` are skipped; LFS files are
-verified by their sha256). A model already present with the expected size is
-skipped, its sha256 recomputed only with `--verify-models`. Requests carry
-only `User-Agent: facetmedia/<version>`.
+Models are stored under `~/.facet/models/direct/`. A `url` model (either
+`https://` or `file://`) streams through `tmp/<model-id>.<random>.part` while
+hashing; a sha256 mismatch deletes the part file and fails with
+`download_failed` naming both hashes. An `hf_repo` model lists the pinned
+revision through the Hugging Face API and fetches each file into its local
+directory (`.gitattributes` and `README.md` are skipped; LFS files are
+verified by their sha256, the rest by size). Network errors are retried three
+times with 2 s / 8 s backoff, and a failed attempt leaves no part file. A
+model already present with the expected size is skipped, its sha256
+recomputed only with `--verify-models`. Requests carry only
+`User-Agent: facetmedia/<version>`.
 
 `.complete` is written last, atomically; its presence is the only meaning of
-"installed".
+"installed". Without `--json`, a successful pull prints one line to stdout —
+`<name> <version> installed at <env> (N bytes downloaded in T s)`, or
+`already installed at <env>`.
 
 ## `--json` data
 
