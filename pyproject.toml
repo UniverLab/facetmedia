@@ -1,11 +1,18 @@
 [project]
 name = "facetmedia"
-version = "0.1.0"
-description = ""
+version = "0.1.0.dev0"
+description = "Creation tools for agents: isolated, verifiable, license-aware (internal preview)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+]
+# uv pins facet's own uv binary (uv.find_uv_bin()); packaging evaluates requires_facet.
+dependencies = ["uv>=0.13,<0.14", "packaging>=24"]
 
 # Development tools live in a dependency group (PEP 735), not in an extra:
 # `uv sync` installs it by default, and the lab's quality gate (deptry) would
@@ -19,6 +26,7 @@ dev = [
 ]
 
 [project.scripts]
+facet = "facetmedia.cli:main"
 facetmedia = "facetmedia.cli:main"
 
 [build-system]
@@ -30,7 +38,15 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "C90", "PL"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-branches = 15
+max-nested-blocks = 5
+max-args = 7
 
 [tool.mypy]
 python_version = "3.11"
@@ -38,6 +54,14 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# fixture package runners are not facet's code.
+[tool.deptry]
+extend_exclude = ["tests/fixtures"]
+
+# No source imports uv or packaging yet; delete the entries when a spec does.
+[tool.deptry.per_rule_ignores]
+DEP002 = ["uv", "packaging"]
 
 # python-ci gates coverage at 80 % by default.
 [tool.coverage.run]

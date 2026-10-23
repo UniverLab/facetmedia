@@ -1,72 +1,36 @@
 # facetmedia
 
-> 
+facet is the lab's "ollama" for creation tools. It installs each tool (CadQuery, Kokoro, ...) in its own pinned uv environment and exposes them to agents through one verifiable `--json` contract.
 
-## Getting started
+> Internal preview: the interface may change between betas.
 
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-### Install
+## Install
 
 ```bash
-uv sync
+uv tool install facetmedia
 ```
 
-### Run CLI
+Linux and WSL only. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry).
 
-```bash
-uv run facetmedia --name world
-```
+## Commands
 
-### Test
+| Command | Purpose |
+|---------|---------|
+| `facet update` | refresh the registry index |
+| `facet pull` | install a tool into its own pinned environment |
+| `facet list` | list installed and available tools |
+| `facet describe` | show a tool's manifest |
+| `facet check` | verify an installed tool |
+| `facet run` | run a tool through the --json contract |
+| `facet preview` | render a tool's output for a person |
+| `facet license accept` | accept the license of a tool |
+| `facet license list` | list the licenses of installed tools |
+| `facet registry validate` | validate a registry checkout |
+| `facet gc` | remove unused environments and caches |
+| `facet rm` | remove an installed tool |
 
-```bash
-uv run pytest
-```
-
-## Development
-
-### Format & lint
-
-```bash
-uv run ruff format .
-uv run ruff check .
-```
-
-### Type check
-
-```bash
-uv run mypy src/
-```
-
-### Quality gate
-
-CI runs the lab's strict gate ([UniverLab/workflows](https://github.com/UniverLab/workflows/blob/main/docs/quality-gate.md)): an 80 % coverage gate, file and function size, complexity, unused dependencies, known vulnerabilities and licences. Commit `uv.lock` (`uv lock`): CI installs with `--frozen`. To run the gate locally:
-
-```bash
-uv run pytest --cov
-bash path/to/UniverLab/workflows/scripts/python-quality.sh
-```
-
-## Project structure
-
-```
-facetmedia/
-├── pyproject.toml
-├── src/
-│   └── facetmedia/
-│       ├── __init__.py
-│       ├── core.py       # Core logic
-│       └── cli.py        # CLI entry point
-├── tests/
-│   ├── test_cli.py
-│   └── test_core.py
-└── README.md
-```
+`facet` and `facetmedia` are the same command; `python -m facetmedia` works too. Add `--json` before or after the command for machine-readable output.
 
 ## License
 
-This project is licensed under the MIT License — see LICENSE for details.
+Apache-2.0. See [LICENSE](LICENSE).
