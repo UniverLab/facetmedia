@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 
@@ -35,8 +36,22 @@ def test_version_prints_package_version(capsys: pytest.CaptureFixture[str]) -> N
 def test_every_verb_parses_and_reports_not_implemented(
     argv: list[str], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    assert main([*argv, "--json"]) == 1
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "internal"
+    assert envelope["error"]["message"] == "not implemented yet"
+
+
+@pytest.mark.parametrize("argv", UNIMPLEMENTED_ARGV, ids=" ".join)
+def test_every_verb_human_error_goes_to_stderr(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
     assert main(argv) == 1
-    assert capsys.readouterr().err == "not implemented yet\n"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "not implemented yet\n"
 
 
 @pytest.mark.parametrize(

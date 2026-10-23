@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from collections.abc import Callable
+from typing import NoReturn, TypeVar
 
-from facetmedia import __version__
+from facetmedia import __version__, contract
+from facetmedia.contract import FacetError
 
 Handler = Callable[[argparse.Namespace], int]
+
+_P = TypeVar("_P", bound=argparse.ArgumentParser)
 
 _VERBS: tuple[tuple[str, str], ...] = (
     ("update", "refresh the registry index"),
@@ -30,9 +35,15 @@ _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
 _REGISTRY_VERBS: tuple[tuple[str, str], ...] = (("validate", "validate a registry checkout"),)
 
 
+class FacetParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        if "--json" in sys.argv:
+            contract.emit(contract.failure(FacetError("invalid_input", message)), True)
+        super().error(message)
+
+
 def _not_implemented(_args: argparse.Namespace) -> int:
-    print("not implemented yet", file=sys.stderr)
-    return 1
+    raise FacetError("internal", "not implemented yet")
 
 
 def _add_json(parser: argparse.ArgumentParser) -> None:
@@ -46,7 +57,7 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_verb(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: argparse._SubParsersAction[_P],
     name: str,
     help_text: str,
     handler: Handler = _not_implemented,
@@ -57,7 +68,7 @@ def _add_verb(
 
 
 def _add_group(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: argparse._SubParsersAction[_P],
     name: str,
     help_text: str,
     verbs: tuple[tuple[str, str], ...],
@@ -69,8 +80,8 @@ def _add_group(
         _add_verb(nested, verb, verb_help)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+def build_parser() -> FacetParser:
+    parser = FacetParser(
         prog="facet",
         description="Creation tools for agents: isolated, verifiable, license-aware.",
     )
@@ -86,6 +97,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    handler: Handler = args.handler
-    return handler(args)
+    as_json = "--json" in (argv if argv is not None else sys.argv)
+    try:
+        args = build_parser().parse_args(argv)
+        as_json = bool(getattr(args, "json", as_json))
+        handler: Handler = args.handler
+        return handler(args)
+    except FacetError as exc:
+        contract.emit(contract.failure(exc), as_json)
+        return exc.exit_code
+    except SystemExit:
+        raise
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        fallback = FacetError("internal", "internal error, see stderr", details={"log": "stderr"})
+        contract.emit(contract.failure(fallback), as_json)
+        return 1
