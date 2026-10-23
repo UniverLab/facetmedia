@@ -43,6 +43,7 @@ __all__ = [
     "load_active_registry",
     "load_registry",
     "registry_dir",
+    "snapshot_commit",
     "validate_registry",
 ]
 
@@ -143,6 +144,15 @@ def registry_dir() -> Path:
     if commit is None:
         commit = _first_use(home)
     return home.registry_dir(commit)
+
+
+def snapshot_commit() -> str | None:
+    """The commit of the snapshot ``facet update`` recorded, or ``None``.
+
+    Asset records name this commit, so the registry a run read is never
+    guessed.
+    """
+    return _recorded_commit(Home.peek_env())
 
 
 def _recorded_commit(home: Home) -> str | None:

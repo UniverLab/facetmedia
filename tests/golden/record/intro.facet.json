@@ -1,0 +1,89 @@
+{
+  "bytes": 12,
+  "created": "2026-10-23T01:02:03Z",
+  "id": "sha256:56ddf20bae94693a26732a7629d110957d63d8afd31c95f098b32b0d9ec5b387",
+  "kind": "audio",
+  "license": {
+    "accepted": [],
+    "commercial_use": true,
+    "models": [
+      {
+        "commercial_use": true,
+        "id": "kokoro-82m-v1.0-onnx",
+        "spdx": "Apache-2.0"
+      }
+    ],
+    "tools": [
+      {
+        "spdx": "MIT",
+        "subject": "kokoro-onnx"
+      },
+      {
+        "spdx": "GPL-3.0-or-later",
+        "subject": "phonemizer"
+      }
+    ]
+  },
+  "mime": "audio/wav",
+  "name": "intro",
+  "path": "intro.wav",
+  "properties": {
+    "duration_s": 9.641,
+    "lufs": -16.0,
+    "peak_dbfs": -1.4,
+    "sample_rate_hz": 24000
+  },
+  "provenance": {
+    "capability": "kokoro.speech",
+    "facet": "0.1.0b1",
+    "inputs": [
+      {
+        "id": "sha256:4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6",
+        "path": "ref.png"
+      }
+    ],
+    "models": [
+      {
+        "id": "kokoro-82m-v1.0-onnx",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "id": "faster-whisper-small",
+        "revision": "cccccccccccccccccccccccccccccccccccccccc"
+      }
+    ],
+    "package": {
+      "lock_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "kokoro",
+      "version": "0.1.0"
+    },
+    "params": {
+      "language": "es",
+      "reference": "ref.png",
+      "speed": 1.0,
+      "text": "Hola.",
+      "voice": "ef_dora"
+    },
+    "params_sha256": "ee211b937228d0dc6595d5aec5ff82a6ac3f7d4269a9e50fab16745d80b3650b",
+    "registry": {
+      "commit": "dddddddddddddddddddddddddddddddddddddddd",
+      "path": null
+    },
+    "seed": null,
+    "tool": {
+      "name": "kokoro-onnx",
+      "version": "0.6.1"
+    }
+  },
+  "record": 1,
+  "verification": {
+    "metrics": {
+      "wer": 0.0
+    },
+    "status": "passed",
+    "thresholds": {
+      "wer_max": 0.05
+    },
+    "verifier": "faster-whisper-small@536b0662"
+  }
+}
