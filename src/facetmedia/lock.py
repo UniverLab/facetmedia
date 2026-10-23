@@ -107,11 +107,14 @@ def _write_holder(home: Home, purpose: str) -> None:
 
 def _holder_lines(home: Home) -> tuple[str | None, str | None]:
     """``(live holder text, stale note)`` from ``lock.json``; each may be ``None``."""
-    info = read_json(home.lock_json, None)
+    try:
+        info = read_json(home.lock_json, None)
+    except FacetError as exc:
+        return None, f"stale info: lock.json is unreadable ({exc.message})"
     if not isinstance(info, dict):
         return None, None
     pid = info.get("pid")
-    if isinstance(pid, int) and _pid_alive(pid):
+    if type(pid) is int and _pid_alive(pid):
         since = info.get("since", "unknown time")
         purpose = info.get("purpose", "unknown purpose")
         return f"pid {pid} since {since}: {purpose}", None

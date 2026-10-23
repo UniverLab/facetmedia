@@ -202,6 +202,35 @@ def test_stale_lock_json_is_reported_and_ignored(
     release.set()
 
 
+def test_corrupt_lock_json_does_not_block(
+    holder_factory: HolderStart, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = Home.from_env()
+    # Free lock with a corrupt file: the flock is the truth, acquire works.
+    home.lock_json.write_text("{not json", encoding="utf-8")
+    with hold("exclusive", "real work", wait=False, timeout_s=0.0):
+        pass
+    assert not home.lock_json.exists()
+    # Held lock with a corrupt file: the waiter still reports lock_busy,
+    # never an internal error from the unreadable file.
+    _proc, release = holder_factory("exclusive", "installing kokoro")
+    home.lock_json.write_text("{not json", encoding="utf-8")
+    with (
+        pytest.raises(FacetError) as exc_info,
+        hold("exclusive", "blocked", wait=False, timeout_s=0.0),
+    ):
+        pass
+    assert exc_info.value.code == "lock_busy"
+    with (
+        pytest.raises(FacetError),
+        hold("exclusive", "blocked", wait=True, timeout_s=SHORT_WAIT_S),
+    ):
+        pass
+    err = capsys.readouterr().err
+    assert "waiting for the facet lock" in err
+    release.set()
+
+
 @pytest.mark.parametrize("argv", LOCKING_VERBS, ids=" ".join)
 def test_locking_verbs_take_the_lock_flags(argv: list[str]) -> None:
     assert _lock_params(build_parser().parse_args([*argv, "--no-wait"])) == (False, 3600.0)
