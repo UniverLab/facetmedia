@@ -42,6 +42,7 @@ __all__ = [
     "Requirements",
     "load_active_registry",
     "load_registry",
+    "override_dir",
     "registry_dir",
     "snapshot_commit",
     "validate_registry",
@@ -122,6 +123,25 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
     return problems
 
 
+def override_dir() -> Path | None:
+    """The ``FACET_REGISTRY`` development directory, or ``None`` when unset.
+
+    The override is validated here and nowhere else, so the directory a run
+    reads and the directory an asset record names are always the same one.
+    """
+    override = os.environ.get("FACET_REGISTRY")
+    if not override:
+        return None
+    path = Path(override)
+    if not path.is_absolute():
+        raise FacetError(
+            "invalid_input",
+            "FACET_REGISTRY must be an absolute path",
+            details={"FACET_REGISTRY": override},
+        )
+    return path
+
+
 def registry_dir() -> Path:
     """The registry directory in use: ``FACET_REGISTRY``, else the snapshot.
 
@@ -129,16 +149,9 @@ def registry_dir() -> Path:
     fresh install works with one command.
     """
 
-    override = os.environ.get("FACET_REGISTRY")
-    if override:
-        path = Path(override)
-        if not path.is_absolute():
-            raise FacetError(
-                "invalid_input",
-                "FACET_REGISTRY must be an absolute path",
-                details={"FACET_REGISTRY": override},
-            )
-        return path
+    override = override_dir()
+    if override is not None:
+        return override
     home = Home.peek_env()
     commit = _recorded_commit(home)
     if commit is None:

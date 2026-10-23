@@ -288,7 +288,9 @@ def test_relative_params_walk_nested_values(asset_dir: Path) -> None:
     assert provenance["params"] == {"nested": {"ref": "ref.png"}, "list": ["ref.png", "text"]}
 
 
-def test_a_relative_input_path_is_kept(asset_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_relative_input_is_named_from_the_record_directory(
+    asset_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(asset_dir)
     spec = dataclasses.replace(_spec(asset_dir), params={}, inputs=("ref.png",))
     record = build_record(asset_dir / "intro.wav", spec, created=CREATED)
@@ -297,12 +299,66 @@ def test_a_relative_input_path_is_kept(asset_dir: Path, monkeypatch: pytest.Monk
     assert provenance["inputs"] == [{"id": asset_id(asset_dir / "ref.png"), "path": "ref.png"}]
 
 
+def test_a_relative_input_points_at_the_same_file_as_its_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The id and the stored path describe one file, from the record's side."""
+    out = tmp_path / "out"
+    refs = tmp_path / "refs"
+    out.mkdir()
+    refs.mkdir()
+    (out / "intro.wav").write_bytes(AUDIO)
+    (refs / "ref.png").write_bytes(IMAGE)
+    monkeypatch.chdir(tmp_path)
+    spec = dataclasses.replace(_spec(out), params={}, inputs=("refs/ref.png",))
+    record = build_record(out / "intro.wav", spec, created=CREATED)
+    provenance = record["provenance"]
+    assert isinstance(provenance, dict)
+    assert provenance["inputs"] == [{"id": asset_id(refs / "ref.png"), "path": "../refs/ref.png"}]
+
+
 def test_input_record_without_a_license_section_is_ignored(asset_dir: Path) -> None:
     write_record(asset_dir / "ref.png", {"license": "nope"})
     record = _record_for(asset_dir)
     license_section = record["license"]
     assert isinstance(license_section, dict)
     assert license_section["commercial_use"] is True
+
+
+def test_a_corrupt_input_record_is_refused_not_read_as_permissive(asset_dir: Path) -> None:
+    (asset_dir / "ref.png.facet.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(FacetError) as exc:
+        _record_for(asset_dir)
+    assert exc.value.code == "invalid_input"
+    assert "corrupt facet record" in exc.value.message
+
+
+def test_a_corrupt_record_is_not_read_as_a_record(asset_dir: Path) -> None:
+    asset = asset_dir / "intro.wav"
+    record_path(asset).write_text("{not json", encoding="utf-8")
+    with pytest.raises(FacetError) as exc:
+        read_record(asset)
+    assert exc.value.code == "invalid_input"
+    assert "corrupt facet record" in exc.value.message
+    assert verify_integrity(asset) is False
+
+
+def test_a_record_that_is_not_an_object_is_refused(asset_dir: Path) -> None:
+    asset = asset_dir / "intro.wav"
+    record_path(asset).write_text("[]", encoding="utf-8")
+    with pytest.raises(FacetError) as exc:
+        read_record(asset)
+    assert exc.value.code == "invalid_input"
+    assert "not a facet record" in exc.value.message
+
+
+def test_an_unreadable_record_raises_invalid_input(asset_dir: Path) -> None:
+    asset = asset_dir / "intro.wav"
+    record_path(asset).mkdir()
+    with pytest.raises(FacetError) as exc:
+        read_record(asset)
+    assert exc.value.code == "invalid_input"
+    assert "cannot read facet record" in exc.value.message
 
 
 def test_malformed_license_lists_become_empty(asset_dir: Path) -> None:
@@ -332,6 +388,14 @@ def test_registry_provenance_names_a_development_directory(
 ) -> None:
     monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
     assert registry_provenance() == {"commit": None, "path": str(FIXTURES)}
+
+
+def test_a_relative_development_registry_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", "relative/registry")
+    with pytest.raises(FacetError) as exc:
+        registry_provenance()
+    assert exc.value.code == "invalid_input"
+    assert "absolute" in exc.value.message
 
 
 def test_development_registry_path_is_relative_in_the_record(

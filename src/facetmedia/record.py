@@ -27,7 +27,7 @@ from typing import Final
 
 from facetmedia import registry
 from facetmedia.contract import FacetError
-from facetmedia.home import atomic_write_json, read_json
+from facetmedia.home import atomic_write_json
 
 __all__ = [
     "CHUNK_BYTES",
@@ -103,11 +103,12 @@ def registry_provenance() -> dict[str, str | None]:
     """The registry a run read: a pinned commit, or the ``FACET_REGISTRY`` dir.
 
     A development run names the directory so it is never mistaken for a
-    pinned one.
+    pinned one. The override is read through :func:`registry.override_dir`,
+    the one place that validates it.
     """
-    override = os.environ.get("FACET_REGISTRY")
-    if override:
-        return {"commit": None, "path": os.path.abspath(override)}
+    override = registry.override_dir()
+    if override is not None:
+        return {"commit": None, "path": str(override)}
     return {"commit": registry.snapshot_commit(), "path": None}
 
 
@@ -147,8 +148,8 @@ def write_record(asset_path: Path | str, record: Mapping[str, object]) -> Path:
 def read_record(path: Path | str) -> dict[str, object]:
     """Read the record for ``path``, given either the asset or its record."""
     target = record_path(path)
-    record = read_json(target, None)
-    if not isinstance(record, dict):
+    record = _load_record(target)
+    if record is None:
         raise FacetError(
             "invalid_input",
             f"{target}: no facet record",
@@ -160,17 +161,42 @@ def read_record(path: Path | str) -> dict[str, object]:
 def verify_integrity(path: Path | str) -> bool:
     """Whether the record's ``id`` still matches the asset beside it.
 
-    A missing record or a missing asset answers ``False``: the question is
-    whether the record still describes this file, not why it does not.
+    A missing record, a corrupt one or a missing asset answers ``False``: the
+    question is whether the record still describes this file, not why it does
+    not.
     """
     given = Path(path)
-    record = read_json(record_path(given), None)
-    if not isinstance(record, dict):
+    try:
+        record = _load_record(record_path(given))
+    except FacetError:
+        return False
+    if record is None:
         return False
     facts = _facts(_asset_for(given))
     if facts is None:
         return False
     return record.get("id") == f"sha256:{facts[0]}"
+
+
+def _load_record(target: Path) -> dict[str, object] | None:
+    """The record JSON at ``target``, or ``None`` when there is no file.
+
+    A record that exists but cannot be read is never treated as absent: it
+    raises ``invalid_input``, naming the file, instead of answering ``None``.
+    """
+    try:
+        text = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise FacetError("invalid_input", f"{target}: cannot read facet record") from exc
+    try:
+        loaded: object = json.loads(text)
+    except ValueError as exc:
+        raise FacetError("invalid_input", f"{target}: corrupt facet record") from exc
+    if not isinstance(loaded, dict):
+        raise FacetError("invalid_input", f"{target}: not a facet record")
+    return dict(loaded)
 
 
 def _facts(path: Path) -> tuple[str, int] | None:
@@ -206,11 +232,14 @@ def _now_z() -> str:
 
 
 def _relative(value: str, base: Path) -> str:
-    """``value`` relative to ``base``, as posix; a relative value is kept."""
-    path = Path(value)
-    if not path.is_absolute():
-        return path.as_posix()
-    return Path(os.path.relpath(path, base)).as_posix()
+    """``value`` as a posix path relative to ``base``, never absolute.
+
+    Both sides are resolved the way every path is (a relative one from the
+    working directory), so the answer is correct whatever the working
+    directory happens to be.
+    """
+    absolute = Path(os.path.abspath(value))
+    return Path(os.path.relpath(absolute, base)).as_posix()
 
 
 def _relative_params(params: Mapping[str, object], base: Path) -> dict[str, object]:
@@ -243,10 +272,19 @@ def _provenance(spec: RecordSpec, params: Mapping[str, object], base: Path) -> d
         "params": dict(params),
         "params_sha256": params_digest(params),
         "seed": spec.seed,
-        "inputs": [
-            {"id": asset_id(item), "path": _relative(str(item), base)} for item in spec.inputs
-        ],
+        "inputs": [_input_entry(item, base) for item in spec.inputs],
     }
+
+
+def _input_entry(item: Path | str, base: Path) -> dict[str, str]:
+    """One ``provenance.inputs`` entry: id and path name the same file.
+
+    The input is resolved the way every path is (a relative one from the
+    working directory) and then stored relative to the record's directory, so
+    the id and the path can never describe different bytes.
+    """
+    resolved = Path(os.path.abspath(item))
+    return {"id": asset_id(resolved), "path": _relative(str(resolved), base)}
 
 
 def _registry_section(
@@ -298,11 +336,12 @@ def _license_section(spec: RecordSpec) -> dict[str, object]:
 def _input_is_nc(path: Path | str) -> bool:
     """Whether the input asset's own record forbids commercial use.
 
-    A missing or unreadable record is ignored: restrictions are inherited
-    only from a record that states one.
+    A missing record, or one without a licence section, is ignored: a
+    restriction is inherited only from a record that states one. A corrupt
+    record is refused rather than read as permissive.
     """
-    record = read_json(record_path(path), None)
-    if not isinstance(record, dict):
+    record = _load_record(record_path(path))
+    if record is None:
         return False
     license = record.get("license")
     if not isinstance(license, dict):
