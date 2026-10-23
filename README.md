@@ -10,7 +10,7 @@ facet is the lab's "ollama" for creation tools. It installs each tool (CadQuery,
 uv tool install facetmedia
 ```
 
-Linux and WSL only. Everything facet installs or remembers lives under one directory, `~/.facet` (override with `FACET_HOME`); see [docs/home.md](docs/home.md) for the layout, the per-invocation logs, and where facet refuses to run. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry); see [docs/registry.md](docs/registry.md) for the registry layout, manifest format, and `facet registry validate`.
+Linux and WSL only. Everything facet installs or remembers lives under one directory, `~/.facet` (override with `FACET_HOME`); see [docs/home.md](docs/home.md) for the layout, the per-invocation logs, the lock, and where facet refuses to run. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry); see [docs/registry.md](docs/registry.md) for the registry layout, manifest format, and `facet registry validate`.
 
 ## Commands
 
