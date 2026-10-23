@@ -10,7 +10,7 @@ facet is the lab's "ollama" for creation tools. It installs each tool (CadQuery,
 uv tool install facetmedia
 ```
 
-Linux and WSL only. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry).
+Linux and WSL only. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry); see [docs/registry.md](docs/registry.md) for the registry layout, manifest format, and `facet registry validate`.
 
 ## Commands
 
