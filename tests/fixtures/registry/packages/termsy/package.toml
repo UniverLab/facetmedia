@@ -1,0 +1,43 @@
+name = "termsy"
+version = "0.1.0"
+requires_facet = ">=0.1.0.dev0,<0.2"
+protocol = 1
+provider = "facet"
+tool_name = "Termsy"
+description = "A non-commercial fixture whose model must be accepted."
+
+[engine]
+type = "python-env"
+python = "3.12"
+
+[transport]
+type = "cli"
+entry = "runner.py"
+
+[requirements]
+gpu = false
+ram_gb = 0.5
+disk_gb = 0.02
+exclusive = true
+platforms = ["linux"]
+host_libs = []
+host_hint = ""
+
+[[licenses]]
+subject = "termsy"
+spdx = "CC-BY-NC-4.0"
+
+[[models]]
+id = "termsy-weights"
+spdx = "CC-BY-NC-4.0"
+commercial_use = false
+requires_acceptance = true
+terms_url = "https://example.invalid/termsy"
+url = "file://tests/fixtures/models/termsy.bin"
+sha256 = "85a73737b5d85eaba43e73ba33ceade28de49f1f4f7573377f02d58408f715c7"
+bytes = 21
+path = "termsy-weights/termsy.bin"
+
+[capabilities.make]
+summary = "Make one termsy asset."
+kind = "text"

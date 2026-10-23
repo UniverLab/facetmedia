@@ -19,7 +19,6 @@ UNIMPLEMENTED_ARGV = [
     ["preview"],
     ["license", "accept"],
     ["license", "list"],
-    ["registry", "validate"],
     ["gc"],
     ["rm"],
 ]

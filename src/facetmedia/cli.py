@@ -6,10 +6,12 @@ import argparse
 import sys
 import traceback
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, contract
+from facetmedia import __version__, contract, registry
 from facetmedia.contract import FacetError
+from facetmedia.registry import validate_registry
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -62,6 +64,31 @@ def _not_implemented(_args: argparse.Namespace) -> int:
     raise FacetError("internal", "not implemented yet")
 
 
+def _handle_registry_validate(args: argparse.Namespace) -> int:
+    path = Path(args.dir)
+    problems = validate_registry(path)
+    if not problems:
+        if args.json:
+            package_names = sorted(registry.load_registry(path).packages.keys())
+            contract.emit(
+                contract.ok({"path": str(path), "valid": True, "packages": package_names}),
+                True,
+            )
+        return 0
+    for problem in problems:
+        sys.stderr.write(f"{problem['file']}: {problem['key']}: {problem['problem']}\n")
+    if args.json:
+        contract.emit(
+            contract.failure(
+                FacetError(
+                    "invalid_input", "registry validation failed", details={"errors": problems}
+                )
+            ),
+            True,
+        )
+    return 2
+
+
 def _add_json(parser: argparse.ArgumentParser) -> None:
     # SUPPRESS keeps a subcommand's default from overwriting a --json given before it.
     parser.add_argument(
@@ -77,10 +104,11 @@ def _add_verb(
     name: str,
     help_text: str,
     handler: Handler = _not_implemented,
-) -> None:
+) -> argparse.ArgumentParser:
     parser = subparsers.add_parser(name, help=help_text, description=help_text)
     _add_json(parser)
     parser.set_defaults(handler=handler)
+    return parser
 
 
 def _add_group(
@@ -96,6 +124,20 @@ def _add_group(
         _add_verb(nested, verb, verb_help)
 
 
+def _add_registry_group(subparsers: argparse._SubParsersAction[_P]) -> None:
+    group = subparsers.add_parser(
+        "registry", help="inspect the package registry", description="inspect the package registry"
+    )
+    _add_json(group)
+    nested = group.add_subparsers(dest="registry_command", metavar="VERB", required=True)
+    validate = nested.add_parser(
+        "validate", help="validate a registry checkout", description="validate a registry checkout"
+    )
+    _add_json(validate)
+    validate.add_argument("dir", help="registry directory to validate")
+    validate.set_defaults(handler=_handle_registry_validate)
+
+
 def build_parser() -> FacetParser:
     parser = FacetParser(
         prog="facet",
@@ -108,7 +150,7 @@ def build_parser() -> FacetParser:
     for verb, verb_help in _VERBS:
         _add_verb(subparsers, verb, verb_help)
     _add_group(subparsers, "license", "manage tool licenses", _LICENSE_VERBS)
-    _add_group(subparsers, "registry", "inspect the package registry", _REGISTRY_VERBS)
+    _add_registry_group(subparsers)
     return parser
 
 

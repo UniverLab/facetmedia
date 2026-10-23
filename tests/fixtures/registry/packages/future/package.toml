@@ -1,0 +1,32 @@
+name = "future"
+version = "0.1.0"
+requires_facet = ">=9"
+protocol = 1
+provider = "facet"
+tool_name = "Future"
+description = "Declares a facet requirement no current release satisfies."
+
+[engine]
+type = "python-env"
+python = "3.12"
+
+[transport]
+type = "cli"
+entry = "runner.py"
+
+[requirements]
+gpu = false
+ram_gb = 0.1
+disk_gb = 0.01
+exclusive = true
+platforms = ["linux"]
+host_libs = []
+host_hint = ""
+
+[[licenses]]
+subject = "future"
+spdx = "Apache-2.0"
+
+[capabilities.thing]
+summary = "A capability from the future."
+kind = "text"

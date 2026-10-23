@@ -59,9 +59,9 @@ testpaths = ["tests"]
 [tool.deptry]
 extend_exclude = ["tests/fixtures"]
 
-# No source imports uv or packaging yet; delete the entries when a spec does.
+# No source imports uv yet; delete the entry when a spec does.
 [tool.deptry.per_rule_ignores]
-DEP002 = ["uv", "packaging"]
+DEP002 = ["uv"]
 
 # python-ci gates coverage at 80 % by default.
 [tool.coverage.run]

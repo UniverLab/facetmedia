@@ -37,7 +37,7 @@ Branch on the exit code without parsing prose:
 |------|------|------|
 | (success) | 0 | |
 | `internal` | 1 | unexpected error (details go to stderr, not stdout) |
-| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability |
+| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate` |
 | `verification_failed` | 3 | the asset was made but its check did not pass |
 | `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
 | `machine_cannot` | 5 | the machine does not meet the package requirements (RAM, disk, platform) |
@@ -49,3 +49,7 @@ Branch on the exit code without parsing prose:
 
 Bad arguments exit 2 and, with `--json`, still print an `invalid_input`
 envelope on stdout.
+
+A registry checkout that fails `facet registry validate` reports every
+problem at once: `details.errors` lists `{"file", "key", "problem"}` for
+each one, and the same lines go to stderr.

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "echo.text",
+  "description": "Echo text back, repeated.",
+  "type": "object",
+  "properties": {
+    "repeat": {
+      "type": "integer",
+      "default": 1,
+      "minimum": 1.0,
+      "maximum": 10.0
+    },
+    "text": {
+      "type": "string",
+      "description": "Text to echo."
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "additionalProperties": false
+}
