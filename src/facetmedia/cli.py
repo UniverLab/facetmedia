@@ -36,6 +36,10 @@ _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
     ("list", "list the licenses of installed tools"),
 )
 
+# Verbs that take the facet lock get the waiting flags; light verbs (list,
+# describe, preview, license list) take no lock and reject them.
+_LOCK_VERBS: frozenset[str] = frozenset({"check", "gc", "pull", "rm", "run", "update"})
+
 
 class FacetParser(argparse.ArgumentParser):
     _facet_argv: list[str] | None = None
@@ -99,14 +103,40 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_lock_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--no-wait",
+        dest="wait",
+        action="store_false",
+        help="fail at once with lock_busy instead of waiting for the facet lock",
+    )
+    parser.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=3600.0,
+        metavar="SECONDS",
+        help="seconds to wait for the facet lock (default: 3600)",
+    )
+
+
+def _lock_params(args: argparse.Namespace) -> tuple[bool, float]:
+    """``(wait, timeout_s)`` for a verb that takes the facet lock."""
+    wait = getattr(args, "wait", True)
+    timeout_s = getattr(args, "wait_timeout", 3600.0)
+    return bool(wait), float(timeout_s)
+
+
 def _add_verb(
     subparsers: argparse._SubParsersAction[_P],
     name: str,
     help_text: str,
     handler: Handler = _not_implemented,
+    lock: bool = False,
 ) -> argparse.ArgumentParser:
     parser = subparsers.add_parser(name, help=help_text, description=help_text)
     _add_json(parser)
+    if lock:
+        _add_lock_flags(parser)
     parser.set_defaults(handler=handler)
     return parser
 
@@ -116,12 +146,13 @@ def _add_group(
     name: str,
     help_text: str,
     verbs: tuple[tuple[str, str], ...],
+    lock_verbs: frozenset[str] = frozenset(),
 ) -> None:
     group = subparsers.add_parser(name, help=help_text, description=help_text)
     _add_json(group)
     nested = group.add_subparsers(dest=f"{name}_command", metavar="VERB", required=True)
     for verb, verb_help in verbs:
-        _add_verb(nested, verb, verb_help)
+        _add_verb(nested, verb, verb_help, lock=verb in lock_verbs)
 
 
 def _add_registry_group(subparsers: argparse._SubParsersAction[_P]) -> None:
@@ -148,8 +179,14 @@ def build_parser() -> FacetParser:
     parser.set_defaults(json=False)
     subparsers = parser.add_subparsers(dest="command", metavar="VERB", required=True)
     for verb, verb_help in _VERBS:
-        _add_verb(subparsers, verb, verb_help)
-    _add_group(subparsers, "license", "manage tool licenses", _LICENSE_VERBS)
+        _add_verb(subparsers, verb, verb_help, lock=verb in _LOCK_VERBS)
+    _add_group(
+        subparsers,
+        "license",
+        "manage tool licenses",
+        _LICENSE_VERBS,
+        lock_verbs=frozenset({"accept"}),
+    )
     _add_registry_group(subparsers)
     return parser
 

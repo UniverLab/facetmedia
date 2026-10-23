@@ -43,6 +43,35 @@ the `internal` failure names that file in its message and in `details.log`
 way a crash-safe install would want: through `tmp/` and an atomic rename, so
 a machine that powers off mid-write keeps the previous version intact.
 
+## The lock
+
+Heavy work takes `state/lock` exclusively, so only one heavy job runs at a
+time: `update`, `pull`, `rm`, `gc`, `license accept`, plus `run` and the asset
+re-verification of `check` when the package manifest sets
+`requirements.exclusive = true` (the default). Light runs take the lock shared
+and overlap; `list`, `describe`, `preview` and a machine-only `check` take no
+lock at all.
+
+Every verb that locks accepts two flags:
+
+```bash
+facet pull --no-wait              # fail at once instead of waiting
+facet run  --wait-timeout 120     # give up after SECONDS (default 3600)
+```
+
+On failure the verb exits `lock_busy` (6) and names the holder. While waiting,
+facet prints one line to stderr naming it too:
+
+```
+waiting for the facet lock, held by pid 4711 since 2026-10-23T173644Z: installing kokoro
+```
+
+The holder information comes from `state/lock.json`, which only an exclusive
+holder writes (and deletes before releasing). The lock itself is a kernel
+`flock`, so a process that crashes never leaves it stuck; a `lock.json` whose
+pid is no longer alive is reported as `stale info` and ignored — the `flock`
+is the truth.
+
 ## Where facet refuses to run
 
 - A `FACET_HOME` under a mounted Windows drive (`/mnt/c/...`) is refused with
