@@ -1,0 +1,51 @@
+# The `--json` contract
+
+Add `--json` to any `facet` command for machine-readable output:
+
+```bash
+facet list --json
+```
+
+With `--json`, stdout carries exactly one JSON document: an envelope with
+the contract version. Progress and logs go to stderr only, so stdout is
+safe to parse.
+
+## Success
+
+```json
+{"contract": 1, "data": {"tools": []}, "facet": "0.1.0.dev0", "ok": true}
+```
+
+`contract` is the contract version (currently `1`); it changes only on a
+breaking change to a `--json` output. `facet` is the facet version.
+`data` holds the verb's result.
+
+## Failure
+
+```json
+{"contract": 1, "error": {"code": "invalid_input", "details": {}, "hint": null, "message": "argument VERB: invalid choice: 'nope' (choose from update, pull, list, describe, check, run, preview, rm, gc, license, registry)"}, "facet": "0.1.0.dev0", "ok": false}
+```
+
+Without `--json`, a failure prints its message (and hint, when there is
+one) to stderr instead of JSON.
+
+## Exit codes
+
+Branch on the exit code without parsing prose:
+
+| Code | Exit | When |
+|------|------|------|
+| (success) | 0 | |
+| `internal` | 1 | unexpected error (details go to stderr, not stdout) |
+| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability |
+| `verification_failed` | 3 | the asset was made but its check did not pass |
+| `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
+| `machine_cannot` | 5 | the machine does not meet the package requirements (RAM, disk, platform) |
+| `lock_busy` | 6 | the lock is held and `--no-wait` was given, or the wait timed out |
+| `not_installed` | 7 | the package is not installed and `--no-pull` was given |
+| `download_failed` | 8 | a model or environment download failed or its sha256 did not match |
+| `runner_failed` | 9 | the package runner crashed or broke the runner protocol |
+| `license_needs_person` | 10 | `license accept` was run without an interactive terminal |
+
+Bad arguments exit 2 and, with `--json`, still print an `invalid_input`
+envelope on stdout.

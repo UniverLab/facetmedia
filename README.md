@@ -29,7 +29,7 @@ Linux and WSL only. The packages live in [UniverLab/facetmedia-registry](https:/
 | `facet gc` | remove unused environments and caches |
 | `facet rm` | remove an installed tool |
 
-`facet` and `facetmedia` are the same command; `python -m facetmedia` works too. Add `--json` before or after the command for machine-readable output.
+`facet` and `facetmedia` are the same command; `python -m facetmedia` works too. Add `--json` before or after the command for machine-readable output (see [docs/contract.md](docs/contract.md)).
 
 ## License
 
