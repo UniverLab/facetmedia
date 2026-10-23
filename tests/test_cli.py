@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from facetmedia import cli as cli_module
 from facetmedia.cli import build_parser, main
 
 EXIT_USAGE = 2
+EXIT_MACHINE_CANNOT = 5
 
 UNIMPLEMENTED_ARGV = [
     ["update"],
@@ -111,6 +113,37 @@ def test_unexpected_exception_is_logged_to_run_log(
     assert captured.out == ""
     log_path = Path(captured.err.removeprefix("internal error, see ").strip())
     assert log_path.is_file()
+    assert log_path.parent.parent == Path(os.environ["FACET_HOME"]) / "logs"
     content = log_path.read_text(encoding="utf-8")
     assert "Traceback" in content
     assert "kablam" in content
+
+
+def test_every_invocation_creates_the_home_layout(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["list"]) == 1
+    capsys.readouterr()
+    root = Path(os.environ["FACET_HOME"])
+    for directory in (
+        root / "registry",
+        root / "state",
+        root / "envs",
+        root / "models" / "direct",
+        root / "models" / "hf",
+        root / "python",
+        root / "cache" / "uv",
+        root / "logs",
+        root / "tmp",
+    ):
+        assert directory.is_dir()
+
+
+def test_main_refuses_native_windows(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("sys.platform", "win32")
+    assert main(["list", "--json"]) == EXIT_MACHINE_CANNOT
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "machine_cannot"
+    assert "WSL" in envelope["error"]["message"]
+    assert not Path(os.environ["FACET_HOME"]).exists()

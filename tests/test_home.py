@@ -170,11 +170,12 @@ def test_new_run_id_shape() -> None:
     assert first != second
 
 
-def test_log_file_path_and_no_creation() -> None:
-    home = _home()
+def test_log_file_path_and_no_creation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root = tmp_path / "not-created-yet"
+    monkeypatch.setenv("FACET_HOME", str(root))
     run_id = "20260304T050607Z-abcdef"
-    assert log_file(run_id) == home.logs_dir / "2026-03-04" / f"{run_id}.log"
-    assert not (home.logs_dir / "2026-03-04").exists()
+    assert log_file(run_id) == root / "logs" / "2026-03-04" / f"{run_id}.log"
+    assert not root.exists()
 
 
 def test_log_file_falls_back_to_today_for_unknown_run_id() -> None:
@@ -182,6 +183,13 @@ def test_log_file_falls_back_to_today_for_unknown_run_id() -> None:
     path = log_file("garbage")
     assert path.name == "garbage.log"
     assert path.parent.parent == home.logs_dir
+
+
+def test_peek_env_does_not_create_the_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root = tmp_path / "still-not-created"
+    monkeypatch.setenv("FACET_HOME", str(root))
+    assert Home.peek_env().root == root
+    assert not root.exists()
 
 
 def test_require_posix_rejects_windows(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -44,9 +44,14 @@ class Home:
         return self._root
 
     @classmethod
-    def from_env(cls) -> Home:
+    def peek_env(cls) -> Home:
+        """The home named by the environment, without creating anything."""
         raw = os.environ.get("FACET_HOME") or str(Path.home() / ".facet")
-        home = cls(Path(raw))
+        return cls(Path(os.path.abspath(raw)))
+
+    @classmethod
+    def from_env(cls) -> Home:
+        home = cls.peek_env()
         home.ensure()
         return home
 
@@ -195,10 +200,10 @@ def new_run_id() -> str:
 
 
 def log_file(run_id: str) -> Path:
-    """The log path for ``run_id``; creates nothing."""
+    """The log path for ``run_id``; creates neither the home nor the log."""
     try:
         day = f"{run_id[0:4]}-{run_id[4:6]}-{run_id[6:8]}"
         datetime.strptime(day, "%Y-%m-%d")
     except (ValueError, IndexError):
         day = datetime.now(UTC).strftime("%Y-%m-%d")
-    return Home.from_env().logs_dir / day / f"{run_id}.log"
+    return Home.peek_env().logs_dir / day / f"{run_id}.log"
