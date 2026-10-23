@@ -2,8 +2,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [feature/v0.1]
   workflow_dispatch:
   # release.yml runs CI on main before releasing.
   workflow_call:
