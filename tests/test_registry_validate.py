@@ -42,6 +42,20 @@ spdx = "Apache-2.0"
 """
 
 
+def _problems(root: Path) -> set[tuple[str, str, str]]:
+    return {(p["file"], p["key"], p["problem"]) for p in validate_registry(root)}
+
+
+def _write_package(root: Path, manifest: str) -> Path:
+    (root / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "missing"\n', encoding="utf-8"
+    )
+    pkg_dir = root / "packages" / "missing"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "package.toml").write_text(manifest, encoding="utf-8")
+    return pkg_dir
+
+
 def test_validate_clean_exit_0() -> None:
     assert main(["registry", "validate", str(FIXTURE_ROOT)]) == 0
 
@@ -105,50 +119,35 @@ def test_validate_broken_manifest_still_reports_missing_files(tmp_path: Path) ->
     assert ("packages/bad/uv.lock", "", "missing") in found
 
 
-def test_validate_missing_pyproject_toml() -> None:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        (root / "index.toml").write_text(
-            'version = 1\n[[packages]]\nname = "missing"\n', encoding="utf-8"
-        )
-        pkg_dir = root / "packages" / "missing"
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "package.toml").write_text(MANIFEST_TEMPLATE, encoding="utf-8")
-        assert main(["registry", "validate", str(root)]) == EXIT_INVALID
+def test_validate_missing_pyproject_toml(tmp_path: Path) -> None:
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text("", encoding="utf-8")
+    assert _problems(tmp_path) == {("packages/missing/pyproject.toml", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
 
 
-def test_validate_missing_uv_lock() -> None:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        (root / "index.toml").write_text(
-            'version = 1\n[[packages]]\nname = "missing"\n', encoding="utf-8"
-        )
-        pkg_dir = root / "packages" / "missing"
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "package.toml").write_text(MANIFEST_TEMPLATE, encoding="utf-8")
-        (pkg_dir / "pyproject.toml").write_text(
-            '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
-        )
-        assert main(["registry", "validate", str(root)]) == EXIT_INVALID
+def test_validate_missing_uv_lock(tmp_path: Path) -> None:
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "runner.py").write_text("", encoding="utf-8")
+    assert _problems(tmp_path) == {("packages/missing/uv.lock", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
 
 
-def test_validate_missing_runner_entry() -> None:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        (root / "index.toml").write_text(
-            'version = 1\n[[packages]]\nname = "missing"\n', encoding="utf-8"
-        )
-        pkg_dir = root / "packages" / "missing"
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "package.toml").write_text(MANIFEST_TEMPLATE, encoding="utf-8")
-        (pkg_dir / "pyproject.toml").write_text(
-            '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
-        )
-        (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
-        assert main(["registry", "validate", str(root)]) == EXIT_INVALID
+def test_validate_missing_runner_entry(tmp_path: Path) -> None:
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    assert _problems(tmp_path) == {("packages/missing/runner.py", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
 
 
-def test_validate_missing_viewer_directory() -> None:
+def test_validate_missing_viewer_directory(tmp_path: Path) -> None:
     manifest_with_viewer = (
         MANIFEST_TEMPLATE
         + """
@@ -160,17 +159,11 @@ kind = "text"
 viewer = "missing"
 """
     )
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        (root / "index.toml").write_text(
-            'version = 1\n[[packages]]\nname = "missing"\n', encoding="utf-8"
-        )
-        pkg_dir = root / "packages" / "missing"
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "package.toml").write_text(manifest_with_viewer, encoding="utf-8")
-        (pkg_dir / "pyproject.toml").write_text(
-            '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
-        )
-        (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
-        (pkg_dir / "runner.py").write_text("", encoding="utf-8")
-        assert main(["registry", "validate", str(root)]) == EXIT_INVALID
+    pkg_dir = _write_package(tmp_path, manifest_with_viewer)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text("", encoding="utf-8")
+    assert _problems(tmp_path) == {("viewers/missing/index.html", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID

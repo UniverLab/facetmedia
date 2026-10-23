@@ -65,6 +65,21 @@ CASES = [
         id="transport-type",
     ),
     pytest.param(
+        BASE.replace('requires_facet = ">=0.1.0"', 'requires_facet = ""'),
+        "requires_facet",
+        "value",
+        id="requires-facet-empty",
+    ),
+    pytest.param(
+        BASE.replace('provider = "test"', 'provider = ""'),
+        "provider",
+        "value",
+        id="provider-empty",
+    ),
+    pytest.param(
+        BASE + MODEL.replace("a" * 64, ""), "models[0].sha256", "value", id="model-sha256-empty"
+    ),
+    pytest.param(
         BASE.replace("ram_gb = 1", 'ram_gb = "1"'), "requirements.ram_gb", "type", id="ram-type"
     ),
     pytest.param(_with_top('licenses = "MIT"'), "licenses", "type", id="licenses-type"),
@@ -147,6 +162,15 @@ CASES = [
         id="array-items",
     ),
     pytest.param(
+        BASE
+        + CAPABILITY
+        + '\n[capabilities.speech.inputs.v]\ntype = "array"\ndefault = "x"\n'
+        + '\n[capabilities.speech.inputs.v.items.x]\ntype = "string"\n',
+        "capabilities.speech.inputs.v.default",
+        "type",
+        id="array-default-type",
+    ),
+    pytest.param(
         BASE + CAPABILITY + '\n[capabilities.speech.inputs.v]\ntype = "integer"\ndefault = "x"\n',
         "capabilities.speech.inputs.v.default",
         "type",
@@ -165,6 +189,53 @@ CASES = [
         "capabilities.speech.inputs.v.pattern",
         "value",
         id="pattern",
+    ),
+    pytest.param(
+        BASE
+        + CAPABILITY
+        + '\n[capabilities.speech.inputs.v]\ntype = "integer"\npattern = "\\\\d+"\n',
+        "capabilities.speech.inputs.v.pattern",
+        "value",
+        id="pattern-non-text",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.inputs.v]\ntype = "string"\nmin = 1\n',
+        "capabilities.speech.inputs.v.min",
+        "value",
+        id="min-non-numeric",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.inputs.v]\ntype = "string"\nvalues = ["a"]\n',
+        "capabilities.speech.inputs.v.values",
+        "value",
+        id="values-non-enum",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.inputs.v]\ntype = "string"\nmin_items = 1\n',
+        "capabilities.speech.inputs.v.min_items",
+        "value",
+        id="min-items-non-array",
+    ),
+    pytest.param(
+        BASE.replace('entry = "runner.py"', 'entry = "../runner.py"'),
+        "transport.entry",
+        "value",
+        id="entry-traversal",
+    ),
+    pytest.param(
+        BASE.replace('entry = "runner.py"', 'entry = ""'),
+        "transport.entry",
+        "value",
+        id="entry-empty",
+    ),
+    pytest.param(
+        BASE.replace(
+            'entry = "runner.py"',
+            'entry = "runner.py"\ninvocation_template = ""',
+        ),
+        "transport.invocation_template",
+        "value",
+        id="template-empty",
     ),
     pytest.param(
         BASE + CAPABILITY + '\n[capabilities.speech.verify]\nthresholds = "x"\n',

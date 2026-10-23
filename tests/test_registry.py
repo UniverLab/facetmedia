@@ -1,5 +1,7 @@
 import hashlib
+import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -8,6 +10,7 @@ import pytest
 from facetmedia.contract import FacetError
 from facetmedia.registry import (
     PROTOCOL_VERSION,
+    load_active_registry,
     load_registry,
     registry_dir,
     validate_registry,
@@ -191,6 +194,54 @@ def test_validate_broken_manifest_reports_all_problems() -> None:
         assert "unknown_key" in problem_keys
 
 
+def _manifest_with_model(name: str, model_id: str) -> str:
+    sha256 = "a" * SHA256_HEX_LEN
+    return f"""name = "{name}"
+version = "0.1.0"
+requires_facet = ">=0.1.0.dev0,<0.2"
+protocol = 1
+provider = "test"
+tool_name = "Test"
+description = "test"
+
+[engine]
+type = "python-env"
+python = "3.12"
+
+[transport]
+type = "cli"
+entry = "runner.py"
+
+[requirements]
+exclusive = false
+
+[[models]]
+id = "{model_id}"
+spdx = "MIT"
+bytes = 10
+url = "https://example.com/m.bin"
+sha256 = "{sha256}"
+path = "m.bin"
+"""
+
+
+def test_model_ids_unique_across_packages(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "one"\n[[packages]]\nname = "two"\n',
+        encoding="utf-8",
+    )
+    for name in ("one", "two"):
+        pkg_dir = tmp_path / "packages" / name
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.toml").write_text(
+            _manifest_with_model(name, "shared-model"), encoding="utf-8"
+        )
+        for file_name in ("pyproject.toml", "uv.lock", "runner.py"):
+            (pkg_dir / file_name).write_text("", encoding="utf-8")
+    found = {(p["file"], p["key"], p["problem"]) for p in validate_registry(tmp_path)}
+    assert ("packages/two/package.toml", "models[0].id", "duplicate") in found
+
+
 def test_registry_dir_absolute_override() -> None:
     override = FIXTURE_ROOT
     old = os.environ.get("FACET_REGISTRY")
@@ -218,6 +269,34 @@ def test_registry_dir_relative_override_raises() -> None:
             os.environ.pop("FACET_REGISTRY", None)
         else:
             os.environ["FACET_REGISTRY"] = old
+
+
+def test_registry_dir_uses_recorded_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    snapshot = home / "registry" / "abc123"
+    shutil.copytree(FIXTURE_ROOT, snapshot)
+    (home / "state").mkdir(parents=True)
+    (home / "state" / "registry.json").write_text(
+        json.dumps({"commit": "abc123"}), encoding="utf-8"
+    )
+    monkeypatch.delenv("FACET_REGISTRY", raising=False)
+    monkeypatch.setenv("FACET_HOME", str(home))
+    assert registry_dir() == snapshot
+    assert set(load_active_registry().packages) == {"echo", "termsy", "future"}
+
+
+def test_registry_dir_corrupt_state_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    (home / "state").mkdir(parents=True)
+    (home / "state" / "registry.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.delenv("FACET_REGISTRY", raising=False)
+    monkeypatch.setenv("FACET_HOME", str(home))
+    with pytest.raises(FacetError) as exc:
+        registry_dir()
+    assert exc.value.code == "internal"
+    assert "corrupt registry state" in exc.value.message
 
 
 def test_registry_dir_no_snapshot_raises() -> None:

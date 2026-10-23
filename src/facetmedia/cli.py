@@ -34,8 +34,6 @@ _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
     ("list", "list the licenses of installed tools"),
 )
 
-_REGISTRY_VERBS: tuple[tuple[str, str], ...] = (("validate", "validate a registry checkout"),)
-
 
 class FacetParser(argparse.ArgumentParser):
     _facet_argv: list[str] | None = None

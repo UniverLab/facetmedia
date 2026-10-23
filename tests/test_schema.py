@@ -4,12 +4,22 @@ from pathlib import Path
 import pytest
 
 from facetmedia.contract import FacetError
-from facetmedia.registry import Field, load_registry
+from facetmedia.registry import Capability, Field, load_registry
 from facetmedia.schema import to_json_schema, validate
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
 GOLDEN_ROOT = Path(__file__).parent / "golden" / "schema"
 REPEAT_MAX = 10
+
+
+def _capability(*fields: Field) -> Capability:
+    return Capability(
+        id="test.cap",
+        package="test",
+        summary="test capability",
+        kind="text",
+        inputs=tuple(fields),
+    )
 
 
 def test_validate_fills_defaults() -> None:
@@ -127,6 +137,38 @@ def test_validate_path_field_resolves() -> None:
     assert exc.value.code == "invalid_input"
     errors = exc.value.details["errors"]
     assert any(e["field"] == "file" and e["problem"] == "not_found" for e in errors)
+
+
+def test_validate_path_field_resolves_existing(tmp_path: Path) -> None:
+    piece_file = tmp_path / "piece.txt"
+    piece_file.write_text("hello", encoding="utf-8")
+    cap = _capability(Field(name="file", type="path", required=True))
+    result = validate(cap, {"file": "piece.txt"}, tmp_path)
+    assert result == {"file": str(piece_file.resolve())}
+
+
+def test_validate_path_default_resolves_and_must_exist(tmp_path: Path) -> None:
+    (tmp_path / "default.txt").write_text("hello", encoding="utf-8")
+    present = _capability(Field(name="file", type="path", default="default.txt"))
+    assert validate(present, {}, tmp_path) == {"file": str((tmp_path / "default.txt").resolve())}
+    absent = _capability(Field(name="file", type="path", default="absent.txt"))
+    with pytest.raises(FacetError) as exc:
+        validate(absent, {}, tmp_path)
+    assert exc.value.details["errors"] == [{"field": "file", "problem": "not_found"}]
+
+
+def test_validate_reports_every_problem() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"text": 123, "unknown": "value"}, Path.cwd())
+    errors = {(e["field"], e["problem"]) for e in exc.value.details["errors"]}
+    assert errors == {("text", "type"), ("unknown", "unknown")}
+
+
+def test_validate_pattern_on_integer_does_not_crash() -> None:
+    cap = _capability(Field(name="count", type="integer", pattern=r"\d+"))
+    assert validate(cap, {"count": 3}, Path.cwd()) == {"count": 3}
 
 
 def test_validate_array_one_level() -> None:

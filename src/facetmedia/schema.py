@@ -53,7 +53,9 @@ def _validate_object(
         path = f"{prefix}{field.name}"
         if field.name not in values:
             if field.has_default:
-                result[field.name] = _default_value(field, piece_dir)
+                default = _default_value(field, path, piece_dir, errors)
+                if default is not _INVALID:
+                    result[field.name] = default
             elif field.required:
                 errors.append({"field": path, "problem": "required"})
             continue
@@ -84,10 +86,14 @@ def _check_field(
     return checked
 
 
-def _default_value(field: Field, piece_dir: Path) -> Any:
-    if field.type == "path" and isinstance(field.default, str):
-        return str((piece_dir / field.default).resolve())
-    return field.default
+def _default_value(field: Field, path: str, piece_dir: Path, errors: list[dict[str, str]]) -> Any:
+    if field.type != "path" or not isinstance(field.default, str):
+        return field.default
+    resolved = (piece_dir / field.default).resolve()
+    if not resolved.exists():
+        errors.append({"field": path, "problem": "not_found"})
+        return _INVALID
+    return str(resolved)
 
 
 def _check_path(value: Any, path: str, piece_dir: Path, errors: list[dict[str, str]]) -> Any:
@@ -112,7 +118,11 @@ def _check_scalar(
     if field.type == "enum" and value not in field.values:
         errors.append({"field": path, "problem": "enum"})
         return _INVALID
-    if field.pattern is not None and re.fullmatch(field.pattern, value) is None:
+    if (
+        field.pattern is not None
+        and isinstance(value, str)
+        and re.fullmatch(field.pattern, value) is None
+    ):
         errors.append({"field": path, "problem": "pattern"})
         return _INVALID
     return value

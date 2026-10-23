@@ -37,6 +37,30 @@ _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}\Z")
 _REVISION_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}\Z")
 _PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(\.\d+)?\Z")
 
+
+def _default_type_matches(field_type: str, default: object) -> bool:
+    """True when a scalar default has the type its field declares."""
+
+    if field_type in {"string", "path"}:
+        return isinstance(default, str)
+    if field_type == "integer":
+        return isinstance(default, int) and not isinstance(default, bool)
+    if field_type == "number":
+        return isinstance(default, int | float) and not isinstance(default, bool)
+    if field_type == "boolean":
+        return isinstance(default, bool)
+    return True
+
+
+def _is_relative_path(value: str) -> bool:
+    """True for a non-empty relative path that stays inside its directory."""
+
+    if not value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
 _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
     {
         "name",
@@ -94,6 +118,13 @@ _FIELD_KEYS: Final[frozenset[str]] = frozenset(
         "items",
     }
 )
+_FIELD_OPTION_TYPES: Final[Mapping[str, frozenset[str]]] = {
+    "values": frozenset({"enum"}),
+    "min": frozenset({"integer", "number"}),
+    "max": frozenset({"integer", "number"}),
+    "pattern": frozenset({"string", "enum"}),
+    "min_items": frozenset({"array"}),
+}
 
 
 class RegistryLoader:
@@ -105,7 +136,9 @@ class RegistryLoader:
         self.model_ids: dict[str, str] = {}
 
     def add(self, file: str, key: str, problem: str) -> None:
-        self.problems.append(Problem(file, key, problem))
+        found = Problem(file, key, problem)
+        if found not in self.problems:
+            self.problems.append(found)
 
     def table(
         self, parent: Mapping[str, Any], key: str, file: str, prefix: str, *, required: bool
@@ -131,6 +164,8 @@ class RegistryLoader:
         if not isinstance(value, str):
             self.add(file, f"{prefix}{key}", "type")
             return None
+        if required and not value:
+            self.add(file, f"{prefix}{key}", "value")
         return value
 
     def integer(
@@ -347,8 +382,13 @@ class RegistryLoader:
         transport_type = self.string(table, "type", file, "transport.", required=True)
         if transport_type is not None and transport_type != "cli":
             self.add(file, "transport.type", "value")
-        entry = self.string(table, "entry", file, "transport.", required=True) or ""
+        raw_entry = self.string(table, "entry", file, "transport.", required=True)
+        entry = raw_entry or ""
+        if raw_entry is not None and not _is_relative_path(entry):
+            self.add(file, "transport.entry", "value")
         template = self.string(table, "invocation_template", file, "transport.", required=False)
+        if isinstance(template, str) and "invocation_template" in table and not template:
+            self.add(file, "transport.invocation_template", "value")
         return transport_type or "", entry, template or DEFAULT_INVOCATION_TEMPLATE
 
     def requirements(self, data: Mapping[str, Any], file: str) -> Requirements:
@@ -586,6 +626,7 @@ class RegistryLoader:
             self.add(file, f"{key}.type", "value")
         if field_type == "array" and not allow_array:
             self.add(file, f"{key}.type", "value")
+        self.check_field_options(field_type, spec, file, key)
         required = self.boolean(spec, "required", file, f"{key}.", default=False)
         description = self.string(spec, "description", file, f"{key}.", required=False) or ""
         values = self.string_list(spec, "values", file, f"{key}.")
@@ -624,6 +665,25 @@ class RegistryLoader:
             items=items,
         )
 
+    def check_field_options(
+        self,
+        field_type: str | None,
+        spec: Mapping[str, Any],
+        file: str,
+        key: str,
+    ) -> None:
+        """Reject options that do not apply to the field's type.
+
+        ``pattern`` is a regular expression: applying it to an integer would
+        crash validation, so a manifest cannot attach it to a non-text field.
+        """
+
+        if field_type is None:
+            return
+        for option, allowed in _FIELD_OPTION_TYPES.items():
+            if spec.get(option) is not None and field_type not in allowed:
+                self.add(file, f"{key}.{option}", "value")
+
     def check_default(
         self,
         field_type: str,
@@ -632,16 +692,10 @@ class RegistryLoader:
         file: str,
         key: str,
     ) -> None:
-        if (
-            field_type in {"string", "path"}
-            and not isinstance(default, str)
-            or field_type == "integer"
-            and (isinstance(default, bool) or not isinstance(default, int))
-            or field_type == "number"
-            and (isinstance(default, bool) or not isinstance(default, int | float))
-            or field_type == "boolean"
-            and not isinstance(default, bool)
-        ):
+        if field_type == "array":
+            if not isinstance(default, list):
+                self.add(file, key, "type")
+        elif not _default_type_matches(field_type, default):
             self.add(file, key, "type")
         elif field_type == "enum" and default not in values:
             self.add(file, key, "value")
