@@ -25,7 +25,7 @@ SHORT_WAIT_S = 0.7
 
 LOCKING_VERBS = [
     ["update"],
-    ["pull"],
+    ["pull", "echo"],
     ["run"],
     ["check"],
     ["rm"],
@@ -238,7 +238,7 @@ def test_locking_verbs_take_the_lock_flags(argv: list[str]) -> None:
 
 
 def test_lock_flags_default_to_waiting_an_hour() -> None:
-    assert _lock_params(build_parser().parse_args(["pull"])) == (True, 3600.0)
+    assert _lock_params(build_parser().parse_args(["pull", "echo"])) == (True, 3600.0)
 
 
 @pytest.mark.parametrize("argv", LIGHT_VERBS, ids=" ".join)

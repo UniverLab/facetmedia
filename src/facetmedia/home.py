@@ -179,6 +179,25 @@ def atomic_write_json(path: Path | str, obj: Any, tmp_dir: Path | str | None = N
         raise
 
 
+def atomic_write_text(path: Path | str, text: str, tmp_dir: Path | str | None = None) -> None:
+    """Write text so a crash mid-write leaves the previous version intact."""
+    target = Path(path)
+    scratch = Path(tmp_dir) if tmp_dir is not None else Home.from_env().tmp_dir
+    scratch.mkdir(parents=True, exist_ok=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(scratch))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+
+
 def read_json(path: Path | str, default: _T) -> _T | Any:
     """Read a JSON state file, returning ``default`` when it is missing."""
     try:

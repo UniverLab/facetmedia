@@ -10,10 +10,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, contract, lock, registry, update
+from facetmedia import __version__, contract, env, lock, registry, update
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
-from facetmedia.registry import validate_registry
+from facetmedia.registry import load_active_registry, validate_registry
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -88,7 +88,35 @@ def _packages(data: dict[str, object]) -> list[dict[str, object]]:
     return [package for package in packages if isinstance(package, dict)]
 
 
-_HANDLERS: dict[str, Handler] = {"update": _handle_update}
+def _handle_pull(args: argparse.Namespace) -> int:
+    with lock.hold("exclusive", "facet pull", *_lock_params(args)):
+        active = load_active_registry()
+        package = active.package(args.package)
+        if package is None:
+            raise FacetError(
+                "invalid_input",
+                f"unknown package: {args.package}",
+                details={"known": sorted(active.packages)},
+            )
+        report = env.pull(package, Home.from_env(), verify_models=args.verify_models)
+    contract.emit(contract.ok(report), args.json)
+    if not args.json:
+        _announce_pull(report)
+    return 0
+
+
+def _announce_pull(report: dict[str, object]) -> None:
+    name = f"{report['package']} {report['version']}"
+    if report["already_installed"] is True:
+        print(f"{name} already installed at {report['env']}")
+        return
+    print(
+        f"{name} installed at {report['env']} "
+        f"({report['downloaded_bytes']} bytes downloaded in {report['seconds']} s)"
+    )
+
+
+_HANDLERS: dict[str, Handler] = {"pull": _handle_pull, "update": _handle_update}
 
 
 def _handle_registry_validate(args: argparse.Namespace) -> int:
@@ -201,6 +229,15 @@ def _add_update_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("package", help="registry package to install")
+    parser.add_argument(
+        "--verify-models",
+        action="store_true",
+        help="recompute the sha256 of models that are already present",
+    )
+
+
 def build_parser() -> FacetParser:
     parser = FacetParser(
         prog="facet",
@@ -220,6 +257,8 @@ def build_parser() -> FacetParser:
         )
         if verb == "update":
             _add_update_flags(verb_parser)
+        elif verb == "pull":
+            _add_pull_flags(verb_parser)
     _add_group(
         subparsers,
         "license",

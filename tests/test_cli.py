@@ -15,7 +15,6 @@ EXIT_USAGE = 2
 EXIT_MACHINE_CANNOT = 5
 
 UNIMPLEMENTED_ARGV = [
-    ["pull"],
     ["list"],
     ["describe"],
     ["check"],

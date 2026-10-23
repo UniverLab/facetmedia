@@ -59,10 +59,6 @@ testpaths = ["tests"]
 [tool.deptry]
 extend_exclude = ["tests/fixtures"]
 
-# No source imports uv yet; delete the entry when a spec does.
-[tool.deptry.per_rule_ignores]
-DEP002 = ["uv"]
-
 # python-ci gates coverage at 80 % by default.
 [tool.coverage.run]
 source = ["facetmedia"]
