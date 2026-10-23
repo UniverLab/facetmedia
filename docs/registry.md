@@ -245,7 +245,7 @@ use.
 With `--json`:
 
 ```json
-{"contract": 1, "data": {"commit": "e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca", "packages": [{"changed": true, "compatible": true, "name": "echo", "version": "0.1.0"}], "previous_commit": null, "ref": "feature/v0.1"}, "facet": "0.1.0.dev0", "ok": true}
+{"contract": 1, "data": {"commit": "e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca", "packages": [{"changed": true, "compatible": true, "name": "echo", "version": "0.1.0"}, {"changed": true, "compatible": false, "name": "future", "version": "0.1.0"}, {"changed": true, "compatible": true, "name": "termsy", "version": "0.1.0"}], "previous_commit": null, "ref": "feature/v0.1"}, "facet": "0.1.0.dev0", "ok": true}
 ```
 
 Without `--json`:

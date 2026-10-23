@@ -12,7 +12,8 @@ URLs.  They exist for the tests and for nothing else.
 
 from __future__ import annotations
 
-import io
+import contextlib
+import http.client
 import os
 import shutil
 import sys
@@ -21,6 +22,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -50,6 +52,7 @@ CODELOAD_BASE: Final[str] = "https://codeload.github.com"
 COMPLETE: Final[str] = ".complete"
 COMMIT_HEX_LEN: Final[int] = 40
 TIMEOUT_S: Final[float] = 60.0
+ARCHIVE_SUFFIX: Final[str] = ".tar.gz"
 HINT: Final[str] = "run facet update when online"
 
 
@@ -72,12 +75,25 @@ def resolve_ref(ref: str) -> str:
     return answer.lower()
 
 
-def download_archive(commit: str) -> bytes:
-    """The ``tar.gz`` archive of exactly ``commit``."""
-    return _get(f"{_base('FACET_GITHUB_CODELOAD', CODELOAD_BASE)}/{REPO}/tar.gz/{commit}")
+def download_archive(home: Home, commit: str) -> Path:
+    """Download the archive of exactly ``commit`` into ``<home>/tmp``.
+
+    The tarball is read from disk rather than memory, and the caller removes it
+    once the snapshot is installed or refused.
+    """
+    url = f"{_base('FACET_GITHUB_CODELOAD', CODELOAD_BASE)}/{REPO}/tar.gz/{commit}"
+    target = home.tmp_dir / f"registry-{commit}{ARCHIVE_SUFFIX}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with _opened(url, None) as response, target.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    return target
 
 
-def extract_snapshot(archive: bytes, dest: Path) -> Path:
+def extract_snapshot(archive: Path, dest: Path) -> Path:
     """Extract ``archive`` into ``dest`` and return its stripped root.
 
     Every member is refused unless it is a plain file or directory inside the
@@ -87,7 +103,7 @@ def extract_snapshot(archive: bytes, dest: Path) -> Path:
     """
     dest.mkdir(parents=True, exist_ok=True)
     try:
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        with tarfile.open(name=str(archive), mode="r:gz") as tar:
             return _extract_members(tar, dest)
     except tarfile.TarError as exc:
         raise FacetError(
@@ -95,7 +111,7 @@ def extract_snapshot(archive: bytes, dest: Path) -> Path:
         ) from exc
 
 
-def install_snapshot(home: Home, commit: str, archive: bytes) -> Path:
+def install_snapshot(home: Home, commit: str, archive: Path) -> Path:
     """Install ``archive`` as ``<home>/registry/<commit>/``, validated.
 
     The archive is unpacked in ``<home>/tmp``; its top directory is renamed to
@@ -133,7 +149,11 @@ def update_registry(home: Home, ref: str | None = None) -> dict[str, object]:
     commit = resolve_ref(pinned)
     snapshot = home.registry_dir(commit)
     if not (snapshot / COMPLETE).is_file():
-        install_snapshot(home, commit, download_archive(commit))
+        archive = download_archive(home, commit)
+        try:
+            install_snapshot(home, commit, archive)
+        finally:
+            archive.unlink(missing_ok=True)
     packages = _package_records(home, snapshot, previous)
     atomic_write_json(
         state_file,
@@ -179,14 +199,21 @@ def _headers(accept: str | None) -> dict[str, str]:
 
 
 def _get(url: str, accept: str | None = None) -> bytes:
-    """Fetch ``url``, turning every network failure into ``download_failed``."""
+    """Fetch ``url`` and return its body."""
+    with _opened(url, accept) as response:
+        return bytes(response.read())
+
+
+@contextlib.contextmanager
+def _opened(url: str, accept: str | None) -> Iterator[http.client.HTTPResponse]:
+    """Open ``url``, turning every network failure into ``download_failed``."""
     request = urllib.request.Request(url, headers=_headers(accept))
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-            return bytes(response.read())
+            yield response
     except urllib.error.HTTPError as exc:
         raise _failed(url, f"HTTP {exc.code}") from exc
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         raise _failed(url, str(reason)) from exc
 

@@ -47,6 +47,15 @@ def _add_symlink(tar: tarfile.TarFile, name: str, target: str) -> None:
     tar.addfile(info)
 
 
+def _add_device(tar: tarfile.TarFile, name: str) -> None:
+    info = tarfile.TarInfo(name)
+    info.type = tarfile.CHRTYPE
+    info.devmajor = 1
+    info.devminor = 3
+    info.mode = 0o666
+    tar.addfile(info)
+
+
 def build_archive(source: Path = FIXTURE_ROOT, top: str = TOP) -> bytes:
     """A ``tar.gz`` of ``source`` under one top directory, like codeload's."""
     buffer = io.BytesIO()
@@ -75,6 +84,15 @@ def archive_with_symlink(top: str = TOP) -> bytes:
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
         _add_file(tar, f"{top}/index.toml", b"version = 1\n")
         _add_symlink(tar, f"{top}/link", "/etc/passwd")
+    return buffer.getvalue()
+
+
+def archive_with_device(top: str = TOP) -> bytes:
+    """An archive whose second member is a character device."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        _add_file(tar, f"{top}/index.toml", b"version = 1\n")
+        _add_device(tar, f"{top}/tty")
     return buffer.getvalue()
 
 

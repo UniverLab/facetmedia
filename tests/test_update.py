@@ -6,6 +6,7 @@ here touches the network.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import shutil
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from facetmedia import __version__, update
+from facetmedia import __version__, lock, update
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
@@ -23,6 +24,7 @@ from tests.registry_server import (
     FIXTURE_ROOT,
     OTHER_COMMIT,
     FakeGitHub,
+    archive_with_device,
     archive_with_file_top,
     archive_with_member,
     archive_with_symlink,
@@ -90,6 +92,7 @@ def test_update_creates_the_snapshot_and_state(fake_github: FakeGitHub) -> None:
     assert (snapshot / "index.toml").is_file()
     assert (snapshot / "packages" / "echo" / "package.toml").is_file()
     assert _registry_dirs() == [COMMIT]
+    assert list((_home() / "tmp").iterdir()) == [], "the tarball is not left in tmp"
 
     state = _state()
     assert state["commit"] == COMMIT
@@ -153,6 +156,28 @@ def test_archive_with_symlink_member_is_refused(fake_github: FakeGitHub) -> None
 
     assert exc.value.code == "download_failed"
     assert "link" in exc.value.message
+    assert _registry_dirs() == []
+
+
+def test_archive_with_absolute_member_is_refused(fake_github: FakeGitHub) -> None:
+    fake_github.archive = archive_with_member("/etc/evil")
+
+    with pytest.raises(FacetError) as exc:
+        update.update_registry(Home.from_env(), "main")
+
+    assert exc.value.code == "download_failed"
+    assert "/etc/evil" in exc.value.message
+    assert _registry_dirs() == []
+
+
+def test_archive_with_a_device_member_is_refused(fake_github: FakeGitHub) -> None:
+    fake_github.archive = archive_with_device()
+
+    with pytest.raises(FacetError) as exc:
+        update.update_registry(Home.from_env(), "main")
+
+    assert exc.value.code == "download_failed"
+    assert "device" in exc.value.message
     assert _registry_dirs() == []
 
 
@@ -344,6 +369,26 @@ def test_cli_update_uses_the_environment_ref(
     assert _state()["ref"] == "feature/v0.1"
 
 
+def test_cli_update_holds_the_exclusive_lock(
+    fake_github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = update.update_registry
+
+    def _while_locked(home: Home, ref: str | None = None) -> dict[str, object]:
+        with (  # a second descriptor on the same lock file must be refused
+            pytest.raises(FacetError) as blocked,
+            lock.hold("exclusive", "probe", wait=False, timeout_s=0.0),
+        ):
+            pass
+        assert blocked.value.code == "lock_busy", "facet update ran without the lock"
+        return real(home, ref)
+
+    monkeypatch.setattr(update, "update_registry", _while_locked)
+
+    assert main(["update", "--json"]) == 0
+    assert fake_github.archive_hits == 1
+
+
 def test_cli_update_json_envelope(
     fake_github: FakeGitHub, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -414,13 +459,36 @@ def test_api_answers_a_sha_and_the_archive_follows_that_commit(
     assert fake_github.requests[0][0] == (
         "/repos/UniverLab/facetmedia-registry/commits/feature/v0.1"
     )
+    assert fake_github.requests[0][1]["accept"] == "application/vnd.github.sha"
 
-    update.download_archive(COMMIT)
+    home = Home.from_env()
+    archive = update.download_archive(home, COMMIT)
+    assert archive == home.tmp_dir / f"registry-{COMMIT}.tar.gz"
+    assert archive.is_file()
     assert fake_github.archive_hits == 1
 
 
 def test_unknown_commit_archive_is_a_download_failure(fake_github: FakeGitHub) -> None:
+    home = Home.from_env()
     with pytest.raises(FacetError) as exc:
-        update.download_archive(OTHER_COMMIT)
+        update.download_archive(home, OTHER_COMMIT)
     assert exc.value.code == "download_failed"
     assert "HTTP 404" in exc.value.message
+    assert list(home.tmp_dir.iterdir()) == []
+
+
+def test_a_cut_connection_is_a_download_failure(
+    fake_github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _cut(*_args: object, **_kwargs: object) -> None:
+        raise http.client.IncompleteRead(b"partial", 4096)
+
+    monkeypatch.setattr("urllib.request.urlopen", _cut)
+    home = Home.from_env()
+
+    with pytest.raises(FacetError) as exc:
+        update.download_archive(home, COMMIT)
+
+    assert exc.value.code == "download_failed"
+    assert exc.value.hint == "run facet update when online"
+    assert list(home.tmp_dir.iterdir()) == []
