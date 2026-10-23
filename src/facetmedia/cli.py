@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import traceback
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from typing import Any, NoReturn, TypeVar
 
 from facetmedia import __version__, contract, registry
 from facetmedia.contract import FacetError
+from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import validate_registry
 
 Handler = Callable[[argparse.Namespace], int]
@@ -153,12 +155,12 @@ def build_parser() -> FacetParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    run_id = new_run_id()
     as_json = "--json" in (argv if argv is not None else sys.argv)
     try:
-        args = build_parser().parse_args(argv)
-        as_json = bool(getattr(args, "json", as_json))
-        handler: Handler = args.handler
-        return handler(args)
+        require_posix()
+        Home.from_env()
+        return _run_logged(argv, run_id)
     except FacetError as exc:
         contract.emit(contract.failure(exc), as_json)
         return exc.exit_code
@@ -169,3 +171,39 @@ def main(argv: list[str] | None = None) -> int:
         fallback = FacetError("internal", "internal error, see stderr", details={"log": "stderr"})
         contract.emit(contract.failure(fallback), as_json)
         return 1
+
+
+def _run_logged(argv: list[str] | None, run_id: str) -> int:
+    as_json = "--json" in (argv if argv is not None else sys.argv)
+    path = log_file(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("facetmedia")
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    previous_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    try:
+        try:
+            args = build_parser().parse_args(argv)
+            as_json = bool(getattr(args, "json", as_json))
+            handler_fn: Handler = args.handler
+            return handler_fn(args)
+        except FacetError as exc:
+            contract.emit(contract.failure(exc), as_json)
+            return exc.exit_code
+        except SystemExit:
+            raise
+        except Exception:
+            logger.exception("unhandled exception")
+            fallback = FacetError(
+                "internal",
+                f"internal error, see {path}",
+                details={"log": str(path)},
+            )
+            contract.emit(contract.failure(fallback), as_json)
+            return 1
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+        logger.setLevel(previous_level)

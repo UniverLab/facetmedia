@@ -215,7 +215,9 @@ def test_unexpected_exception_becomes_internal(
     envelope = json.loads(captured.out)
     assert envelope["ok"] is False
     assert envelope["error"]["code"] == "internal"
-    assert "internal error, see stderr" in envelope["error"]["message"]
+    message = envelope["error"]["message"]
+    assert message.startswith("internal error, see ")
+    assert envelope["error"]["details"] == {"log": message.removeprefix("internal error, see ")}
 
 
 def test_unexpected_exception_human_goes_to_stderr(
@@ -235,4 +237,4 @@ def test_unexpected_exception_human_goes_to_stderr(
     assert code == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "internal error, see stderr" in captured.err
+    assert captured.err.startswith("internal error, see ")

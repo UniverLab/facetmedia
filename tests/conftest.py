@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -16,3 +17,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if "heavy" in item.keywords:
             item.add_marker(skip_heavy)
+
+
+@pytest.fixture(autouse=True)
+def _facet_home_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))

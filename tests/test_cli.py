@@ -1,10 +1,13 @@
+import argparse
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from facetmedia import __version__
+from facetmedia import cli as cli_module
 from facetmedia.cli import build_parser, main
 
 EXIT_USAGE = 2
@@ -88,3 +91,26 @@ def test_python_m_facetmedia_prints_version() -> None:
     )
     assert result.returncode == 0
     assert __version__ in result.stdout
+
+
+def test_unexpected_exception_is_logged_to_run_log(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(_args: argparse.Namespace) -> int:
+        raise RuntimeError("kablam")
+
+    parser = cli_module.build_parser()
+    monkeypatch.setattr(
+        parser,
+        "parse_args",
+        lambda argv=None: argparse.Namespace(handler=_boom, json=False),
+    )
+    monkeypatch.setattr(cli_module, "build_parser", lambda: parser)
+    assert main(["list"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    log_path = Path(captured.err.removeprefix("internal error, see ").strip())
+    assert log_path.is_file()
+    content = log_path.read_text(encoding="utf-8")
+    assert "Traceback" in content
+    assert "kablam" in content

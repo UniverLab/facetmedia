@@ -7,8 +7,8 @@ facet list --json
 ```
 
 With `--json`, stdout carries exactly one JSON document: an envelope with
-the contract version. Progress and logs go to stderr only, so stdout is
-safe to parse.
+the contract version. Progress goes to stderr, and every invocation writes a
+debug log under `~/.facet/logs/<YYYY-MM-DD>/`, so stdout is safe to parse.
 
 ## Success
 
@@ -36,7 +36,7 @@ Branch on the exit code without parsing prose:
 | Code | Exit | When |
 |------|------|------|
 | (success) | 0 | |
-| `internal` | 1 | unexpected error (details go to stderr, not stdout) |
+| `internal` | 1 | unexpected error; the traceback goes to the run log under `~/.facet/logs/<YYYY-MM-DD>/`, and `message`/`details.log` name the file |
 | `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate` |
 | `verification_failed` | 3 | the asset was made but its check did not pass |
 | `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
