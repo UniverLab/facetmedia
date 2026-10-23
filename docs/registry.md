@@ -213,23 +213,26 @@ facet update --ref <40-hex commit> --json
 `facet update` resolves a reference to one exact commit and keeps that commit as
 an immutable snapshot under `FACET_HOME`. Package runners are code that arrives
 from the network, so the commit is always pinned and never changes silently.
+Like every heavy verb, it takes the exclusive lock (see [home.md](home.md)).
 
 - `REF` defaults to `$FACET_REGISTRY_REF`, else `main`, and may be a branch, a
   tag, or a 40-hex commit; `--ref` wins over the variable. During v0.1
   development the registry's work lives on `feature/v0.1`, so
   `FACET_REGISTRY_REF=feature/v0.1` is how facet is tested against it. The
-  snapshot in use keeps the ref it was fetched with until the next update.
+  recorded `ref` is the reference used for that update, not a moving pointer:
+  only the next update changes it.
 - The reference is resolved with
   `GET https://api.github.com/repos/UniverLab/facetmedia-registry/commits/<REF>`.
   Set `GITHUB_TOKEN` to lift the anonymous rate limit; facet sends it as
   `Authorization: Bearer` only when it is set.
 - `https://codeload.github.com/UniverLab/facetmedia-registry/tar.gz/<commit>` is
-  downloaded into `<home>/tmp/` and unpacked there, with its one top directory
-  stripped. A member that is absolute, contains `..`, is a link, or is a device
-  is refused. The snapshot is then loaded: one whose manifests do not validate
-  is rejected and deleted.
+  downloaded to `<home>/tmp/registry-<commit>.tar.gz`, unpacked there, and the
+  tarball is removed once the snapshot is installed or refused. Its one top
+  directory is stripped. A member that is absolute, contains `..`, is a link, or
+  is a device is refused. The snapshot is then loaded: one whose manifests do
+  not validate is rejected and deleted.
 - A snapshot that already holds `.complete` is never downloaded again; updating
-  to the same commit only switches to it.
+  to the same commit only switches to it and records the new `ref`.
 - `state/registry.json` records `commit`, `ref`, `fetched_at`, and `source`, and
   every later command reads that snapshot offline until the next update.
   Installed environments are not touched: a package whose manifest version
@@ -247,6 +250,13 @@ With `--json`:
 ```json
 {"contract": 1, "data": {"commit": "e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca", "packages": [{"changed": true, "compatible": true, "name": "echo", "version": "0.1.0"}, {"changed": true, "compatible": false, "name": "future", "version": "0.1.0"}, {"changed": true, "compatible": true, "name": "termsy", "version": "0.1.0"}], "previous_commit": null, "ref": "feature/v0.1"}, "facet": "0.1.0.dev0", "ok": true}
 ```
+
+`commit` is the pinned snapshot now in use and `ref` the reference it was
+resolved from. `previous_commit` is the commit in use before this update, `null`
+on the first. Each package record carries `name`, `version`, `compatible`
+(whether this facet can run it), and `changed` (its manifest version differs
+from the previous snapshot, so its next `pull` or `run` rebuilds its
+environment).
 
 Without `--json`:
 
