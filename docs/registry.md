@@ -271,7 +271,7 @@ use.
 With `--json`:
 
 ```json
-{"contract": 1, "data": {"commit": "e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca", "packages": [{"changed": true, "compatible": true, "name": "echo", "version": "0.1.0"}, {"changed": true, "compatible": false, "name": "future", "version": "0.1.0"}, {"changed": true, "compatible": true, "name": "termsy", "version": "0.1.0"}], "previous_commit": null, "ref": "feature/v0.1"}, "facet": "0.1.0.dev0", "ok": true}
+{"contract": 1, "data": {"commit": "e475dbaca193af4d9c2e7b9f68f2c8a35fe2c6ca", "packages": [{"changed": true, "compatible": true, "name": "echo", "version": "0.1.0"}, {"changed": true, "compatible": false, "name": "future", "version": "0.1.0"}, {"changed": true, "compatible": true, "name": "termsy", "version": "0.1.0"}], "previous_commit": null, "ref": "feature/v0.1"}, "facet": "0.1.0b1", "ok": true}
 ```
 
 `commit` is the pinned snapshot now in use and `ref` the reference it was
@@ -317,7 +317,7 @@ Run it in the registry's CI before merging a package.
 A clean registry with `--json`:
 
 ```json
-{"contract": 1, "data": {"packages": ["echo", "future", "termsy"], "path": "tests/fixtures/registry", "valid": true}, "facet": "0.1.0.dev0", "ok": true}
+{"contract": 1, "data": {"packages": ["echo", "future", "termsy"], "path": "tests/fixtures/registry", "valid": true}, "facet": "0.1.0b1", "ok": true}
 ```
 
 Problems are printed to stderr as `file: key: problem`, and with `--json` the
@@ -328,7 +328,7 @@ $ facet registry validate /tmp/broken-registry --json
 packages/echo/package.toml: transport.entry: value
 packages/echo/package.toml: typo_key: unknown
 packages/echo/uv.lock: : missing
-{"contract": 1, "error": {"code": "invalid_input", "details": {"errors": [{"file": "packages/echo/package.toml", "key": "transport.entry", "problem": "value"}, {"file": "packages/echo/package.toml", "key": "typo_key", "problem": "unknown"}, {"file": "packages/echo/uv.lock", "key": "", "problem": "missing"}]}, "hint": null, "message": "registry validation failed"}, "facet": "0.1.0.dev0", "ok": false}
+{"contract": 1, "error": {"code": "invalid_input", "details": {"errors": [{"file": "packages/echo/package.toml", "key": "transport.entry", "problem": "value"}, {"file": "packages/echo/package.toml", "key": "typo_key", "problem": "unknown"}, {"file": "packages/echo/uv.lock", "key": "", "problem": "missing"}]}, "hint": null, "message": "registry validation failed"}, "facet": "0.1.0b1", "ok": false}
 ```
 
 `file` is relative to the registry root. `key` is the dotted key, empty when

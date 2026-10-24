@@ -13,7 +13,7 @@ debug log under `~/.facet/logs/<YYYY-MM-DD>/`, so stdout is safe to parse.
 ## Success
 
 ```json
-{"contract": 1, "data": {"packages": [], "registry": {"commit": "9f2c1ab", "ref": "main"}}, "facet": "0.1.0.dev0", "ok": true}
+{"contract": 1, "data": {"packages": [], "registry": {"commit": "9f2c1ab", "ref": "main"}}, "facet": "0.1.0b1", "ok": true}
 ```
 
 `contract` is the contract version (currently `1`); it changes only on a
@@ -23,7 +23,7 @@ breaking change to a `--json` output. `facet` is the facet version.
 ## Failure
 
 ```json
-{"contract": 1, "error": {"code": "invalid_input", "details": {}, "hint": null, "message": "argument VERB: invalid choice: 'nope' (choose from update, pull, list, describe, skill, doctor, check, run, preview, rm, gc, license, registry)"}, "facet": "0.1.0.dev0", "ok": false}
+{"contract": 1, "error": {"code": "invalid_input", "details": {}, "hint": null, "message": "argument VERB: invalid choice: 'nope' (choose from update, pull, list, describe, skill, doctor, check, run, preview, rm, gc, license, registry)"}, "facet": "0.1.0b1", "ok": false}
 ```
 
 Without `--json`, a failure prints its message (and hint, when there is

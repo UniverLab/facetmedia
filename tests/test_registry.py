@@ -6,7 +6,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 
+from facetmedia import __version__
 from facetmedia.contract import FacetError
 from facetmedia.registry import (
     PROTOCOL_VERSION,
@@ -46,7 +49,7 @@ def test_echo_fixture_fields() -> None:
     assert echo is not None
     assert echo.name == "echo"
     assert echo.version == "0.1.0"
-    assert echo.requires_facet == ">=0.1.0.dev0,<0.2"
+    assert echo.requires_facet == ">=0.1.0b1,<0.2"
     assert echo.protocol == PROTOCOL_VERSION
     assert echo.provider == "facet"
     assert echo.tool_name == "Echo"
@@ -128,6 +131,16 @@ def test_echo_compatible() -> None:
     echo.require_compatible()
 
 
+def test_b1_specifier_compatible_with_installed_version() -> None:
+    assert SpecifierSet(">=0.1.0b1,<0.2").contains(Version(__version__), prereleases=True)
+    registry = load_registry(FIXTURE_ROOT)
+    echo = registry.package("echo")
+    assert echo is not None
+    assert echo.requires_facet == ">=0.1.0b1,<0.2"
+    assert echo.compatible is True
+    echo.require_compatible()
+
+
 def test_lock_sha256() -> None:
     registry = load_registry(FIXTURE_ROOT)
     echo = registry.package("echo")
@@ -199,7 +212,7 @@ def _manifest_with_model(name: str, model_id: str) -> str:
     sha256 = "a" * SHA256_HEX_LEN
     return f"""name = "{name}"
 version = "0.1.0"
-requires_facet = ">=0.1.0.dev0,<0.2"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "test"
 tool_name = "Test"

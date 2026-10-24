@@ -79,7 +79,7 @@ def _write_echo_record(asset: Path) -> None:
         name="echo",
         kind="text",
         mime="text/plain",
-        facet="0.1.0.dev0",
+        facet="0.1.0b1",
         capability="echo.text",
         package={"name": "echo", "version": "0.1.0", "lock_sha256": "abc"},
         tool={"name": "echo", "version": "0.1.0"},

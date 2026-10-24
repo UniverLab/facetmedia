@@ -1,6 +1,6 @@
 name = "echo"
 version = "0.1.0"
-requires_facet = ">=0.1.0.dev0,<0.2"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "facet"
 tool_name = "Echo"

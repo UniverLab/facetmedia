@@ -153,6 +153,6 @@ facet:
   ✗ orphans: 1 orphaned: /home/you/.facet/envs/ghost/1.0.0
     → fix: facet gc
 echo (installed):
-  ✓ compatible: requires_facet >=0.1.0.dev0,<0.2 satisfied by facet 0.1.0.dev0, protocol 1
+  ✓ compatible: requires_facet >=0.1.0b1,<0.2 satisfied by facet 0.1.0b1, protocol 1
   ✓ imports: echo.text echo runner imports (full)
 ```

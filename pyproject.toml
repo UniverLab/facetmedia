@@ -1,6 +1,6 @@
 [project]
 name = "facetmedia"
-version = "0.1.0.dev0"
+version = "0.1.0b1"
 description = "Creation tools for agents: isolated, verifiable, license-aware (internal preview)."
 readme = "README.md"
 requires-python = ">=3.11"
