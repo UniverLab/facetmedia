@@ -246,10 +246,9 @@ Like every heavy verb, it takes the exclusive lock (see [home.md](home.md)).
   only the next update changes it.
 - The reference is resolved with
   `GET https://api.github.com/repos/UniverLab/facetmedia-registry/commits/<REF>`.
-  Set `GITHUB_TOKEN` to lift the anonymous rate limit; facet sends it as
-  `Authorization: Bearer` only when it is set. The fetch uses the GitHub API
-  (60 requests/hour anonymous); `GITHUB_TOKEN` is sent when set and lifts that
-  limit.
+  The fetch uses the GitHub API, whose anonymous limit is 60 requests per hour
+  per IP; `GITHUB_TOKEN` is sent as `Authorization: Bearer` only when it is set,
+  and then lifts that limit.
 - `https://codeload.github.com/UniverLab/facetmedia-registry/tar.gz/<commit>` is
   downloaded to `<home>/tmp/registry-<commit>.tar.gz`, unpacked there, and the
   tarball is removed once the snapshot is installed or refused. Its one top
@@ -267,8 +266,9 @@ Like every heavy verb, it takes the exclusive lock (see [home.md](home.md)).
 The first command that needs the registry and finds no snapshot fetches it once,
 printing `fetching the registry (first use)` to stderr. With no network and no
 snapshot the error is `download_failed` (exit 8) with the hint `run facet update
-when online`. A failed update changes nothing: the previous snapshot stays in
-use.
+when online`. When the failure is GitHub's rate limit, the message says `GitHub
+rate limit reached` with the reset instant, and the hint names `GITHUB_TOKEN`. A
+failed update changes nothing: the previous snapshot stays in use.
 
 With `--json`:
 

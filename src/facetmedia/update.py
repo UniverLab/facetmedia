@@ -191,12 +191,17 @@ def _quote(ref: str) -> str:
     return urllib.parse.quote(ref, safe="/")
 
 
+def _token() -> str | None:
+    """The GitHub token from the environment, or ``None``; never logged."""
+    return os.environ.get("GITHUB_TOKEN") or None
+
+
 def _headers(accept: str | None) -> dict[str, str]:
     headers = {"User-Agent": f"facetmedia/{__version__}"}
     if accept is not None:
         headers["Accept"] = accept
-    token = os.environ.get("GITHUB_TOKEN")
-    if token:
+    token = _token()
+    if token is not None:
         headers["Authorization"] = f"Bearer {token}"
     return headers
 
@@ -248,7 +253,7 @@ def _rate_limit_error(url: str, exc: urllib.error.HTTPError) -> FacetError | Non
         message = f"{message} (retry after {reset})"
     hint = (
         "retry after the reset"
-        if os.environ.get("GITHUB_TOKEN")
+        if _token() is not None
         else "set GITHUB_TOKEN to a GitHub token to lift the limit, or retry after the reset"
     )
     return FacetError(
