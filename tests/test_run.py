@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from facetmedia import check as check_module
 from facetmedia import record, runner, runner_sdk
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
@@ -31,6 +32,7 @@ from facetmedia.registry import load_registry
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
 EXIT_VERIFICATION_FAILED = 3
+EXIT_MACHINE_CANNOT = 5
 EXIT_NOT_INSTALLED = 7
 EXIT_RUNNER_FAILED = 9
 SEED = 7
@@ -397,6 +399,24 @@ def test_run_no_pull_on_a_fresh_home_is_not_installed(
     error = _error(_envelope(capsys))
     assert code == EXIT_NOT_INSTALLED
     assert error["code"] == "not_installed"
+    assert list((tmp_path / "fresh-home" / "envs").glob("*/*")) == []
+
+
+def test_run_refuses_a_machine_that_cannot_before_pulling(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    monkeypatch.setattr(check_module, "mem_total_gb", lambda: 0.05)
+    piece = _piece(tmp_path)
+
+    code = main(["run", "echo.text", str(piece), "--no-pull", "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_MACHINE_CANNOT
+    assert error["code"] == "machine_cannot"
+    # The gate ran before the pull/not-installed decision; nothing was installed.
     assert list((tmp_path / "fresh-home" / "envs").glob("*/*")) == []
 
 

@@ -35,12 +35,11 @@ from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import Model, Package
 
-__all__ = ["is_installed", "pull"]
+__all__ = ["is_installed", "model_present", "pull"]
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
 COMPLETE: Final[str] = ".complete"
-GB: Final[int] = 1024**3
 CHUNK_BYTES: Final[int] = 1024 * 1024
 TIMEOUT_S: Final[float] = 60.0
 USER_AGENT: Final[str] = f"facetmedia/{__version__}"
@@ -116,7 +115,7 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
     lines = [f"python {package.python}", f"environment {env_dir}"]
     total = 0
     for model in package.models:
-        present = _model_present(model, home, verify)
+        present = model_present(model, home, verify)
         if present:
             state = "already present"
         else:
@@ -242,7 +241,7 @@ def _fetch_models(
     records: list[dict[str, object]] = []
     downloaded = 0
     for model in package.models:
-        if _model_present(model, home, verify):
+        if model_present(model, home, verify):
             records.append(_model_record(model, "present"))
             continue
         if model.url:
@@ -262,7 +261,11 @@ def _model_record(model: Model, status: str) -> dict[str, object]:
     }
 
 
-def _model_present(model: Model, home: Home, verify: bool) -> bool:
+def model_present(model: Model, home: Home, verify: bool = False) -> bool:
+    """Whether ``model`` is already under ``<home>/models/direct``.
+
+    ``verify`` recomputes hashes; without it only the byte count is checked.
+    """
     if model.url:
         return _file_ok(home.models_dir / "direct" / model.path, model, verify)
     return _hf_present(model, home, verify)

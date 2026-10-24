@@ -181,7 +181,7 @@ def _handle_check(args: argparse.Namespace) -> int:
         return code
     _capability, package = check.resolve(args.capability)
     mode: lock.LockMode = "exclusive" if package.requirements.exclusive else "shared"
-    wait, wait_timeout = run._lock_params(args)
+    wait, wait_timeout = _lock_params(args)
     with lock.hold(mode, "facet check", wait, wait_timeout):
         data, code = check.reverify(args.capability, args.asset, home, args.run_id)
     contract.emit(contract.ok(data), args.json)

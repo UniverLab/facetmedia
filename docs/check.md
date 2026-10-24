@@ -3,8 +3,9 @@
 `facet check` answers the two questions a client asks before and after
 making something: "can this machine do it?" and "does this asset still
 pass?". Both forms speak the same `--json` contract as everything else and
-never download anything; the machine checks themselves take well under two
-seconds.
+never download anything. The local checks are bounded at two seconds
+(`nvidia-smi` is capped there); the probe, run only when the package is
+installed, is one runner call with a 60 s cap.
 
 ```bash
 facet check echo.text                 # can this machine run echo.text?

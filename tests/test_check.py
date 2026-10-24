@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from facetmedia import check as check_module
+from facetmedia import cli as cli_module
 from facetmedia import record as record_module
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
@@ -137,6 +140,68 @@ def test_check_low_ram_machine_fails_with_exit_5(
     assert data["checks"]["ram"]["ok"] is False
 
 
+def test_check_incompatible_package_fails_with_exit_5(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+
+    code = main(["check", "future.thing", "--json"])
+    data = _data(_envelope(capsys))
+    assert code == EXIT_MACHINE_CANNOT
+    assert data["can_run"] is False
+    assert data["checks"]["compatible"]["ok"] is False
+
+
+def test_check_unsupported_platform_fails_with_exit_5(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    monkeypatch.setattr(check_module.sys, "platform", "darwin")
+
+    code = main(["check", "echo.text", "--json"])
+    data = _data(_envelope(capsys))
+    assert code == EXIT_MACHINE_CANNOT
+    assert data["can_run"] is False
+    assert data["checks"]["platform"]["ok"] is False
+    assert "linux" in str(data["checks"]["platform"]["detail"])
+
+
+def test_check_insufficient_disk_fails_with_exit_5(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    monkeypatch.setattr(check_module.shutil, "disk_usage", lambda _path: SimpleNamespace(free=0))
+
+    code = main(["check", "echo.text", "--json"])
+    data = _data(_envelope(capsys))
+    assert code == EXIT_MACHINE_CANNOT
+    assert data["can_run"] is False
+    assert data["checks"]["disk"]["ok"] is False
+
+
+def test_check_missing_model_reports_needs_pull(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    assert main(["license", "accept", "termsy-weights", "--yes", "--json"]) == 0
+    _envelope(capsys)
+
+    code = main(["check", "termsy.make", "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["can_run"] is True
+    assert data["needs_pull"] is True
+    assert data["checks"]["licenses"] == {
+        "ok": True,
+        "detail": "termsy-weights (CC-BY-NC-4.0): accepted",
+    }
+    assert data["checks"]["models"]["ok"] is False
+
+
 def _piece(directory: Path) -> Path:
     piece = directory / "piece.toml"
     piece.write_text('[inputs]\ntext = "hello"\nrepeat = 2\n', encoding="utf-8")
@@ -152,6 +217,7 @@ def test_reverify_untouched_asset_passes(
     assert code == 0
     _envelope(capsys)
     asset = out / "echo.txt"
+    before = (out / "echo.txt.facet.json").read_bytes()
 
     code = main(["check", "echo.text", str(asset), "--json"])
     data = _data(_envelope(capsys))
@@ -161,7 +227,9 @@ def test_reverify_untouched_asset_passes(
     assert data["fresh"]["metrics"] == {"match": 1}
     assert data["fresh"]["metrics"] == data["recorded"]["metrics"]
     # The record file itself is untouched by the re-verification.
-    assert (out / "echo.txt.facet.json").is_file()
+    record_path = out / "echo.txt.facet.json"
+    assert record_path.is_file()
+    assert record_path.read_bytes() == before
 
 
 def test_reverify_edited_bytes_fails_with_exit_3(
@@ -229,6 +297,7 @@ def test_license_gate_maps_to_exit_4(
     assert code == EXIT_LICENSE_NOT_ACCEPTED
     assert data["can_run"] is False
     assert data["checks"]["licenses"]["ok"] is False
+    assert data["checks"]["licenses"]["detail"] == ("termsy-weights (CC-BY-NC-4.0): not accepted")
 
 
 def test_check_unreadable_meminfo_fails_with_exit_5(
@@ -330,6 +399,65 @@ def _write_echo_record(asset: Path) -> None:
     )
     asset.write_text("hellohello", encoding="utf-8")
     record_module.write_record(asset, record_module.build_record(asset, spec))
+
+
+def _spy_hold(calls: list[tuple[str, str, bool, float]]) -> Any:
+    """A ``lock.hold`` that records its arguments and then takes the real lock."""
+    real = cli_module.lock.hold
+
+    @contextlib.contextmanager
+    def hold(mode: str, purpose: str, wait: bool = True, timeout_s: float = 3600.0) -> Any:
+        calls.append((mode, purpose, wait, timeout_s))
+        with real(mode, purpose, wait, timeout_s):
+            yield
+
+    return hold
+
+
+def test_check_machine_form_takes_no_lock(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    calls: list[tuple[str, str, bool, float]] = []
+    monkeypatch.setattr(cli_module.lock, "hold", _spy_hold(calls))
+
+    assert main(["check", "echo.text", "--json"]) == 0
+    _envelope(capsys)
+    assert calls == []
+
+
+def test_check_asset_takes_a_shared_lock_for_a_light_package(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+) -> None:
+    assert facet_home.is_dir()
+    calls: list[tuple[str, str, bool, float]] = []
+    monkeypatch.setattr(cli_module.lock, "hold", _spy_hold(calls))
+    asset = tmp_path / "echo.txt"
+    _write_echo_record(asset)
+
+    code = main(["check", "echo.text", str(asset), "--json"])
+    assert code == 0
+    _envelope(capsys)
+    assert calls == [("shared", "facet check", True, 3600.0)]
+
+
+def test_check_asset_takes_an_exclusive_lock_for_an_exclusive_package(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+) -> None:
+    assert facet_home.is_dir()
+    calls: list[tuple[str, str, bool, float]] = []
+    monkeypatch.setattr(cli_module.lock, "hold", _spy_hold(calls))
+
+    code = main(["check", "termsy.make", str(tmp_path / "missing.txt"), "--json"])
+    assert code == EXIT_INVALID_INPUT
+    _error(_envelope(capsys))
+    assert calls == [("exclusive", "facet check", True, 3600.0)]
 
 
 def test_reverify_without_an_installed_environment_is_not_installed(

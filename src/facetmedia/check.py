@@ -31,7 +31,7 @@ from typing import Any, Final
 from facetmedia import __version__, licenses, record, runner
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
-from facetmedia.registry import Capability, Package, load_active_registry
+from facetmedia.registry import Capability, Model, Package, load_active_registry
 
 __all__ = [
     "GB",
@@ -345,12 +345,13 @@ def _compatible(package: Package) -> Check:
 def _platform(package: Package) -> Check:
     if sys.platform in package.requirements.platforms:
         return Check(True, f"{sys.platform} in [{', '.join(package.requirements.platforms)}]")
+    supported = ", ".join(package.requirements.platforms)
     error = FacetError(
         "machine_cannot",
         f"{package.name} does not support this platform ({sys.platform})",
         details={"platform": sys.platform, "platforms": list(package.requirements.platforms)},
     )
-    return Check(False, error.message, error)
+    return Check(False, f"{error.message}; supports [{supported}]", error)
 
 
 def _ram(package: Package) -> Check:
@@ -428,22 +429,37 @@ def _installed(package: Package, home: Home) -> Check:
 
 
 def _licenses(package: Package) -> Check:
-    wanted = sum(1 for model in package.models if model.requires_acceptance)
-    try:
-        accepted = licenses.require(package.models)
-    except FacetError as exc:
-        return Check(False, exc.message, exc)
+    wanted = [model for model in package.models if model.requires_acceptance]
     if not wanted:
         return Check(True, "no model requires acceptance")
-    return Check(True, f"{len(accepted)} of {wanted} acceptance(s) recorded")
+    try:
+        licenses.require(package.models)
+    except FacetError as exc:
+        missing = _missing_models(exc)
+        return Check(False, _license_detail(wanted, missing), exc)
+    return Check(True, _license_detail(wanted, set()))
+
+
+def _missing_models(error: FacetError) -> set[str]:
+    """The model ids ``licenses.require`` reported as not accepted."""
+    entries = error.details.get("models")
+    if not isinstance(entries, list):
+        return set()
+    return {str(entry["id"]) for entry in entries if isinstance(entry, dict) and "id" in entry}
+
+
+def _license_detail(wanted: list[Model], missing: set[str]) -> str:
+    """One ``id (spdx): accepted|not accepted`` fragment per model."""
+    return "; ".join(
+        f"{model.id} ({model.spdx}): {'not accepted' if model.id in missing else 'accepted'}"
+        for model in wanted
+    )
 
 
 def _models(package: Package, home: Home) -> Check:
     from facetmedia import env as env_module  # noqa: PLC0415
 
-    missing = [
-        model.id for model in package.models if not env_module._model_present(model, home, False)
-    ]
+    missing = [model.id for model in package.models if not env_module.model_present(model, home)]
     if missing:
         return Check(False, f"missing: {', '.join(missing)}")
     if package.models:
@@ -476,7 +492,10 @@ def _probe(package: Package, home: Home, run_id: str, capability: str, installed
             details={"error": exc.code, **exc.details},
         )
         return Check(False, error.message, error)
-    return _probe_result(outcome.result, temp_dir)
+    result = _probe_result(outcome.result, temp_dir)
+    if result.ok:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return result
 
 
 def _probe_result(result: Any, temp_dir: Path) -> Check:
