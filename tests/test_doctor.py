@@ -683,6 +683,13 @@ def test_quick_doctor_over_its_budget_times_out_as_machine_cannot(
     assert "did not finish within 1.0 s" in checks[0]["detail"]
 
 
+def test_the_quick_budget_is_ten_seconds_for_cold_imports() -> None:
+    """The quick budget leaves room for cold imports of OCP, onnxruntime, CTranslate2."""
+    cold_import_budget_s = 10.0
+    assert cold_import_budget_s == doctor_module.QUICK_TIMEOUT_S
+    assert doctor_module.DOCTOR_TIMEOUTS["quick"] == doctor_module.QUICK_TIMEOUT_S
+
+
 def test_crashing_doctor_is_runner_failed(
     capsys: pytest.CaptureFixture[str], facet_home: Path, swap_echo_runner: Any
 ) -> None:
