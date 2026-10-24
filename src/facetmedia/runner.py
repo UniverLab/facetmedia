@@ -187,6 +187,9 @@ def call(inv: Invocation, verb: str, request: Mapping[str, object]) -> Outcome:
     input_path = inv.temp_dir / REQUEST_NAME
     result_path = inv.temp_dir / RESULT_NAME
     input_path.write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding="utf-8")
+    # run and verify share the temp dir: a result an earlier verb left behind
+    # must never be read as this verb's answer to "did you write a result".
+    result_path.unlink(missing_ok=True)
     argv = build_argv(inv.package, inv.env_dir, verb, input_path, result_path)
     logger.info("runner %s: %s", verb, " ".join(argv))
     tail: deque[str] = deque(maxlen=TAIL_LINES)

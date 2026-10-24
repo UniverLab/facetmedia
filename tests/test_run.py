@@ -88,6 +88,49 @@ def verify(req: Request) -> dict[str, Any]:
 runner.main()
 '''
 
+#: A runner whose verify verb exits 0 without ever writing a result file.
+SILENT_VERIFY_RUNNER = '''"""Echo run; verify exits 0 but writes no result file."""
+
+from __future__ import annotations
+
+import sys
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    text = str(req.inputs["text"])
+    repeat = int(req.inputs.get("repeat", 1))
+    (req.out_dir / "echo.txt").write_text(text * repeat, encoding="utf-8")
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": "echo.txt",
+                "name": "echo",
+                "kind": "text",
+                "mime": "text/plain",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [],
+            }
+        ],
+    }
+
+
+@runner.verb("verify")
+def verify(req: Request) -> dict[str, Any]:
+    sys.exit(0)
+
+
+runner.main()
+'''
+
 #: A runner that prints to stderr and dies before writing any result.
 CRASHING_RUNNER = '''"""Echo run that dies before the result file."""
 
@@ -425,6 +468,24 @@ def test_run_runner_exit_1_is_runner_failed_with_its_output(
     assert Path(error["details"]["log"]).is_file()
     # The temp dir is kept for inspection.
     assert list(out.glob(".facet-tmp-*/.facet-request")) != []
+
+
+def test_run_verify_exit_0_without_a_result_is_runner_failed(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Callable[[str], None],
+) -> None:
+    """The run verb's result is never misread as the verify verb's answer."""
+    swap_echo_runner(SILENT_VERIFY_RUNNER)
+    piece = _piece(tmp_path)
+    out = tmp_path / "out"
+
+    code = main(["run", "echo.text", str(piece), "--out", str(out), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_RUNNER_FAILED
+    assert error["code"] == "runner_failed"
+    assert "wrote no result file" in error["message"]
 
 
 # --- facet killed mid-run and the runner timeout (FR3, FR7).
