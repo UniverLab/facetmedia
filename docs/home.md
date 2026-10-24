@@ -49,11 +49,11 @@ Heavy work takes `state/lock` exclusively, so only one heavy job runs at a
 time: `update`, `pull`, `rm`, `gc`, `license accept`, plus `run` and the asset
 re-verification of `check` when the package manifest sets
 `requirements.exclusive = true` (the default). Light runs take the lock shared
-and overlap; `list`, `describe`, `preview` and a machine-only `check` take no
-lock at all.
+and overlap; [`facet doctor`](doctor.md) takes it shared as well. `list`,
+`describe` and `preview` take no lock at all.
 
-Every verb that locks accepts two flags, except the asset form of `check`,
-which always waits with the defaults:
+Every verb that locks accepts two flags — `doctor` among them — except the
+asset form of `check`, which always waits with the defaults:
 
 ```bash
 facet pull --no-wait              # fail at once instead of waiting

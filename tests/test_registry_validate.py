@@ -42,6 +42,26 @@ spdx = "Apache-2.0"
 """
 
 
+DOCTOR_STUB = '''"""Test runner stub: only the decorator the validator looks for."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
+
 def _problems(root: Path) -> set[tuple[str, str, str]]:
     return {(p["file"], p["key"], p["problem"]) for p in validate_registry(root)}
 
@@ -122,7 +142,7 @@ def test_validate_broken_manifest_still_reports_missing_files(tmp_path: Path) ->
 def test_validate_missing_pyproject_toml(tmp_path: Path) -> None:
     pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
     (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
-    (pkg_dir / "runner.py").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
     assert _problems(tmp_path) == {("packages/missing/pyproject.toml", "", "missing")}
     assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
 
@@ -132,7 +152,7 @@ def test_validate_missing_uv_lock(tmp_path: Path) -> None:
     (pkg_dir / "pyproject.toml").write_text(
         '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
     )
-    (pkg_dir / "runner.py").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
     assert _problems(tmp_path) == {("packages/missing/uv.lock", "", "missing")}
     assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
 
@@ -164,6 +184,35 @@ viewer = "missing"
         '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
     )
     (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
-    (pkg_dir / "runner.py").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
     assert _problems(tmp_path) == {("viewers/missing/index.html", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def _complete_package(tmp_path: Path, runner_text: str) -> Path:
+    """A package whose environment files and manifest are complete."""
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(runner_text, encoding="utf-8")
+    return pkg_dir
+
+
+def test_validate_rejects_a_runner_without_a_doctor_verb(tmp_path: Path) -> None:
+    without_doctor = DOCTOR_STUB.replace('@runner.verb("doctor")', '@runner.verb("run")')
+    _complete_package(tmp_path, without_doctor)
+    found = _problems(tmp_path)
+    assert ("packages/missing/runner.py", "runner.verb", "missing doctor verb") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_runner_that_still_registers_probe(tmp_path: Path) -> None:
+    probe_runner = (
+        DOCTOR_STUB + '\n@runner.verb("probe")\ndef probe(req: object) -> dict:\n    return {}\n'
+    )
+    _complete_package(tmp_path, probe_runner)
+    found = _problems(tmp_path)
+    assert ("packages/missing/runner.py", "runner.verb", "rename probe to doctor") in found
     assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID

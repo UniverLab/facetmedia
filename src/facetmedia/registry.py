@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -48,6 +49,11 @@ __all__ = [
     "snapshot_identity",
     "validate_registry",
 ]
+
+#: The runner verb registrations the validator looks for in an entry file.
+DOCTOR_VERB_RE: re.Pattern[str] = re.compile(r"""@runner\.verb\(\s*['"]doctor['"]\s*\)""")
+PROBE_VERB_RE: re.Pattern[str] = re.compile(r"""@runner\.verb\(\s*['"]probe['"]\s*\)""")
+RUNNER_VERB_KEY: str = "runner.verb"
 
 
 def _load(root: Path) -> tuple[Registry | None, list[Problem]]:
@@ -112,8 +118,11 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
     viewers: set[str] = set()
     for package in registry.packages.values():
         base = f"packages/{package.name}"
-        if not (package.directory / package.entry).is_file():
+        entry_file = package.directory / package.entry
+        if not entry_file.is_file():
             problems.append(Problem(f"{base}/{package.entry}", "", "missing"))
+        else:
+            problems.extend(_verb_problems(f"{base}/{package.entry}", entry_file))
         for capability in package.capabilities:
             if capability.viewer in viewers:
                 continue
@@ -122,6 +131,24 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
             if not viewer_file.is_file():
                 problems.append(Problem(f"viewers/{capability.viewer}/index.html", "", "missing"))
     return problems
+
+
+def _verb_problems(file: str, entry_file: Path) -> list[Problem]:
+    """The runner verb problems of one entry file, found by a static parse.
+
+    No environment is needed: the entry is text, and the validator looks for
+    the two decorator registrations the protocol names.
+    """
+    try:
+        text = entry_file.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    found: list[Problem] = []
+    if not DOCTOR_VERB_RE.search(text):
+        found.append(Problem(file, RUNNER_VERB_KEY, "missing doctor verb"))
+    if PROBE_VERB_RE.search(text):
+        found.append(Problem(file, RUNNER_VERB_KEY, "rename probe to doctor"))
+    return found
 
 
 def override_dir() -> Path | None:

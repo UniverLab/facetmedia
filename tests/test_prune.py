@@ -42,6 +42,11 @@ def run(req: Request) -> dict[str, object]:
     raise SystemExit(1)
 
 
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, object]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
 runner.main()
 '''
 

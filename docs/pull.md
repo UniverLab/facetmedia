@@ -19,8 +19,10 @@ facet pull kokoro --verify-models   # recompute sha256 of models already present
 ## What it checks first
 
 Nothing is written or downloaded until every check passes. This is the same
-gate [`facet check`](check.md) reports, in this order; each refusal is
-`machine_cannot` (exit 5), except the licence check, which has its own error:
+gate [`facet doctor`](doctor.md) reports, in this order — plus the package's
+`doctor` verb at `quick` depth when the environment is already installed —
+and each refusal is `machine_cannot` (exit 5), except the licence check,
+which has its own error:
 
 - the package is `compatible` with this facet version, with the hint
   `facet update, or upgrade facet`;

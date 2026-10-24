@@ -23,6 +23,14 @@ from typing import Any, Final, NoReturn
 __all__ = ["Request", "Runner"]
 
 PROTOCOL_VERSION: Final[int] = 1
+#: The default depth for a request that carries none (older callers).
+DEFAULT_DEPTH: Final[str] = "quick"
+#: What the SDK answers when a package never registered its ``doctor`` verb.
+NO_DOCTOR: Final[dict[str, Any]] = {
+    "ok": False,
+    "detail": "this package has no doctor",
+    "fix": "report it to the package's maintainer",
+}
 
 
 class Request:
@@ -31,7 +39,10 @@ class Request:
     ``inputs`` is the piece's inputs after schema validation (defaults
     filled, paths resolved absolute); ``out_dir`` is the temporary directory
     the runner writes its assets into; ``assets`` names the produced files
-    and is only filled for ``verify`` and ``preview``.
+    and is only filled for ``verify`` and ``preview``; ``depth`` is the
+    ``doctor`` verb's requested depth, ``"quick"`` (imports, files, versions;
+    about 2 s, writes nothing) or ``"full"`` (may run the tool once on a
+    throwaway output; up to 30 s).
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -39,6 +50,7 @@ class Request:
         self.verb: str = str(data.get("verb", ""))
         self.capability: str = str(data.get("capability", ""))
         self.protocol: int = int(data.get("protocol", 0))
+        self.depth: str = str(data.get("depth", DEFAULT_DEPTH))
         self.inputs: dict[str, Any] = _mapping(data.get("inputs"))
         self.out_dir: Path = Path(str(data.get("out_dir", "")))
         self.piece_dir: Path = Path(str(data.get("piece_dir", "")))
@@ -95,19 +107,31 @@ class Runner:
             return 1
         handler = self._verbs.get(verb)
         if handler is None:
+            if verb == "doctor":
+                # A package without a doctor still answers: the SDK writes the
+                # no-doctor verdict and exits 0; facet reports it as a check.
+                return _write(result_path, NO_DOCTOR)
             known = ", ".join(sorted(self._verbs)) or "none"
             print(f"unknown verb: {verb} (this runner has: {known})", file=sys.stderr)
             return 1
         try:
             request = Request.from_file(input_path)
             result = handler(request)
-            result_path.write_text(
-                json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
-            )
         except Exception:
             traceback.print_exc()
             return 1
-        return 0
+        return _write(result_path, result)
+
+
+def _write(result_path: Path, result: Any) -> int:
+    try:
+        result_path.write_text(
+            json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        traceback.print_exc()
+        return 1
+    return 0
 
 
 def _parse_argv(argv: list[str]) -> tuple[str, Path, Path]:

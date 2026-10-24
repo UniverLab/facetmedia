@@ -30,7 +30,7 @@ from typing import IO, Any, Final
 import uv
 
 from facetmedia import __version__
-from facetmedia import check as check_module
+from facetmedia import doctor as doctor_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import Model, Package
@@ -63,10 +63,12 @@ def is_installed(package: Package, home: Home) -> bool:
     return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
 
 
-def pull(package: Package, home: Home, verify_models: bool = False) -> dict[str, object]:
+def pull(
+    package: Package, home: Home, verify_models: bool = False, run_id: str = ""
+) -> dict[str, object]:
     """Install ``package`` into ``home``; returns the ``facet pull`` result."""
     started = time.monotonic()
-    _preflight(package, home)
+    _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
     up_to_date = _is_complete(env_dir, package.lock_sha256)
@@ -90,15 +92,15 @@ def pull(package: Package, home: Home, verify_models: bool = False) -> dict[str,
 # --- FR2 preflight: nothing is written or downloaded before all of this passes.
 
 
-def _preflight(package: Package, home: Home) -> None:
+def _preflight(package: Package, home: Home, run_id: str) -> None:
     """The FR2 checks, in order, before any disk or network write.
 
-    The checks themselves live in ``facetmedia.check`` so ``facet check``
-    reports exactly what ``pull`` refuses; only the probe (which needs an
-    installed environment) is ``check``-only.
+    The checks themselves live in ``facetmedia.doctor`` so ``facet doctor``
+    reports exactly what ``pull`` refuses; the package doctor (which needs an
+    installed environment) is skipped until one is there.
     """
     require_posix()
-    errors = check_module.requirement_errors(package, home)
+    errors = doctor_module.requirement_errors(package, home, run_id)
     if errors:
         raise errors[0]
 

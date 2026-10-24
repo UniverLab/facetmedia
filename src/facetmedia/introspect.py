@@ -13,7 +13,7 @@ import json
 import math
 from typing import Any
 
-from facetmedia import check, env, licenses, schema
+from facetmedia import check, doctor, env, licenses, schema
 from facetmedia.contract import CONTRACT_VERSION
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry, snapshot_identity
@@ -49,7 +49,7 @@ def _package_row(package: Package, home: Home) -> dict[str, Any]:
         "provider": package.provider,
         "compatible": package.compatible,
         "installed": installed,
-        "env_bytes": check.tree_bytes(env_dir) if installed else 0,
+        "env_bytes": doctor.tree_bytes(env_dir) if installed else 0,
         "models_bytes": sum(
             model.bytes for model in package.models if env.model_present(model, home)
         ),

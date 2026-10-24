@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from facetmedia import check as check_module
+from facetmedia import doctor as doctor_module
 from facetmedia import record, runner, runner_sdk
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
@@ -87,6 +87,11 @@ def verify(req: Request) -> dict[str, Any]:
     }
 
 
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
 runner.main()
 '''
 
@@ -130,6 +135,11 @@ def verify(req: Request) -> dict[str, Any]:
     sys.exit(0)
 
 
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
 runner.main()
 '''
 
@@ -150,6 +160,11 @@ runner = Runner()
 def run(req: Request) -> dict[str, Any]:
     print("boom happened", file=sys.stderr)
     raise SystemExit(1)
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
 
 
 runner.main()
@@ -174,6 +189,11 @@ def run(req: Request) -> dict[str, Any]:
     (req.out_dir / "pgid.txt").write_text(str(os.getpgid(0)), encoding="utf-8")
     time.sleep(600)
     return {"tool": {"name": "echo", "version": "0.1.0"}, "assets": []}
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
 
 
 runner.main()
@@ -409,7 +429,7 @@ def test_run_refuses_a_machine_that_cannot_before_pulling(
 ) -> None:
     monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
     _registry(monkeypatch)
-    monkeypatch.setattr(check_module, "mem_total_gb", lambda: 0.05)
+    monkeypatch.setattr(doctor_module, "mem_total_gb", lambda: 0.05)
     piece = _piece(tmp_path)
 
     code = main(["run", "echo.text", str(piece), "--no-pull", "--json"])

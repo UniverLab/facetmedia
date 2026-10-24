@@ -22,6 +22,14 @@ packages/<package>/runner.py         # the package runner
 viewers/<viewer>/index.html          # person-facing viewers
 ```
 
+A package is finished with its input `schema`, the runner verbs `run`,
+`verify` and `preview`, and its `doctor` — the package's own answer to
+[`facet doctor`](doctor.md) at the `quick` and `full` depths. The runner SDK
+(`facet_runner_sdk`, copied into every environment) is how a runner declares
+them; see [run.md](run.md#the-runner-protocol) for the protocol and
+[doctor.md](doctor.md#writing-a-packages-doctor-with-the-sdk) for writing the
+doctor.
+
 ## `index.toml`
 
 ```toml
@@ -284,7 +292,10 @@ facet registry validate <dir> --json
 
 It loads the registry and reports **every** problem at once, not only the
 first. Beyond the manifests it checks that each package directory has its
-`pyproject.toml`, `uv.lock`, and `entry`; that every viewer named by a
+`pyproject.toml`, `uv.lock`, and `entry`; that each entry registers
+`@runner.verb("doctor")` (a static parse of the entry file — no environment
+is needed) and no longer registers `probe`, which is `rename probe to
+doctor`; that every viewer named by a
 capability has a `viewers/<viewer>/index.html`; and that model ids are unique
 across the registry. Exit `0` when the registry is clean and `2` otherwise.
 Run it in the registry's CI before merging a package.

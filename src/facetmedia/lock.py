@@ -105,8 +105,12 @@ def _write_holder(home: Home, purpose: str) -> None:
     )
 
 
-def _holder_lines(home: Home) -> tuple[str | None, str | None]:
-    """``(live holder text, stale note)`` from ``lock.json``; each may be ``None``."""
+def holder_info(home: Home) -> tuple[str | None, str | None]:
+    """``(live holder text, stale note)`` from ``lock.json``; each may be ``None``.
+
+    Only the ``flock`` decides who holds the lock; this names the holder when
+    the file is truthful and reports — never removes — stale information.
+    """
     try:
         info = read_json(home.lock_json, None)
     except FacetError as exc:
@@ -123,7 +127,7 @@ def _holder_lines(home: Home) -> tuple[str | None, str | None]:
 
 def _announce_wait(home: Home) -> None:
     """Print the one waiting line — or the stale-info report — to stderr."""
-    holder, stale = _holder_lines(home)
+    holder, stale = holder_info(home)
     if holder is not None:
         print(f"waiting for the facet lock, held by {holder}", file=sys.stderr)
     elif stale is not None:
@@ -134,7 +138,7 @@ def _announce_wait(home: Home) -> None:
 
 def _busy_error(home: Home) -> FacetError:
     """The ``lock_busy`` failure, naming the holder when lock.json knows it."""
-    holder, stale = _holder_lines(home)
+    holder, stale = holder_info(home)
     if holder is not None:
         return FacetError(
             "lock_busy",

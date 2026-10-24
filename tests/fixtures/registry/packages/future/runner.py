@@ -1,16 +1,35 @@
-"""Stdlib runner placeholder for the future fixture package."""
+"""Runner for the future fixture package, written on the runner SDK.
+
+The package is incompatible with every current facet release, but its entry
+still registers the verbs ``facet registry validate`` requires.
+"""
 
 from __future__ import annotations
 
-import json
-import sys
-from pathlib import Path
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
 
 
-def main(argv: list[str]) -> int:
-    Path(argv[2]).write_text(json.dumps({"tool": {"name": "future", "version": "0.1.0"}}))
-    return 0
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    return {"tool": {"name": "future", "version": "0.1.0"}, "assets": []}
 
 
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {
+        "checks": [
+            {
+                "name": "runner",
+                "ok": True,
+                "detail": f"future doctor ready ({req.depth})",
+                "fix": "",
+            }
+        ]
+    }
+
+
+runner.main()

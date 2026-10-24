@@ -2,7 +2,9 @@
 
 `run` writes ``echo.txt`` holding ``text`` repeated ``repeat`` times;
 ``verify`` passes when the file's content equals the expected text;
-``preview`` writes the text preview file; ``probe`` answers ok.
+``preview`` writes the text preview file; ``doctor`` answers at both depths:
+``quick`` imports and reports without writing, ``full`` also writes one
+throwaway word into the temp directory.
 """
 
 from __future__ import annotations
@@ -78,9 +80,22 @@ def preview(req: Request) -> dict[str, Any]:
     return {"assets": entries}
 
 
-@runner.verb("probe")
-def probe(req: Request) -> dict[str, Any]:
-    return {"ok": True, "detail": f"{req.capability} echo runner is ready"}
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = [
+        {
+            "name": "imports",
+            "ok": True,
+            "detail": f"{req.capability} echo runner imports ({req.depth})",
+            "fix": "",
+        }
+    ]
+    if req.depth == "full":
+        (req.out_dir / "doctor-word.txt").write_text("echo\n", encoding="utf-8")
+        checks.append(
+            {"name": "synthesis", "ok": True, "detail": "wrote one throwaway word", "fix": ""}
+        )
+    return {"checks": checks}
 
 
 runner.main()

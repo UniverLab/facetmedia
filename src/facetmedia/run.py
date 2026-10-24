@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from facetmedia import __version__, check, env, licenses, prune, record, runner, schema
+from facetmedia import __version__, doctor, env, licenses, prune, record, runner, schema
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
@@ -69,10 +69,10 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     """Run one piece; returns the ``--json`` data and the process exit code."""
     piece, piece_dir = _read_piece(args.piece)
     capability, package = _resolve_capability(args.capability)
-    _require_machine(package)
+    _require_machine(package, run_id)
     home = Home.from_env()
     ephemeral = _ephemeral(args, package, home)
-    pulled, downloaded = _ensure_installed(args, package)
+    pulled, downloaded = _ensure_installed(args, package, run_id)
     try:
         accepted = tuple(licenses.require(package.models))
         job = RunJob(
@@ -190,14 +190,14 @@ def _resolve_capability(capability_id: str) -> tuple[Capability, Package]:
     return capability, package
 
 
-def _require_machine(package: Package) -> None:
-    """The ``facet check`` gate, before anything is pulled, planned or run."""
-    errors = check.requirement_errors(package, Home.from_env())
+def _require_machine(package: Package, run_id: str) -> None:
+    """The readiness gate plus the quick doctor, before anything is planned."""
+    errors = doctor.requirement_errors(package, Home.from_env(), run_id)
     if errors:
         raise errors[0]
 
 
-def _ensure_installed(args: argparse.Namespace, package: Package) -> tuple[bool, int]:
+def _ensure_installed(args: argparse.Namespace, package: Package, run_id: str) -> tuple[bool, int]:
     """Pull the package when needed; ``--no-pull`` refuses an absent env."""
     home = Home.from_env()
     if env.is_installed(package, home):
@@ -211,7 +211,7 @@ def _ensure_installed(args: argparse.Namespace, package: Package) -> tuple[bool,
         )
     wait, wait_timeout = _lock_params(args)
     with hold("exclusive", "facet run pull", wait, wait_timeout):
-        report = env.pull(package, home)
+        report = env.pull(package, home, run_id=run_id)
     downloaded = report.get("downloaded_bytes", 0)
     return True, downloaded if isinstance(downloaded, int) else 0
 

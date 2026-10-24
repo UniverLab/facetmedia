@@ -37,9 +37,10 @@ read from stdin, for clients that build pieces in memory.
 
 1. The capability is resolved from the registry; an unknown id is
    `invalid_input` with the known ids.
-2. Before anything is pulled, the machine gate of [`facet check`](check.md)
-   runs (compatibility, platform, RAM, disk, GPU, host libraries and model
-   acceptance); a refusal is `machine_cannot` (exit 5) or
+2. Before anything is pulled, the machine gate of [`facet doctor`](doctor.md)
+   runs (compatibility, platform, RAM, disk, GPU, host libraries, model
+   acceptance, and — when the environment is already installed — the package's
+   `doctor` verb at `quick` depth); a refusal is `machine_cannot` (exit 5) or
    `license_not_accepted` (exit 4) for a model whose terms were not accepted
    with `facet license accept`.
 3. If the package is not installed, it is pulled first (same lock rules and
@@ -109,10 +110,14 @@ interpreter, `{{entry}}` = the runner script, `{{verb}}`, `{{input}}` and
 `{{result}}`. facet writes a request file (`{"protocol": 1, "verb",
 "capability", "inputs", "out_dir", "piece_dir", "models", "assets"}`, where
 `models` maps each model id to its absolute path under
-`~/.facet/models/direct`) and the runner writes a result file: for `run`, its
+`~/.facet/models/direct`; the `doctor` verb also carries `"depth"`: `"quick"`
+or `"full"`) and the runner writes a result file: for `run`, its
 tool and one entry per produced asset (file, name, kind, mime, properties,
-params, seed, inputs); for `verify`, one verdict per asset; `preview` and
-`probe` serve `facet preview` and `facet check`. A `file` is one bare name
+params, seed, inputs); for `verify`, one verdict per asset; for `doctor`, a
+`checks` list of `{"name", "ok", "detail", "fix"}`; `preview` and `doctor`
+serve `facet preview` and [`facet doctor`](doctor.md) — `quick` finishes in
+about 2 s and writes nothing, `full` may take up to 30 s and may write a
+throwaway output facet removes. A `file` is one bare name
 inside the temporary directory — never a path, and never the reserved
 `.facet-` prefix. The runner's environment is facet's own plus `FACET_MODELS`
 (that models directory) and an empty `CUDA_VISIBLE_DEVICES` when the manifest
@@ -137,5 +142,9 @@ runner.main()
 
 `req` carries the request: `inputs` (validated, defaults filled, paths
 absolute), `out_dir`, `piece_dir`, `assets` (the files to judge, on `verify`
-and `preview`) and `model_path(id)`. An unknown verb or an exception exits 1
-with the reason on stderr, which facet turns into `runner_failed`.
+and `preview`), `depth` (on `doctor`: `quick` or `full`) and
+`model_path(id)`. An unknown verb or an exception exits 1
+with the reason on stderr, which facet turns into `runner_failed`; the one
+exception is a `doctor` verb the package never registered, which the SDK
+answers with `{"ok": false, "detail": "this package has no doctor", "fix":
+"report it to the package's maintainer"}` and exit 0.

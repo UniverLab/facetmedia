@@ -14,12 +14,14 @@ from facetmedia import (
     __version__,
     check,
     contract,
+    doctor,
     env,
     introspect,
     licenses,
     lock,
     preview,
     prune,
+    record,
     registry,
     run,
     update,
@@ -37,7 +39,8 @@ _VERBS: tuple[tuple[str, str], ...] = (
     ("pull", "install a tool into its own pinned environment"),
     ("list", "list installed and available tools"),
     ("describe", "show a tool's manifest"),
-    ("check", "report machine readiness or re-verify an asset"),
+    ("doctor", "report facet, this machine's readiness and each package's doctor"),
+    ("check", "re-verify an asset against its record"),
     ("run", "run a tool through the --json contract"),
     ("preview", "render a tool's output for a person"),
     ("rm", "remove an installed tool"),
@@ -51,9 +54,8 @@ _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
 
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
 # describe, preview, license list) take no lock and reject them. `check`
-# without an asset takes no lock (a machine-only report); with an asset it
 # holds the lock itself, so it also rejects the flags.
-_LOCK_VERBS: frozenset[str] = frozenset({"gc", "pull", "rm", "run", "update"})
+_LOCK_VERBS: frozenset[str] = frozenset({"doctor", "gc", "pull", "rm", "run", "update"})
 
 
 class FacetParser(argparse.ArgumentParser):
@@ -143,7 +145,9 @@ def _handle_pull(args: argparse.Namespace) -> int:
                 f"unknown package: {args.package}",
                 details={"known": sorted(active.packages)},
             )
-        report = env.pull(package, Home.from_env(), verify_models=args.verify_models)
+        report = env.pull(
+            package, Home.from_env(), verify_models=args.verify_models, run_id=args.run_id
+        )
     contract.emit(contract.ok(report), args.json)
     if not args.json:
         _announce_pull(report)
@@ -184,42 +188,88 @@ def _announce_run(data: dict[str, object]) -> None:
 
 
 def _handle_check(args: argparse.Namespace) -> int:
-    """Machine-only `check` takes no lock; re-verifying an asset holds it."""
+    """Content only: one asset, the lock per its manifest, re-verification."""
     home = Home.from_env()
-    if args.asset is None:
-        data, code = check.run_check(args.capability, home, args.run_id)
-        contract.emit(contract.ok(data), args.json)
-        if not args.json:
-            _announce_check(data)
-        return code
-    _capability, package = check.resolve(args.capability)
+    capability = _check_capability(args.asset)
+    _capability, package = check.resolve(capability)
     mode: lock.LockMode = "exclusive" if package.requirements.exclusive else "shared"
     wait, wait_timeout = _lock_params(args)
     with lock.hold(mode, "facet check", wait, wait_timeout):
-        data, code = check.reverify(args.capability, args.asset, home, args.run_id)
+        data, code = check.reverify(args.asset, home, args.run_id)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         _announce_reverify(data)
     return code
 
 
-def _announce_check(data: dict[str, object]) -> None:
-    state = "can run" if data.get("can_run") is True else "cannot run"
-    suffix = ", needs pull" if data.get("needs_pull") is True else ""
-    print(f"{data.get('capability')}: {state}{suffix}")
-    checks = data.get("checks")
-    if not isinstance(checks, dict):
-        return
-    for name, entry in checks.items():
-        if not isinstance(entry, dict):
-            continue
-        mark = "ok" if entry.get("ok") is True else "FAIL"
-        print(f"  {mark} {name}: {entry.get('detail')}")
+def _check_capability(asset: str) -> str:
+    """The record's capability; a capability id is a doctor target, not an asset."""
+    path = Path(asset)
+    bare = path
+    if path.name.endswith(record.RECORD_SUFFIX):
+        bare = Path(str(path)[: -len(record.RECORD_SUFFIX)])
+    if path.is_file() or bare.is_file():
+        return check.record_capability(asset)
+    if doctor.is_known_target(asset, Home.from_env()):
+        raise FacetError(
+            "invalid_input",
+            f"{asset} is a capability id; facet check re-verifies an asset",
+            hint=f"facet doctor {asset}",
+            details={"target": asset},
+        )
+    raise FacetError("invalid_input", f"{asset}: no such asset file")
 
 
 def _announce_reverify(data: dict[str, object]) -> None:
     state = "passed" if data.get("passed") is True else "failed"
     print(f"{data.get('asset')} {state}")
+
+
+def _handle_doctor(args: argparse.Namespace) -> int:
+    """The tool's doctor: the facet section plus each package's doctor."""
+    data, code = doctor.execute(args.target, bool(args.quick), args.run_id, *_lock_params(args))
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_doctor(data)
+    return code
+
+
+def _announce_doctor(data: dict[str, object]) -> None:
+    state = "healthy" if data.get("healthy") is True else "unhealthy"
+    capability = data.get("capability")
+    prefix = f"{capability}: " if isinstance(capability, str) else ""
+    suffix = ""
+    if data.get("needs_pull") is True:
+        suffix = ", needs pull"
+    print(f"{prefix}{state}{suffix}")
+    facet = data.get("facet")
+    if isinstance(facet, dict) and facet:
+        print("facet:")
+        _announce_checks(facet)
+    packages = data.get("packages")
+    for name, section in packages.items() if isinstance(packages, dict) else []:
+        if not isinstance(section, dict):
+            continue
+        mark = "installed" if section.get("installed") is True else "not installed"
+        print(f"{name} ({mark}):")
+        readiness = section.get("readiness")
+        if isinstance(readiness, dict):
+            _announce_checks(readiness)
+        doctor_checks = section.get("doctor")
+        if isinstance(doctor_checks, list):
+            _announce_checks({str(entry.get("name", "doctor")): entry for entry in doctor_checks})
+
+
+def _announce_checks(checks: dict[str, object]) -> None:
+    """One ``✓/✗ name: detail`` line per check, with its fix when it failed."""
+    for name, entry in checks.items():
+        if not isinstance(entry, dict):
+            continue
+        mark = "✓" if entry.get("ok") is True else "✗"
+        print(f"  {mark} {name}: {entry.get('detail')}")
+        fix = entry.get("fix")
+        if mark == "✗" and isinstance(fix, str) and fix:
+            print(f"    → fix: {fix}")
 
 
 def _handle_preview(args: argparse.Namespace) -> int:
@@ -343,6 +393,7 @@ def _describe_inputs(data: dict[str, object]) -> str:
 _HANDLERS: dict[str, Handler] = {
     "check": _handle_check,
     "describe": _handle_describe,
+    "doctor": _handle_doctor,
     "gc": _handle_gc,
     "list": _handle_list,
     "preview": _handle_preview,
@@ -499,12 +550,23 @@ def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_check_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("capability", help="registry capability id to check")
     parser.add_argument(
         "asset",
+        help="asset or record to re-verify against its facet record",
+    )
+
+
+def _add_doctor_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "target",
         nargs="?",
-        default=None,
-        help="asset or record to re-verify (without it, facet reports machine readiness)",
+        default="",
+        help="package name or capability id (default: facet and every installed package)",
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="run only the quick depth of the package doctors (about 2 s each)",
     )
 
 
@@ -608,6 +670,8 @@ def build_parser() -> FacetParser:
             _add_describe_flags(verb_parser)
         elif verb == "pull":
             _add_pull_flags(verb_parser)
+        elif verb == "doctor":
+            _add_doctor_flags(verb_parser)
         elif verb == "check":
             _add_check_flags(verb_parser)
         elif verb == "rm":

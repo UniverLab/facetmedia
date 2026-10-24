@@ -40,6 +40,7 @@ __all__ = [
     "dir_bytes",
     "gc_sweep",
     "model_dirnames",
+    "orphans",
     "record_leftover",
     "rm_env",
     "rm_package",
@@ -226,6 +227,15 @@ def _installed_model_dirnames(home: Home, registry: Registry, exclude: str) -> s
 
 
 # --- facet gc.
+
+
+def orphans(home: Home, registry: Registry) -> list[GcItem]:
+    """Environments and models no installed package references: what ``gc`` frees.
+
+    Only these two families, so ``facet doctor`` can report the disk an
+    orphaned install is holding without listing logs or scratch as a problem.
+    """
+    return [*_env_items(home, registry), *_model_items(home, registry)]
 
 
 def gc_sweep(home: Home, registry: Registry, dry_run: bool = False) -> dict[str, object]:
