@@ -5,6 +5,7 @@ protocol = 1
 provider = "facet"
 tool_name = "Echo"
 description = "Echo text back; the dependency-free registry fixture."
+facet = "text"
 
 [engine]
 type = "python-env"

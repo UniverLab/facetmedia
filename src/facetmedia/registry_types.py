@@ -27,6 +27,16 @@ DEFAULT_INVOCATION_TEMPLATE: Final[str] = (
 CAPABILITY_KINDS: Final[frozenset[str]] = frozenset(
     {"audio", "video", "image", "cad", "presentation", "text"}
 )
+FACETS: Final[tuple[str, ...]] = (
+    "voice",
+    "audio",
+    "image",
+    "video",
+    "cad",
+    "text",
+    "presentation",
+)
+WEIGHT_LIMIT: Final[int] = 100_000_000
 FIELD_TYPES: Final[frozenset[str]] = frozenset(
     {"string", "integer", "number", "boolean", "enum", "path", "array"}
 )
@@ -141,6 +151,7 @@ class Package:
     provider: str
     tool_name: str
     description: str
+    facet: str
     engine_type: str
     python: str
     transport_type: str
@@ -191,6 +202,22 @@ class Package:
                 "protocol": self.protocol,
             },
         )
+
+
+def weight(package: Package) -> str:
+    """The package's weight: ``light``, ``cpu-heavy`` or ``gpu``.
+
+    Derived from the manifest, never declared: a GPU package is ``gpu``;
+    otherwise a package that needs the lock alone (``exclusive``) or ships
+    more than :data:`WEIGHT_LIMIT` model bytes is ``cpu-heavy``.
+    """
+    if package.requirements.gpu:
+        return "gpu"
+    if package.requirements.exclusive:
+        return "cpu-heavy"
+    if sum(model.bytes for model in package.models) > WEIGHT_LIMIT:
+        return "cpu-heavy"
+    return "light"
 
 
 @dataclass(frozen=True)

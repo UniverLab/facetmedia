@@ -81,18 +81,20 @@ def test_default_list_is_installed_only(
     assert data["registry"] == {"path": str(FIXTURES)}
 
 
-def test_human_list_available_is_three_sorted_lines(
+def test_human_list_available_is_grouped_by_facet(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
     assert main(["list", "--available"]) == 0
-    lines = capsys.readouterr().out.splitlines()
-    assert lines == [
-        "echo.text  text  Echo text back, repeated.",
-        "future.thing  text  A capability from the future.",
-        "termsy.make  text  Make one termsy asset.",
+    assert capsys.readouterr().out.splitlines() == [
+        "text:",
+        "  echo  light",
+        "    echo.text  text  Echo text back, repeated.",
+        "  future  cpu-heavy",
+        "    future.thing  text  A capability from the future.",
+        "  termsy  cpu-heavy",
+        "    termsy.make  text  Make one termsy asset.",
     ]
-    assert lines == sorted(lines)
 
 
 def test_fake_installed_echo_is_listed_alone(
@@ -116,18 +118,54 @@ def test_fake_installed_echo_is_listed_alone(
     assert rows[0]["env_bytes"] == len(echo.lock_sha256) + 7
 
     assert main(["list"]) == 0
-    assert capsys.readouterr().out == "echo.text  text  Echo text back, repeated.  [installed]\n"
+    assert capsys.readouterr().out == (
+        "text:\n  echo  light  [installed]\n    echo.text  text  Echo text back, repeated.\n"
+    )
 
 
 @pytest.mark.parametrize(
     "argv",
-    [["list", "--no-wait"], ["describe", "echo.text", "--no-wait"]],
+    [
+        ["list", "--no-wait"],
+        ["describe", "echo.text", "--no-wait"],
+        ["skill", "--no-wait"],
+    ],
     ids=" ".join,
 )
 def test_lock_flags_are_rejected(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exit_info:
         main(argv)
     assert exit_info.value.code == EXIT_USAGE
+
+
+def test_list_facet_filter_keeps_one_facet(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["list", "--available", "--facet", "text", "--json"]) == 0
+    rows = _data(capsys)["packages"]
+    assert [row["name"] for row in rows] == ["echo", "future", "termsy"]
+    assert {row["facet"] for row in rows} == {"text"}
+    assert {row["weight"] for row in rows} == {"light", "cpu-heavy"}
+    assert main(["list", "--available", "--facet", "voice", "--json"]) == 0
+    assert _data(capsys)["packages"] == []
+    assert main(["list", "--available", "--facet", "voice"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_describe_carries_facet_weight_and_skill(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["describe", "echo.text", "--json"]) == 0
+    data = _data(capsys)
+    assert data["facet"] == "text"
+    assert data["weight"] == "light"
+    assert data["skill"] == "facet skill echo"
+    assert main(["describe", "termsy.make", "--json"]) == 0
+    data = _data(capsys)
+    assert (data["facet"], data["weight"]) == ("text", "cpu-heavy")
+    assert data["skill"] == "facet skill termsy"
 
 
 def test_unknown_capability_is_invalid_input(

@@ -2,6 +2,7 @@
   "capability": "echo.text",
   "contract": 1,
   "download_bytes": 0,
+  "facet": "text",
   "inputs": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -54,8 +55,10 @@
     ],
     "ram_gb": 0.1
   },
+  "skill": "facet skill echo",
   "summary": "Echo text back, repeated.",
   "verify": {
     "thresholds": {}
-  }
+  },
+  "weight": "light"
 }

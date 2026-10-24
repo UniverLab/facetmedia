@@ -30,6 +30,7 @@ from facetmedia.registry_types import (
     Registry,
     Requirements,
 )
+from facetmedia.skill import validate_skill
 
 __all__ = [
     "PROTOCOL_VERSION",
@@ -123,6 +124,13 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
             problems.append(Problem(f"{base}/{package.entry}", "", "missing"))
         else:
             problems.extend(_verb_problems(f"{base}/{package.entry}", entry_file))
+        problems.extend(
+            validate_skill(
+                package.directory,
+                package.name,
+                tuple(cap.id for cap in package.capabilities),
+            )
+        )
         for capability in package.capabilities:
             if capability.viewer in viewers:
                 continue

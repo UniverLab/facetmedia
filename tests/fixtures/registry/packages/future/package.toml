@@ -5,6 +5,7 @@ protocol = 1
 provider = "facet"
 tool_name = "Future"
 description = "Declares a facet requirement no current release satisfies."
+facet = "text"
 
 [engine]
 type = "python-env"

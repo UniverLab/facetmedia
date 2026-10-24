@@ -19,6 +19,7 @@ from packaging.version import InvalidVersion, Version
 from facetmedia.registry_types import (
     CAPABILITY_KINDS,
     DEFAULT_INVOCATION_TEMPLATE,
+    FACETS,
     FIELD_TYPES,
     MISSING,
     Capability,
@@ -70,6 +71,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "provider",
         "tool_name",
         "description",
+        "facet",
         "engine",
         "transport",
         "requirements",
@@ -302,6 +304,7 @@ class RegistryLoader:
         provider = self.string(data, "provider", file, "", required=True)
         tool_name = self.string(data, "tool_name", file, "", required=True)
         description = self.string(data, "description", file, "", required=True)
+        facet = self.facet(data, file)
         engine_type, python = self.engine(data, file)
         transport_type, entry, template = self.transport(data, file)
         requirements = self.requirements(data, file)
@@ -317,6 +320,7 @@ class RegistryLoader:
             or provider is None
             or tool_name is None
             or description is None
+            or facet is None
         ):
             return None
         return Package(
@@ -327,6 +331,7 @@ class RegistryLoader:
             provider=provider,
             tool_name=tool_name,
             description=description,
+            facet=facet,
             engine_type=engine_type,
             python=python,
             transport_type=transport_type,
@@ -360,6 +365,15 @@ class RegistryLoader:
             self.add(file, "requires_facet", "value")
             return None
         return specifier
+
+    def facet(self, data: Mapping[str, Any], file: str) -> str | None:
+        value = self.string(data, "facet", file, "", required=True)
+        if value is None:
+            return None
+        if value not in FACETS:
+            self.add(file, "facet", f"value: one of {', '.join(FACETS)}")
+            return None
+        return value
 
     def engine(self, data: Mapping[str, Any], file: str) -> tuple[str, str]:
         table = self.table(data, "engine", file, "", required=True)

@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -18,6 +19,7 @@ protocol = 1
 provider = "test"
 tool_name = "Test"
 description = "test"
+facet = "text"
 
 [engine]
 type = "python-env"
@@ -39,6 +41,35 @@ host_hint = ""
 [[licenses]]
 subject = "test"
 spdx = "Apache-2.0"
+"""
+
+SKILL_TEMPLATE = """---
+name: {name}
+description: A valid test skill for the {name} package fixture.
+---
+# {title}
+
+Body mentions {capabilities}.
+
+## When to use
+
+Use it in tests.
+
+## Pieces
+
+```toml
+[inputs]
+```
+
+Pieces for {capabilities}.
+
+## Judging the result
+
+Verify measures nothing; read the generic preview fields.
+
+## Pitfalls
+
+- None.
 """
 
 
@@ -73,6 +104,14 @@ def _write_package(root: Path, manifest: str) -> Path:
     pkg_dir = root / "packages" / "missing"
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "package.toml").write_text(manifest, encoding="utf-8")
+    capabilities = sorted(set(re.findall(r"\[capabilities\.([a-z0-9-]+)\]", manifest)))
+    cap_ids = ", ".join(f"missing.{cap}" for cap in capabilities) or "no capabilities"
+    skill_dir = pkg_dir / "skill"
+    skill_dir.mkdir(exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        SKILL_TEMPLATE.format(name="missing", title="Missing", capabilities=cap_ids),
+        encoding="utf-8",
+    )
     return pkg_dir
 
 

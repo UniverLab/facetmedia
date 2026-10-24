@@ -1,31 +1,39 @@
-# `facet list` and `facet describe`
+# `facet list`, `facet describe` and `facet skill`
 
-These two verbs are the whole discovery surface: an agent learns what facet
-can do by asking facet, not by importing a server. Both read the registry
-snapshot and the home's install state only; neither takes the
-[facet lock](home.md#the-lock), neither accepts the waiting flags, and
-neither downloads anything.
+These three verbs are the whole discovery surface: an agent learns what facet
+can do by asking facet, not by importing a server. All three read the registry
+snapshot and the home's install state only; none takes the
+[facet lock](home.md#the-lock), none accepts the waiting flags, and
+none downloads anything.
 
 ```bash
 facet list                              # installed packages only
 facet list --available                  # every package in the snapshot
+facet list --available --facet voice    # one facet's packages
 facet list --available --json           # the same, machine-readable
 facet describe echo.text --json         # one capability's full contract
+facet skill                             # how an agent learns each package
 ```
 
 ## `facet list`
 
-One line per capability, `<id>  <kind>  <summary>`, with `  [installed]`
-appended when the package is installed:
+Packages grouped by facet — `voice`, `audio`, `image`, `video`, `cad`,
+`text`, `presentation`, empty facets omitted — each with its weight
+(`light`, `cpu-heavy`, `gpu`; see [registry.md](registry.md#packagetoml)):
 
 ```bash
 $ facet list --available
-echo.text  text  Echo text back, repeated.
-future.thing  text  A capability from the future.
-termsy.make  text  Make one termsy asset.  [installed]
+text:
+  echo  light
+    echo.text  text  Echo text back, repeated.
+  future  cpu-heavy
+    future.thing  text  A capability from the future.
+  termsy  cpu-heavy  [installed]
+    termsy.make  text  Make one termsy asset.
 ```
 
-`--json` reports, per package: `name`, `version`, `tool_name`, `provider`,
+`--facet <name>` keeps one facet's packages. `--json` reports, per package:
+`name`, `version`, `tool_name`, `provider`, `facet`, `weight`,
 `compatible` (this facet satisfies the manifest's `requires_facet` and
 `protocol`), `installed`, `env_bytes` (the environment's size on disk when
 installed, 0 otherwise), `models_bytes` (the size of the models already
@@ -58,7 +66,7 @@ installed: no
 [`--json` envelope](contract.md) as every other verb:
 
 ```json
-{"contract": 1, "data": {"contract": 1, "capability": "echo.text", "summary": "Echo text back, repeated.", "kind": "text", "package": {"name": "echo", "version": "0.1.0", "tool_name": "Echo", "provider": "facet"}, "inputs": {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "echo.text", "description": "Echo text back, repeated.", "type": "object", "properties": {"text": {"type": "string", "description": "Text to echo."}, "repeat": {"type": "integer", "default": 1, "minimum": 1.0, "maximum": 10.0}}, "required": ["text"], "additionalProperties": false}, "piece_example": "[inputs]\nrepeat = 1\ntext = \"text\"\n", "verify": {"thresholds": {}}, "preview": {"viewer": "generic"}, "requirements": {"gpu": false, "ram_gb": 0.1, "disk_gb": 0.01, "exclusive": false, "platforms": ["linux"]}, "licenses": {"tools": [{"subject": "echo", "spdx": "Apache-2.0"}], "models": []}, "download_bytes": 0, "installed": false}, "facet": "0.1.0.dev0", "ok": true}
+{"contract": 1, "data": {"capability": "echo.text", "contract": 1, "download_bytes": 0, "facet": "text", "inputs": {"$schema": "https://json-schema.org/draft/2020-12/schema", "additionalProperties": false, "description": "Echo text back, repeated.", "properties": {"repeat": {"default": 1, "maximum": 10.0, "minimum": 1.0, "type": "integer"}, "text": {"description": "Text to echo.", "type": "string"}}, "required": ["text"], "title": "echo.text", "type": "object"}, "installed": false, "kind": "text", "licenses": {"models": [], "tools": [{"spdx": "Apache-2.0", "subject": "echo"}]}, "package": {"name": "echo", "provider": "facet", "tool_name": "Echo", "version": "0.1.0"}, "piece_example": "[inputs]\nrepeat = 1\ntext = \"text\"\n", "preview": {"viewer": "generic"}, "requirements": {"disk_gb": 0.01, "exclusive": false, "gpu": false, "platforms": ["linux"], "ram_gb": 0.1}, "skill": "facet skill echo", "summary": "Echo text back, repeated.", "verify": {"thresholds": {}}, "weight": "light"}, "facet": "0.1.0.dev0", "ok": true}
 ```
 
 - `inputs` is JSON Schema draft 2020-12, and `piece_example` is a minimal
@@ -74,6 +82,12 @@ installed: no
   missing), and 0 when the package is installed.
 - `contract` appears both in the envelope and in `data`, because clients
   cache `describe` output on its own.
+- `facet` is the package's domain and `weight` its derived heaviness; `skill`
+  is the command that prints that package's how-to (`facet skill <package>`).
 
 An unknown capability id fails with `invalid_input` (exit 2) and lists the
 known ids in `details.known`.
+
+To learn a package, read [`facet skill`](skill.md): the core skill lists
+every package by facet with its weight, and each package skill holds its
+details.

@@ -11,6 +11,7 @@ protocol = 1
 provider = "test"
 tool_name = "Test"
 description = "a test package"
+facet = "text"
 
 [engine]
 type = "python-env"
@@ -63,6 +64,18 @@ CASES = [
         "transport.type",
         "value",
         id="transport-type",
+    ),
+    pytest.param(
+        BASE.replace('facet = "text"', 'facet = "song"'),
+        "facet",
+        "value: one of voice, audio, image, video, cad, text, presentation",
+        id="facet-unknown",
+    ),
+    pytest.param(
+        BASE.replace('facet = "text"\n', ""),
+        "facet",
+        "required",
+        id="facet-missing",
     ),
     pytest.param(
         BASE.replace('requires_facet = ">=0.1.0"', 'requires_facet = ""'),

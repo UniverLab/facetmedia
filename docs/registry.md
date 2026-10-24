@@ -19,12 +19,15 @@ packages/<package>/pyproject.toml    # the environment's dependencies
                                      # ([tool.uv] package = false)
 packages/<package>/uv.lock           # the pinned lock, authoritative
 packages/<package>/runner.py         # the package runner
+packages/<package>/skill/SKILL.md    # the package skill (see skill.md)
 viewers/<viewer>/index.html          # person-facing viewers
 ```
 
 A package is finished with its input `schema`, the runner verbs `run`,
-`verify` and `preview`, and its `doctor` — the package's own answer to
-[`facet doctor`](doctor.md) at the `quick` and `full` depths. The runner SDK
+`verify` and `preview`, its `doctor` — the package's own answer to
+[`facet doctor`](doctor.md) at the `quick` and `full` depths — and its
+[`skill`](skill.md): `SKILL.md` plus optional `skill/references/<ref>.md`.
+The runner SDK
 (`facet_runner_sdk`, copied into every environment) is how a runner declares
 them; see [run.md](run.md#the-runner-protocol) for the protocol and
 [doctor.md](doctor.md#writing-a-packages-doctor-with-the-sdk) for writing the
@@ -56,10 +59,19 @@ protocol = 1                          # runner protocol version
 provider = "hexgrad · thewh1teagle"
 tool_name = "Kokoro TTS (kokoro-onnx)"
 description = "Local text to speech."
+facet = "voice"                       # voice | audio | image | video | cad | text | presentation
 ```
 
 These keys are required, and the text values may not be empty. Unknown keys
-are an error at every level, named by their dotted key.
+are an error at every level, named by their dotted key. `facet` names the
+domain of creation the package belongs to; a package that makes speech and
+one that transcribes it are both `voice`. A new facet arrives only with a
+reviewed facet release. The list lives beside `CAPABILITY_KINDS`, while
+`kind` keeps meaning the asset a capability writes (it alone picks the
+preview schema and the viewer). The package's **weight** is derived from
+what the manifest already declares, never declared again: `light` (no GPU,
+not exclusive, models totalling at most 100 MB), `cpu-heavy` (no GPU, but
+exclusive or more than 100 MB of models), `gpu`.
 
 ### `[engine]`
 
@@ -296,8 +308,10 @@ first. Beyond the manifests it checks that each package directory has its
 `@runner.verb("doctor")` (a static parse of the entry file — no environment
 is needed) and no longer registers `probe`, which is `rename probe to
 doctor`; that every viewer named by a
-capability has a `viewers/<viewer>/index.html`; and that model ids are unique
-across the registry. Exit `0` when the registry is clean and `2` otherwise.
+capability has a `viewers/<viewer>/index.html`; that model ids are unique
+across the registry; and that each package carries a valid
+[`skill`](skill.md) — missing, misnamed, or misheaded skills are one
+problem each. Exit `0` when the registry is clean and `2` otherwise.
 Run it in the registry's CI before merging a package.
 
 A clean registry with `--json`:

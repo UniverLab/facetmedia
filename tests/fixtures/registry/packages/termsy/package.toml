@@ -5,6 +5,7 @@ protocol = 1
 provider = "facet"
 tool_name = "Termsy"
 description = "A non-commercial fixture whose model must be accepted."
+facet = "text"
 
 [engine]
 type = "python-env"

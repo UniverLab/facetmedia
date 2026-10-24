@@ -10,12 +10,14 @@
       ],
       "compatible": true,
       "env_bytes": 0,
+      "facet": "text",
       "installed": false,
       "models_bytes": 0,
       "name": "echo",
       "provider": "facet",
       "tool_name": "Echo",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "weight": "light"
     },
     {
       "capabilities": [
@@ -27,12 +29,14 @@
       ],
       "compatible": false,
       "env_bytes": 0,
+      "facet": "text",
       "installed": false,
       "models_bytes": 0,
       "name": "future",
       "provider": "facet",
       "tool_name": "Future",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "weight": "cpu-heavy"
     },
     {
       "capabilities": [
@@ -44,12 +48,14 @@
       ],
       "compatible": true,
       "env_bytes": 0,
+      "facet": "text",
       "installed": false,
       "models_bytes": 0,
       "name": "termsy",
       "provider": "facet",
       "tool_name": "Termsy",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "weight": "cpu-heavy"
     }
   ],
   "registry": {

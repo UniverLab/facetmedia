@@ -29,6 +29,7 @@ from facetmedia import (
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import load_active_registry, validate_registry
+from facetmedia.registry_types import FACETS
 
 Handler = Callable[[argparse.Namespace], int]
 
@@ -39,6 +40,7 @@ _VERBS: tuple[tuple[str, str], ...] = (
     ("pull", "install a tool into its own pinned environment"),
     ("list", "list installed and available tools"),
     ("describe", "show a tool's manifest"),
+    ("skill", "print the skill for facet or one package"),
     ("doctor", "report facet, this machine's readiness and each package's doctor"),
     ("check", "re-verify an asset against its record"),
     ("run", "run a tool through the --json contract"),
@@ -331,7 +333,7 @@ def _announce_gc(data: dict[str, object]) -> None:
 
 def _handle_list(args: argparse.Namespace) -> int:
     """A light verb: the registry snapshot and the home, no lock, no network."""
-    data = introspect.list_data(args.available)
+    data = introspect.list_data(args.available, args.facet)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         _announce_list(data)
@@ -339,16 +341,26 @@ def _handle_list(args: argparse.Namespace) -> int:
 
 
 def _announce_list(data: dict[str, object]) -> None:
-    for package in _packages(data):
-        suffix = "  [installed]" if package.get("installed") is True else ""
-        capabilities = package.get("capabilities")
-        for capability in capabilities if isinstance(capabilities, list) else []:
-            if not isinstance(capability, dict):
-                continue
-            cap_id = capability.get("id")
-            kind = capability.get("kind")
-            summary = capability.get("summary")
-            print(f"{cap_id}  {kind}  {summary}{suffix}")
+    for facet in FACETS:
+        rows = [
+            package
+            for package in _packages(data)
+            if isinstance(package, dict) and package.get("facet") == facet
+        ]
+        if not rows:
+            continue
+        print(f"{facet}:")
+        for package in sorted(rows, key=lambda row: str(row.get("name", ""))):
+            suffix = "  [installed]" if package.get("installed") is True else ""
+            print(f"  {package.get('name')}  {package.get('weight')}{suffix}")
+            capabilities = package.get("capabilities")
+            for capability in capabilities if isinstance(capabilities, list) else []:
+                if not isinstance(capability, dict):
+                    continue
+                print(
+                    f"    {capability.get('id')}  {capability.get('kind')}  "
+                    f"{capability.get('summary')}"
+                )
 
 
 def _handle_describe(args: argparse.Namespace) -> int:
@@ -390,6 +402,17 @@ def _describe_inputs(data: dict[str, object]) -> str:
     return ", ".join(parts)
 
 
+def _handle_skill(args: argparse.Namespace) -> int:
+    """A light verb: print a skill plus what is true on this machine."""
+    data = introspect.skill_data(
+        args.target, args.reference, with_doctor=not args.no_doctor, run_id=args.run_id
+    )
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        sys.stdout.write(str(data["body"]))
+    return 0
+
+
 _HANDLERS: dict[str, Handler] = {
     "check": _handle_check,
     "describe": _handle_describe,
@@ -400,6 +423,7 @@ _HANDLERS: dict[str, Handler] = {
     "pull": _handle_pull,
     "rm": _handle_rm,
     "run": _handle_run,
+    "skill": _handle_skill,
     "update": _handle_update,
 }
 
@@ -524,10 +548,37 @@ def _add_list_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="list every package in the registry snapshot, installed or not",
     )
+    parser.add_argument(
+        "--facet",
+        default=None,
+        choices=list(FACETS),
+        metavar="FACET",
+        help=f"list one facet's packages ({', '.join(FACETS)})",
+    )
 
 
 def _add_describe_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("capability", help="registry capability id to describe")
+
+
+def _add_skill_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="package name or capability id (default: the core skill)",
+    )
+    parser.add_argument(
+        "--reference",
+        default=None,
+        metavar="REF",
+        help="print one reference file of a package skill",
+    )
+    parser.add_argument(
+        "--no-doctor",
+        action="store_true",
+        help="skip the quick doctor in the machine section",
+    )
 
 
 def _add_license_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
@@ -668,6 +719,8 @@ def build_parser() -> FacetParser:
             _add_list_flags(verb_parser)
         elif verb == "describe":
             _add_describe_flags(verb_parser)
+        elif verb == "skill":
+            _add_skill_flags(verb_parser)
         elif verb == "pull":
             _add_pull_flags(verb_parser)
         elif verb == "doctor":
