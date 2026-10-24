@@ -10,7 +10,7 @@ facet is the lab's "ollama" for creation tools. It installs each tool (CadQuery,
 uv tool install facetmedia
 ```
 
-Linux and WSL only. Everything facet installs or remembers lives under one directory, `~/.facet` (override with `FACET_HOME`); see [docs/home.md](docs/home.md) for the layout, the per-invocation logs, the lock, and where facet refuses to run. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry), which `facet update` pins at one commit; see [docs/registry.md](docs/registry.md) for the registry layout, manifest format, and `facet registry validate`. `facet check` reports whether this machine can run a capability and re-verifies an asset it did not make; see [docs/check.md](docs/check.md) for every check and the `--json` data. `facet list` and `facet describe` are the discovery surface: what the packages can do and one capability's full contract; see [docs/discover.md](docs/discover.md). `facet pull` installs one package into its own pinned environment; see [docs/pull.md](docs/pull.md) for what it checks, builds, and downloads. `facet run` turns a declarative piece file into verified assets with their records; see [docs/run.md](docs/run.md) for the flags, the order of steps, the exit codes, and the runner protocol. Models with terms are accepted with `facet license accept`; see [docs/license.md](docs/license.md).
+Linux and WSL only. Everything facet installs or remembers lives under one directory, `~/.facet` (override with `FACET_HOME`); see [docs/home.md](docs/home.md) for the layout, the per-invocation logs, the lock, and where facet refuses to run. The packages live in [UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry), which `facet update` pins at one commit; see [docs/registry.md](docs/registry.md) for the registry layout, manifest format, and `facet registry validate`. `facet check` reports whether this machine can run a capability and re-verifies an asset it did not make; see [docs/check.md](docs/check.md) for every check and the `--json` data. `facet list` and `facet describe` are the discovery surface: what the packages can do and one capability's full contract; see [docs/discover.md](docs/discover.md). `facet pull` installs one package into its own pinned environment; see [docs/pull.md](docs/pull.md) for what it checks, builds, and downloads. `facet run` turns a declarative piece file into verified assets with their records; see [docs/run.md](docs/run.md) for the flags, the order of steps, the exit codes, and the runner protocol. `facet preview` shows one asset to an agent as data or to a person through the capability's viewer; see [docs/preview.md](docs/preview.md) for the two forms and the paths the viewer server serves. Models with terms are accepted with `facet license accept`; see [docs/license.md](docs/license.md).
 
 ## Commands
 
@@ -22,7 +22,7 @@ Linux and WSL only. Everything facet installs or remembers lives under one direc
 | `facet describe` | show a capability's inputs, verification and licences |
 | `facet check` | report machine readiness or re-verify an asset |
 | `facet run` | turn a piece file into verified assets with records |
-| `facet preview` | render a tool's output for a person |
+| `facet preview` | show an asset to a person through its viewer, or to an agent as data |
 | `facet license accept` | accept a model's terms before it may be used |
 | `facet license list` | list models that need acceptance, with status |
 | `facet registry validate` | validate a registry checkout |

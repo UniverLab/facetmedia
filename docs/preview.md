@@ -25,7 +25,12 @@ used. The images a preview lists are only ever files beside the asset.
 Nothing is opened and no server starts. The data is
 `{"asset", "record", "preview", "images"}`: the asset's path relative to
 the working directory, its record, the parsed preview file, and the
-preview's images as absolute paths.
+preview's images as absolute paths (an empty list for an echo asset, whose
+preview lists no image files):
+
+```json
+{"asset": "out/echo.txt", "images": [], "preview": {"chars": 10, "kind": "text", "preview": 1, "summary": "hellohello"}, "record": {"name": "echo", "kind": "text", "...": "the full record, as run --json reports it"}}
+```
 
 ## Person form: `facet preview <asset>`
 
@@ -34,14 +39,16 @@ the registry snapshot in use, at `viewers/<viewer>/`; the shared kit lives
 at `viewers/_kit/`. Facet serves them on 127.0.0.1 — a free port, or
 `--port` — read-only and only three paths: `/viewer/...` from the viewer's
 directory, `/kit/...` from the kit, and `/asset/<name>` for the asset, its
-record, its preview file and its images. Anything else is 404, and so is
-any path with `..`.
+record, its preview file and its images — nothing else beside the asset,
+and no directory listing. Any other path is 404, and so is any path with
+`..`.
 
-The viewer opens at `http://127.0.0.1:<port>/viewer/index.html?asset=<name>`
-(`wslview`, `explorer.exe`, `xdg-open` or `open`, whichever fits; with
-`--no-open`, or when no opener works, the URL is printed instead). The
-server runs in the foreground, prints the URL to stdout, and stops on
-Ctrl+C or after `--idle-timeout` seconds without requests (default 600). A
+The viewer opens at `http://127.0.0.1:<port>/viewer/index.html?asset=<name>`,
+which is always the first line facet prints to stdout; it then opens that
+URL with `wslview`, `explorer.exe`, `xdg-open` or `open`, whichever fits
+the platform. With `--no-open`, or when no opener works, the printed URL
+is all you get. The server runs in the foreground and stops on Ctrl+C or
+after `--idle-timeout` seconds without requests (default 600). A
 viewer missing from the registry falls back to `generic`; when that is
 missing too, facet prints the preview JSON and exits 0. The core carries no
 HTML of its own.
