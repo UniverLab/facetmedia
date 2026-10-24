@@ -19,6 +19,7 @@ from facetmedia import (
     licenses,
     lock,
     preview,
+    prune,
     registry,
     run,
     update,
@@ -228,6 +229,56 @@ def _handle_preview(args: argparse.Namespace) -> int:
     return code
 
 
+def _handle_rm(args: argparse.Namespace) -> int:
+    """Exclusive: delete a package's environments, and with ``--models`` its models."""
+    with lock.hold("exclusive", "facet rm", *_lock_params(args)):
+        active = load_active_registry() if args.models else None
+        data = prune.rm_package(
+            Home.from_env(),
+            args.package,
+            with_models=bool(args.models),
+            registry=active,
+        )
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_rm(data)
+    return 0
+
+
+def _handle_gc(args: argparse.Namespace) -> int:
+    """Exclusive: remove what nothing uses any more, or list it with ``--dry-run``."""
+    with lock.hold("exclusive", "facet gc", *_lock_params(args)):
+        data = prune.gc_sweep(
+            Home.from_env(),
+            load_active_registry(),
+            dry_run=bool(args.dry_run),
+        )
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_gc(data)
+    return 0
+
+
+def _announce_rm(data: dict[str, object]) -> None:
+    removed = data.get("removed")
+    paths = [path for path in removed if isinstance(path, str)] if isinstance(removed, list) else []
+    if not paths:
+        print("nothing to remove")
+        return
+    for path in paths:
+        print(path)
+    print(f"freed {data.get('freed_bytes')} bytes")
+
+
+def _announce_gc(data: dict[str, object]) -> None:
+    items = data.get("items")
+    for entry in items if isinstance(items, list) else []:
+        if isinstance(entry, dict):
+            print(f"{entry.get('path')} {entry.get('bytes')} bytes {entry.get('reason')}")
+    verb = "would free" if data.get("dry_run") is True else "freed"
+    print(f"{verb} {data.get('freed_bytes')} bytes")
+
+
 def _handle_list(args: argparse.Namespace) -> int:
     """A light verb: the registry snapshot and the home, no lock, no network."""
     data = introspect.list_data(args.available)
@@ -292,9 +343,11 @@ def _describe_inputs(data: dict[str, object]) -> str:
 _HANDLERS: dict[str, Handler] = {
     "check": _handle_check,
     "describe": _handle_describe,
+    "gc": _handle_gc,
     "list": _handle_list,
     "preview": _handle_preview,
     "pull": _handle_pull,
+    "rm": _handle_rm,
     "run": _handle_run,
     "update": _handle_update,
 }
@@ -455,6 +508,23 @@ def _add_check_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_rm_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("package", help="registry package to remove")
+    parser.add_argument(
+        "--models",
+        action="store_true",
+        help="also delete the package's models that no other installed package lists",
+    )
+
+
+def _add_gc_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list what would be removed, and remove nothing",
+    )
+
+
 def _add_run_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("capability", help="registry capability id to run")
     parser.add_argument("piece", help="piece file to run, or - for JSON on stdin")
@@ -482,6 +552,11 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="SECONDS",
         help="kill the runner's process group after this many seconds",
+    )
+    parser.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help="install the package for this run only, then remove its environment",
     )
 
 
@@ -535,6 +610,10 @@ def build_parser() -> FacetParser:
             _add_pull_flags(verb_parser)
         elif verb == "check":
             _add_check_flags(verb_parser)
+        elif verb == "rm":
+            _add_rm_flags(verb_parser)
+        elif verb == "gc":
+            _add_gc_flags(verb_parser)
         elif verb == "run":
             _add_run_flags(verb_parser)
         elif verb == "preview":

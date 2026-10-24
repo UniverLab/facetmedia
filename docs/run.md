@@ -14,6 +14,7 @@ echo '{"inputs": {"text": "hi"}}' | facet run echo.text - --out out --json
 facet run echo.text piece.toml --no-verify     # skip the verify verb
 facet run echo.text piece.toml --no-pull       # fail instead of pulling
 facet run echo.text piece.toml --timeout 600   # kill the runner after 600 s
+facet run echo.text piece.toml --ephemeral     # install, run, remove the environment
 facet run echo.text piece.toml --no-wait       # fail at once instead of waiting
 ```
 
@@ -44,7 +45,9 @@ read from stdin, for clients that build pieces in memory.
 3. If the package is not installed, it is pulled first (same lock rules and
    checks as [`facet pull`](pull.md), its plan printed to stderr and the run
    log before it starts) — unless `--no-pull`, which is `not_installed`
-   (exit 7).
+   (exit 7). With `--ephemeral` a package this run installed is removed again
+   after the run (its models stay); a package that was already installed is
+   left alone, and facet says so on stderr.
 4. The piece is validated against the capability's inputs.
 5. The [facet lock](home.md#the-lock) is taken: exclusive if the package's
    `requirements.exclusive` says so, else shared. `--no-wait` and
@@ -64,11 +67,13 @@ read from stdin, for clients that build pieces in memory.
 
 A runner that exits non-zero, writes no or a malformed result file, or lists
 an asset it did not produce is `runner_failed` (exit 9) with the last 40
-lines of its output, the run-log path and the kept temporary directory.
-`--timeout S` and an interrupt (SIGINT/SIGTERM) do the same: facet sends
-SIGTERM to the runner's whole process group, then SIGKILL after 10 s, so no
-child keeps memory or VRAM. Runner output is streamed to facet's stderr and
-the run log, never to its stdout.
+lines of its output, the run-log path and the kept temporary directory. That
+directory's absolute path is appended to `<home>/state/leftovers.json`, so
+[`facet gc`](gc.md) removes it once it is no longer wanted. `--timeout S` and
+an interrupt (SIGINT/SIGTERM) do the same: facet sends SIGTERM to the
+runner's whole process group, then SIGKILL after 10 s, so no child keeps
+memory or VRAM. Runner output is streamed to facet's stderr and the run log,
+never to its stdout.
 
 ## `--json`
 

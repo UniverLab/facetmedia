@@ -19,7 +19,7 @@ The home is created on first use, with mode `0700` on the root:
 │   └── hf/              # Hugging Face cache (HF_HOME)
 ├── python/              # uv-managed Python interpreters
 ├── registry/            # extracted registry snapshots (one dir per commit)
-├── state/               # registry.json, licenses.json, lock files
+├── state/               # registry.json, leftovers.json, licenses.json, lock files
 └── tmp/                 # scratch, same filesystem, for atomic renames
 ```
 

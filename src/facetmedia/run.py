@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import shutil
 import sys
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from facetmedia import __version__, check, env, licenses, record, runner, schema
+from facetmedia import __version__, check, env, licenses, prune, record, runner, schema
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
@@ -32,6 +33,8 @@ from facetmedia.registry_types import Model
 from facetmedia.runner import Invocation, Outcome, RunAsset, VerifyResult
 
 __all__ = ["execute"]
+
+logger = logging.getLogger("facetmedia")
 
 
 @dataclass(frozen=True)
@@ -67,12 +70,14 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     piece, piece_dir = _read_piece(args.piece)
     capability, package = _resolve_capability(args.capability)
     _require_machine(package)
+    home = Home.from_env()
+    ephemeral = _ephemeral(args, package, home)
     pulled, downloaded = _ensure_installed(args, package)
     accepted = tuple(licenses.require(package.models))
     job = RunJob(
         capability=capability,
         package=package,
-        home=Home.from_env(),
+        home=home,
         inputs=_piece_inputs(capability, piece, piece_dir),
         piece_dir=piece_dir,
         out_dir=Path(args.out) if args.out else piece_dir,
@@ -81,10 +86,15 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
         verify=bool(args.verify),
         accepted=accepted,
     )
-    mode: LockMode = "exclusive" if package.requirements.exclusive else "shared"
+    exclusive = package.requirements.exclusive or ephemeral
+    mode: LockMode = "exclusive" if exclusive else "shared"
     wait, wait_timeout = _lock_params(args)
     with hold(mode, "facet run", wait, wait_timeout):
-        records, exit_code = _produce(job)
+        try:
+            records, exit_code = _produce(job)
+        finally:
+            if ephemeral:
+                prune.rm_env(job.home, package.name, package.version)
     data: dict[str, object] = {
         "capability": capability.id,
         "out_dir": str(job.out_dir),
@@ -93,6 +103,23 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
         "assets": records,
     }
     return data, exit_code
+
+
+def _ephemeral(args: argparse.Namespace, package: Package, home: Home) -> bool:
+    """Whether ``--ephemeral`` applies: only to a package this run installs.
+
+    An environment that was already there belongs to the person who pulled it,
+    so ``--ephemeral`` changes nothing there and says so.
+    """
+    if not bool(getattr(args, "ephemeral", False)):
+        return False
+    if not env.is_installed(package, home):
+        return True
+    print(
+        f"{package.name} {package.version} is already installed; --ephemeral changes nothing",
+        file=sys.stderr,
+    )
+    return False
 
 
 # --- before the lock: the piece, the capability, the package, the licence.
@@ -190,6 +217,17 @@ def _produce(job: RunJob) -> tuple[list[dict[str, object]], int]:
     """One run under the lock: assets out of temp, one record each."""
     temp_dir = job.out_dir / f".facet-tmp-{job.run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        records, failed = _attempt(job, temp_dir)
+    except Exception:
+        _keep_leftover(job.home, temp_dir)
+        raise
+    shutil.rmtree(temp_dir)
+    return records, 3 if failed else 0
+
+
+def _attempt(job: RunJob, temp_dir: Path) -> tuple[list[dict[str, object]], bool]:
+    """Run and verify one piece in ``temp_dir``; the caller places the assets."""
     inv = Invocation(job.package, job.home, job.env_dir, temp_dir, job.run_id, job.timeout_s)
     models = runner.model_paths(job.package, job.home)
     request = runner.make_request(
@@ -199,13 +237,24 @@ def _produce(job: RunJob) -> tuple[list[dict[str, object]], int]:
     tool, assets = _parse_run(outcome, inv)
     verdicts = _verify(inv, job, models, assets) if job.verify else {}
     records = _place(job, temp_dir, assets, tool, verdicts)
-    shutil.rmtree(temp_dir)
     failed = any(
         isinstance(entry["verification"], Mapping)
         and entry["verification"].get("status") == "failed"
         for entry in records
     )
-    return records, 3 if failed else 0
+    return records, failed
+
+
+def _keep_leftover(home: Home, temp_dir: Path) -> None:
+    """Record the kept temp directory so ``facet gc`` can remove it later.
+
+    Recording must never mask the run's own failure: a state file that cannot
+    be written is logged and the original exception is re-raised by the caller.
+    """
+    try:
+        prune.record_leftover(home, temp_dir)
+    except Exception:
+        logger.exception("cannot record the kept temporary directory %s", temp_dir)
 
 
 def _parse_run(outcome: Outcome, inv: Invocation) -> tuple[dict[str, str], list[RunAsset]]:

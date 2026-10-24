@@ -27,7 +27,7 @@ LOCKING_VERBS = [
     ["update"],
     ["pull", "echo"],
     ["run", "echo.text", "piece.toml"],
-    ["rm"],
+    ["rm", "echo"],
     ["gc"],
     ["license", "accept", "termsy-weights"],
 ]

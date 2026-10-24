@@ -15,11 +15,7 @@ EXIT_USAGE = 2
 EXIT_MACHINE_CANNOT = 5
 DEFAULT_WAIT_TIMEOUT_S = 3600.0
 SHORT_TIMEOUT_S = 5.0
-
-UNIMPLEMENTED_ARGV = [
-    ["gc"],
-    ["rm"],
-]
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 
 
 def test_version_prints_package_version(capsys: pytest.CaptureFixture[str]) -> None:
@@ -27,28 +23,6 @@ def test_version_prints_package_version(capsys: pytest.CaptureFixture[str]) -> N
         main(["--version"])
     assert exit_info.value.code == 0
     assert __version__ in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("argv", UNIMPLEMENTED_ARGV, ids=" ".join)
-def test_every_verb_parses_and_reports_not_implemented(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert main([*argv, "--json"]) == 1
-    captured = capsys.readouterr()
-    envelope = json.loads(captured.out)
-    assert envelope["ok"] is False
-    assert envelope["error"]["code"] == "internal"
-    assert envelope["error"]["message"] == "not implemented yet"
-
-
-@pytest.mark.parametrize("argv", UNIMPLEMENTED_ARGV, ids=" ".join)
-def test_every_verb_human_error_goes_to_stderr(
-    argv: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert main(argv) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == "not implemented yet\n"
 
 
 @pytest.mark.parametrize(
@@ -76,9 +50,25 @@ def test_run_flags_default_to_the_spec() -> None:
     assert args.out is None
     assert args.verify is True
     assert args.pull is True
+    assert args.ephemeral is False
     assert args.timeout is None
     assert args.wait is True
     assert args.wait_timeout == DEFAULT_WAIT_TIMEOUT_S
+
+
+def test_run_flags_are_booleans_that_flip() -> None:
+    args = build_parser().parse_args(["run", "echo.text", "-", "--ephemeral"])
+    assert args.ephemeral is True
+
+
+def test_rm_and_gc_flags_default_to_the_spec() -> None:
+    rm = build_parser().parse_args(["rm", "echo"])
+    assert rm.package == "echo"
+    assert rm.models is False
+    assert rm.wait is True
+    gc = build_parser().parse_args(["gc"])
+    assert gc.dry_run is False
+    assert gc.wait is True
 
 
 def test_run_no_flags_flip_their_dests() -> None:
@@ -134,8 +124,11 @@ def test_unexpected_exception_is_logged_to_run_log(
     assert "kablam" in content
 
 
-def test_every_invocation_creates_the_home_layout(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["gc"]) == 1
+def test_every_invocation_creates_the_home_layout(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    assert main(["gc"]) == 0
     capsys.readouterr()
     root = Path(os.environ["FACET_HOME"])
     for directory in (

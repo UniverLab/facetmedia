@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,8 @@ from facetmedia.contract import (
     failure,
     ok,
 )
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 
 EXPECTED_EXIT_MAP = {
     "internal": 1,
@@ -106,18 +109,19 @@ def test_emit_human_success_is_noop(capsys: pytest.CaptureFixture[str]) -> None:
     assert captured.err == ""
 
 
-def test_main_json_single_doc_on_unimplemented(
-    capsys: pytest.CaptureFixture[str],
+def test_main_json_single_doc_on_error(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    code = main(["gc", "--json"])
-    assert code == 1
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    code = main(["pull", "nope", "--json"])
+    assert code == EXIT_CODES["invalid_input"]
     captured = capsys.readouterr()
     assert captured.out.count("\n") == 1
     envelope = json.loads(captured.out)
     assert envelope["ok"] is False
     assert envelope["contract"] == 1
-    assert envelope["error"]["code"] == "internal"
-    assert "not implemented yet" in envelope["error"]["message"]
+    assert envelope["error"]["code"] == "invalid_input"
+    assert "unknown package: nope" in envelope["error"]["message"]
     assert "contract" not in captured.err
 
 
@@ -180,20 +184,23 @@ def test_main_returns_each_exit_code(
 
 
 def test_stderr_never_contains_envelope_on_json_error(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert main(["gc", "--json"]) == 1
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    assert main(["pull", "nope", "--json"]) == EXIT_CODES["invalid_input"]
     captured = capsys.readouterr()
     assert '"ok"' not in captured.err
     assert '"contract"' not in captured.err
 
 
-def test_unimplemented_is_internal(capsys: pytest.CaptureFixture[str]) -> None:
-    code = main(["gc"])
-    assert code == 1
+def test_a_facet_error_in_human_form_prints_one_line_on_stderr(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    assert main(["pull", "nope"]) == EXIT_CODES["invalid_input"]
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "not implemented yet\n"
+    assert captured.err.startswith("unknown package: nope\n")
 
 
 def test_unexpected_exception_becomes_internal(
