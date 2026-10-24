@@ -41,7 +41,7 @@ class Request:
     the runner writes its assets into; ``assets`` names the produced files
     and is only filled for ``verify`` and ``preview``; ``depth`` is the
     ``doctor`` verb's requested depth, ``"quick"`` (imports, files, versions;
-    about 2 s, writes nothing) or ``"full"`` (may run the tool once on a
+    about 10 s, writes nothing) or ``"full"`` (may run the tool once on a
     throwaway output; up to 30 s).
     """
 

@@ -42,7 +42,9 @@ read from stdin, for clients that build pieces in memory.
    acceptance, and — when the environment is already installed — the package's
    `doctor` verb at `quick` depth); a refusal is `machine_cannot` (exit 5) or
    `license_not_accepted` (exit 4) for a model whose terms were not accepted
-   with `facet license accept`.
+   with `facet license accept`. A quick doctor that misses its 10 s budget
+   does not refuse: the run warns on stderr and in the run log, records the
+   warning in the JSON result's `data.warnings`, and proceeds.
 3. If the package is not installed, it is pulled first (same lock rules and
    checks as [`facet pull`](pull.md), its plan printed to stderr and the run
    log before it starts) — unless `--no-pull`, which is `not_installed`
@@ -130,7 +132,7 @@ tool and one entry per produced asset (file, name, kind, mime, properties,
 params, seed, inputs); for `verify`, one verdict per asset; for `doctor`, a
 `checks` list of `{"name", "ok", "detail", "fix"}`; `preview` and `doctor`
 serve `facet preview` and [`facet doctor`](doctor.md) — `quick` finishes in
-about 2 s and writes nothing, `full` may take up to 30 s and may write a
+about 10 s and writes nothing, `full` may take up to 30 s and may write a
 throwaway output facet removes. A `file` is one bare name
 inside the temporary directory — never a path, and never the reserved
 `.facet-` prefix. The runner's environment is facet's own plus `FACET_MODELS`

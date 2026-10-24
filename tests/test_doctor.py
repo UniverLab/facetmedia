@@ -139,6 +139,67 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
 
+#: An SDK runner whose run echoes like the fixture; its doctor sleeps.
+SLOW_DOCTOR_ECHO_RUNNER = '''"""Echo run; the doctor sleeps past the quick budget."""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    text = str(req.inputs["text"]) * int(req.inputs["repeat"])
+    (req.out_dir / "echo.txt").write_text(text, encoding="utf-8")
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": "echo.txt",
+                "name": "echo",
+                "kind": "text",
+                "mime": "text/plain",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [],
+            }
+        ],
+    }
+
+
+@runner.verb("verify")
+def verify(req: Request) -> dict[str, Any]:
+    expected = str(req.inputs["text"]) * int(req.inputs["repeat"])
+    entries = []
+    for path in req.assets:
+        matched = path.read_text(encoding="utf-8") == expected
+        entries.append(
+            {
+                "file": path.name,
+                "passed": matched,
+                "metrics": {"match": 1 if matched else 0},
+                "thresholds": {},
+                "verifier": "echo-content",
+            }
+        )
+    return {"assets": entries}
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    time.sleep(30)
+    return {"checks": [{"name": "imports", "ok": True, "detail": "too late", "fix": ""}]}
+
+
+runner.main()
+'''
+
 
 def _registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
@@ -606,16 +667,20 @@ def test_doctor_without_a_doctor_verb_is_machine_cannot(
 
 
 def test_quick_doctor_over_its_budget_times_out_as_machine_cannot(
-    capsys: pytest.CaptureFixture[str], facet_home: Path, swap_echo_runner: Any
+    capsys: pytest.CaptureFixture[str],
+    facet_home: Path,
+    swap_echo_runner: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     swap_echo_runner(SLOW_DOCTOR_RUNNER)
+    monkeypatch.setitem(doctor_module.DOCTOR_TIMEOUTS, "quick", 1.0)
 
     code = main(["doctor", "echo.text", "--quick", "--json"])
     data = _data(_envelope(capsys))
     assert code == EXIT_MACHINE_CANNOT
     checks = data["packages"]["echo"]["doctor"]
     assert checks[0]["ok"] is False
-    assert "did not finish within 2.0 s" in checks[0]["detail"]
+    assert "did not finish within 1.0 s" in checks[0]["detail"]
 
 
 def test_crashing_doctor_is_runner_failed(
@@ -684,6 +749,31 @@ def test_run_gate_refuses_when_the_quick_doctor_fails(
     assert "cannot import the tool" in envelope["error"]["message"]
 
 
+def test_run_gate_runs_with_a_slow_doctor_warning(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Any,
+) -> None:
+    """A quick doctor that only times out warns the run gate and does not block."""
+    swap_echo_runner(SLOW_DOCTOR_ECHO_RUNNER)
+    monkeypatch.setitem(doctor_module.DOCTOR_TIMEOUTS, "quick", 1.0)
+    piece = tmp_path / "piece.toml"
+    piece.write_text('[inputs]\ntext = "hello"\nrepeat = 1\n', encoding="utf-8")
+    warning = "echo doctor did not answer within 1.0 s; running anyway"
+
+    code = main(["run", "echo.text", str(piece), "--no-pull", "--json"])
+    captured = capsys.readouterr()
+    assert code == 0
+    envelope: Any = json.loads(captured.out)
+    assert isinstance(envelope, dict)
+    assert envelope["ok"] is True
+    assert envelope["data"]["warnings"] == [warning]
+    assert warning in captured.err
+    assert (tmp_path / "echo.txt").read_text(encoding="utf-8") == "hello"
+
+
 def test_gate_skips_the_doctor_before_the_env_exists(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -691,8 +781,9 @@ def test_gate_skips_the_doctor_before_the_env_exists(
     _fresh_home(monkeypatch, tmp_path)
     package = load_registry(FIXTURES).packages["echo"]
 
-    errors = doctor_module.requirement_errors(package, Home.from_env(), "test-run")
+    errors, warnings = doctor_module.requirement_errors(package, Home.from_env(), "test-run")
     assert errors == []
+    assert warnings == []
 
 
 def test_requirement_errors_include_the_quick_doctor(
@@ -702,9 +793,10 @@ def test_requirement_errors_include_the_quick_doctor(
     swap_echo_runner(FAILING_DOCTOR_RUNNER)
     package = load_registry(FIXTURES).packages["echo"]
 
-    errors = doctor_module.requirement_errors(package, Home.from_env(), "test-run")
+    errors, warnings = doctor_module.requirement_errors(package, Home.from_env(), "test-run")
     assert [error.code for error in errors] == ["machine_cannot"]
     assert "cannot import the tool" in errors[0].message
+    assert warnings == []
 
 
 def test_human_output_marks_each_check_and_indents_the_fix(

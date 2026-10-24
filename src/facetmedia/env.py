@@ -100,7 +100,7 @@ def _preflight(package: Package, home: Home, run_id: str) -> None:
     installed environment) is skipped until one is there.
     """
     require_posix()
-    errors = doctor_module.requirement_errors(package, home, run_id)
+    errors, _warnings = doctor_module.requirement_errors(package, home, run_id)
     if errors:
         raise errors[0]
 

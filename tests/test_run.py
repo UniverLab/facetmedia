@@ -465,6 +465,7 @@ def test_run_echo_writes_the_asset_and_a_passed_record(
     assert data["out_dir"] == str(out)
     assert data["pulled"] is False
     assert data["downloaded_bytes"] == 0
+    assert "warnings" not in data
     assert (out / "echo.txt").read_text(encoding="utf-8") == "hellohello"
     assert list(out.glob(".facet-tmp-*")) == []
 

@@ -72,7 +72,7 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     """Run one piece; returns the ``--json`` data and the process exit code."""
     piece, piece_dir = _read_piece(args.piece)
     capability, package = _resolve_capability(args.capability)
-    _require_machine(package, run_id)
+    gate_warnings = _require_machine(package, run_id)
     home = Home.from_env()
     ephemeral = _ephemeral(args, package, home)
     pulled, downloaded = _ensure_installed(args, package, run_id)
@@ -115,6 +115,8 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
         "downloaded_bytes": downloaded,
         "assets": records,
     }
+    if gate_warnings:
+        data["warnings"] = gate_warnings
     return data, exit_code
 
 
@@ -203,11 +205,21 @@ def _resolve_capability(capability_id: str) -> tuple[Capability, Package]:
     return capability, package
 
 
-def _require_machine(package: Package, run_id: str) -> None:
-    """The readiness gate plus the quick doctor, before anything is planned."""
-    errors = doctor.requirement_errors(package, Home.from_env(), run_id)
+def _require_machine(package: Package, run_id: str) -> list[str]:
+    """The readiness gate plus the quick doctor, before anything is planned.
+
+    A quick doctor that merely timed out does not block the run: each such
+    warning goes to stderr and the run log, and the run carries on with it.
+    """
+    errors, warnings = doctor.requirement_errors(
+        package, Home.from_env(), run_id, timeout_warns=True
+    )
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+        logger.info("%s", warning)
     if errors:
         raise errors[0]
+    return warnings
 
 
 def _ensure_installed(args: argparse.Namespace, package: Package, run_id: str) -> tuple[bool, int]:

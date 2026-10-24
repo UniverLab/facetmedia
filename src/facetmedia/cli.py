@@ -617,7 +617,7 @@ def _add_doctor_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="run only the quick depth of the package doctors (about 2 s each)",
+        help="run only the quick depth of the package doctors (about 10 s each)",
     )
 
 

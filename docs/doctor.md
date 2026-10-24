@@ -71,14 +71,17 @@ The runner protocol's `doctor` verb answers with
 names in `"depth"`. Without `--quick` the doctor runs `full`; `--quick` runs
 only `quick`:
 
-- **`quick`** must finish in about 2 s and writes nothing: imports, files,
+- **`quick`** must finish in about 10 s and writes nothing: imports, files,
   versions. It is what `probe` did. `--quick` runs only this depth.
 - **`full`** may take up to 30 s and may write a throwaway output in the
   temporary directory — one word synthesised, one box exported — which facet
   removes afterwards.
 
-facet enforces the timeout per depth (2 s / 30 s) and reports a timeout as a
-failed check. A runner that does not register `doctor` yields `{"ok": false,
+facet enforces the timeout per depth (10 s / 30 s) and reports a timeout as a
+failed check. The run gate is the one exception: there a quick doctor that
+merely timed out becomes a warning (stderr, the run log and `data.warnings`)
+and the run proceeds, while `facet doctor` and `facet pull` still report it as
+a failure. A runner that does not register `doctor` yields `{"ok": false,
 "detail": "this package has no doctor", "fix": "report it to the package's
 maintainer"}` (the SDK writes it). An uninstalled package is skipped with an
 `ok` check. `pull` and `run` run the same readiness checks plus this doctor

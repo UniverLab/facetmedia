@@ -10,7 +10,7 @@ check comes with a ``fix`` a person or agent can run.  Its sections are
   check gaining a ``fix``): compatible, platform, ram, disk, gpu, host_libs,
   installed, licenses, models;
 - **the package doctor**: the package's own ``doctor`` verb at ``quick``
-  depth (imports, files, versions; about 2 s, writes nothing) or ``full``
+  depth (imports, files, versions; about 10 s, writes nothing) or ``full``
   depth (may run the tool once on a throwaway output; up to 30 s).
 
 ``pull`` and ``run`` gate with the same readiness functions plus the quick
@@ -67,8 +67,10 @@ __all__ = [
 GB: Final[int] = 1024**3
 NO_HOST_LIBS_HINT: Final[str] = "facet never installs host libraries"
 NVIDIA_SMI_TIMEOUT_S: Final[float] = 2.0
-#: The package doctor's budget per depth; a timeout is a failed check.
-QUICK_TIMEOUT_S: Final[float] = 2.0
+#: The package doctor's budget per depth; a timeout is a failed check.  The
+#: quick budget is 10 s because cold imports of OCP, onnxruntime and
+#: CTranslate2 take several seconds on a CPU machine.
+QUICK_TIMEOUT_S: Final[float] = 10.0
 FULL_TIMEOUT_S: Final[float] = 30.0
 UV_TIMEOUT_S: Final[float] = 30.0
 DOCTOR_TIMEOUTS: Final[dict[str, float]] = {"quick": QUICK_TIMEOUT_S, "full": FULL_TIMEOUT_S}
@@ -148,15 +150,38 @@ class PackageSection:
 # --- the readiness checks moved from check.py, each with its fix.
 
 
-def requirement_errors(package: Package, home: Home, run_id: str) -> list[FacetError]:
+def requirement_errors(
+    package: Package, home: Home, run_id: str, *, timeout_warns: bool = False
+) -> tuple[list[FacetError], list[str]]:
     """The gate ``pull`` and ``run`` run first: readiness plus the quick doctor.
 
-    Returns the failures in the spec's order; an empty list means the machine
-    can do it.  The package doctor runs only when the environment is already
-    installed: a gate that runs before a pull has nothing to call yet.
+    Returns the failures in the spec's order plus the gate's warnings; an
+    empty error list means the machine can do it.  The package doctor runs
+    only when the environment is already installed: a gate that runs before a
+    pull has nothing to call yet.  Only the run gate passes ``timeout_warns``:
+    then a quick doctor that merely timed out becomes a warning the run
+    carries on with instead of a failure.
     """
     _, failures, doctor_failures = run_check(package, home, "", run_id, depth="quick")
-    return failures + doctor_failures
+    errors: list[FacetError] = []
+    warnings: list[str] = []
+    for error in failures + doctor_failures:
+        warning = _timeout_warning(error) if timeout_warns else None
+        if warning is None:
+            errors.append(error)
+        else:
+            warnings.append(warning)
+    return errors, warnings
+
+
+def _timeout_warning(error: FacetError) -> str | None:
+    """The run-gate warning for a doctor that timed out; ``None`` for any other error."""
+    if error.details.get("doctor_timeout") is not True:
+        return None
+    return (
+        f"{str(error.details['package'])} doctor did not answer within "
+        f"{str(error.details['timeout_s'])} s; running anyway"
+    )
 
 
 def run_check(
@@ -674,7 +699,7 @@ def _doctor_call(
         outcome = runner.call(invocation, "doctor", request)
         return _doctor_result(package, outcome.result, temp_dir)
     except FacetError as exc:
-        return [_failed_doctor_check(package, exc)], _classify_doctor_error(package, exc)
+        return [_failed_doctor_check(package, exc)], _classify_doctor_error(package, exc, timeout_s)
 
 
 def _failed_doctor_check(package: Package, error: FacetError) -> dict[str, object]:
@@ -686,7 +711,7 @@ def _failed_doctor_check(package: Package, error: FacetError) -> dict[str, objec
     }
 
 
-def _classify_doctor_error(package: Package, error: FacetError) -> FacetError:
+def _classify_doctor_error(package: Package, error: FacetError, timeout_s: float) -> FacetError:
     """A timeout is ``machine_cannot``; a crash or bad protocol stays as it is."""
     timed_out = error.code == "runner_failed" and error.message.startswith(
         "the runner did not finish within"
@@ -695,7 +720,7 @@ def _classify_doctor_error(package: Package, error: FacetError) -> FacetError:
         return FacetError(
             "machine_cannot",
             f"{package.name} doctor: {error.message}",
-            details={"package": package.name},
+            details={"package": package.name, "doctor_timeout": True, "timeout_s": timeout_s},
         )
     return error
 
