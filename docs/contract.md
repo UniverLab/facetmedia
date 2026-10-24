@@ -40,9 +40,9 @@ Branch on the exit code without parsing prose:
 | `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate` |
 | `verification_failed` | 3 | the asset was made but its check did not pass |
 | `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
-| `machine_cannot` | 5 | the machine does not meet the package requirements (RAM, disk, platform) |
+| `machine_cannot` | 5 | the machine or facet's own health does not meet the requirements (RAM, disk, platform, a failing `facet doctor` check) |
 | `lock_busy` | 6 | the lock is held and `--no-wait` was given, or the wait timed out |
-| `not_installed` | 7 | the package is not installed and `--no-pull` was given |
+| `not_installed` | 7 | the package is not installed: `run --no-pull`, re-verifying an asset of it, or a `facet doctor` target |
 | `download_failed` | 8 | a model, environment, or registry download failed, or its sha256 did not match |
 | `runner_failed` | 9 | the package runner crashed or broke the runner protocol |
 | `license_needs_person` | 10 | `license accept` was run without an interactive terminal |

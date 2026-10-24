@@ -30,7 +30,8 @@ Nine checks about facet and this machine, each `{"ok", "detail", "fix"}`:
   `remove <home>/state/lock.json` — reported, never removed, because the
   kernel `flock` is the truth;
 - `registry`: the checkout in use is at the pinned commit and passes
-  `facet registry validate` (fix: `run facet update`);
+  `facet registry validate` (fix: `run facet update`, or fix the
+  `FACET_REGISTRY` checkout);
 - `disk`: free GB at the home;
 - `orphans`: environments or models no installed package references, with
   the fix `facet gc`;
@@ -46,7 +47,9 @@ For a package target the doctor reports the same readiness checks
 - `platform`: `sys.platform` is in `requirements.platforms`;
 - `ram`: total and available GB from `/proc/meminfo` against `ram_gb`;
 - `disk`: free GB at the home against what `pull` would still need;
-- `gpu`: what `nvidia-smi` reports, or `none`;
+- `gpu`: what `nvidia-smi` reports, or `none` — informative only, unless
+  the manifest sets `gpu = true`, in which case its absence is
+  `machine_cannot`;
 - `host_libs`: each soname in `requirements.host_libs` loads with
   `ctypes.CDLL` (fix: the manifest's `host_hint`);
 - `installed`: whether `<env>/.complete` matches the lock (fix:
@@ -65,7 +68,8 @@ missing. For a capability target the data also carries `capability`.
 
 The runner protocol's `doctor` verb answers with
 `{"checks": [{"name", "ok", "detail", "fix"}]}`, at the depth the request
-names in `"depth"`:
+names in `"depth"`. Without `--quick` the doctor runs `full`; `--quick` runs
+only `quick`:
 
 - **`quick`** must finish in about 2 s and writes nothing: imports, files,
   versions. It is what `probe` did. `--quick` runs only this depth.
@@ -126,11 +130,13 @@ A capability target adds `capability`, `can_run` and `needs_pull`.
 |-------|-------|------|------|
 | 1 | `machine_cannot` | 5 | a facet check, a readiness check other than `licenses`/`installed`/`models`, or a package doctor check failed |
 | 2 | `license_not_accepted` | 4 | a model's terms are not accepted |
-| 3 | `not_installed` | 7 | a named package is not installed |
+| 3 | `not_installed` | 7 | the target's package is not installed |
 | 4 | `runner_failed` | 9 | a doctor verb crashed or broke the protocol |
 
-`installed`/`models` failing on their own pick no class: they are what
-`needs_pull` reports, and the named-but-uninstalled case is row 3.
+`installed`/`models` failing with no target pick no class: they are what
+`needs_pull` reports. With a target — a package name or a capability id —
+naming an uninstalled package, `can_run` can still be true, but the exit is
+row 3.
 
 `invalid_input` (2) is an unknown target; a lock that never comes free is
 `lock_busy` (6).
