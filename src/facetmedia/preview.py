@@ -150,21 +150,23 @@ def _ensure_preview(
     preview_file.unlink(missing_ok=True)
     temp_dir = home.tmp_dir / f".facet-preview-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    invocation = runner.Invocation(
-        package, home, home.env_dir(package.name, package.version), temp_dir, run_id, None
-    )
-    request = runner.make_request(
-        "preview",
-        capability_id,
-        params,
-        asset_path.parent,
-        asset_path.parent,
-        runner.model_paths(package, home),
-        [asset_path],
-    )
-    runner.call(invocation, "preview", request)
-    preview_data = _load_preview(preview_file)
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    try:
+        invocation = runner.Invocation(
+            package, home, home.env_dir(package.name, package.version), temp_dir, run_id, None
+        )
+        request = runner.make_request(
+            "preview",
+            capability_id,
+            params,
+            asset_path.parent,
+            asset_path.parent,
+            runner.model_paths(package, home),
+            [asset_path],
+        )
+        runner.call(invocation, "preview", request)
+        preview_data = _load_preview(preview_file)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
     return preview_data
 
 
