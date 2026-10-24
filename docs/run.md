@@ -61,7 +61,8 @@ read from stdin, for clients that build pieces in memory.
    unless `--no-verify` — its `verify` verb judges those assets.
 7. Each asset is moved onto `<out>/<file>` (`os.replace`; an existing file of
    the same name is replaced) and its record (`<asset>.facet.json`) is
-   written beside it; then the temporary directory is removed.
+   written beside it; then the temporary directory is removed. The one name
+   never replaced is the run's own input (next paragraph).
 8. Exit 0 when every asset passed (or verification was skipped), exit 3
    (`verification_failed`) when any failed. Either way the `--json` envelope
    is printed with every record; failed assets and their records are kept so
@@ -76,6 +77,19 @@ an interrupt (SIGINT/SIGTERM) do the same: facet sends SIGTERM to the
 runner's whole process group, then SIGKILL after 10 s, so no child keeps
 memory or VRAM. Runner output is streamed to facet's stderr and the run log,
 never to its stdout.
+
+An asset never lands on one of the run's own inputs. Before anything is
+moved, every target `<out>/<file>` is compared with the piece's `path`
+inputs and with the piece file itself (by resolved path, and by file
+identity when both exist); a collision is `invalid_input` (exit 2) —
+`asset <file> would overwrite input <path>` — with the hint to give the
+piece a name that differs from its inputs, or to pass `--out`. Nothing is
+moved, no record is written, and the temporary directory is kept and
+recorded for [`facet gc`](gc.md), so the produced files are not lost. The
+same protection covers provenance: the `sha256` id of every `path` input
+is computed before the runner starts, so a record's `provenance.inputs`
+describes the inputs as they were when the run began, even when the run
+itself touched a file.
 
 ## `--json`
 

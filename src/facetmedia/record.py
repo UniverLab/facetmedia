@@ -37,6 +37,7 @@ __all__ = [
     "RecordSpec",
     "asset_id",
     "build_record",
+    "input_entry",
     "params_digest",
     "read_record",
     "record_path",
@@ -61,6 +62,10 @@ class RecordSpec:
     ``facet`` is explicit rather than read from ``facetmedia.__version__`` so
     a stored golden record stays stable across releases. ``registry`` is
     ``None`` for the registry in use, or an explicit ``{"commit", "path"}``.
+
+    ``input_entries`` carries provenance entries hashed before the run
+    started, keyed by the input's absolute path; an input a record lists
+    that is not among them is hashed at record time instead.
     """
 
     name: str
@@ -78,6 +83,7 @@ class RecordSpec:
     registry: Mapping[str, str | None] | None = None
     verification: Mapping[str, object] | None = None
     license: Mapping[str, object] = field(default_factory=dict)
+    input_entries: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
 
 def asset_id(path: Path | str) -> str:
@@ -272,11 +278,24 @@ def _provenance(spec: RecordSpec, params: Mapping[str, object], base: Path) -> d
         "params": dict(params),
         "params_sha256": params_digest(params),
         "seed": spec.seed,
-        "inputs": [_input_entry(item, base) for item in spec.inputs],
+        "inputs": [_entry(item, base, spec.input_entries) for item in spec.inputs],
     }
 
 
-def _input_entry(item: Path | str, base: Path) -> dict[str, str]:
+def _entry(item: Path | str, base: Path, known: Mapping[str, Mapping[str, str]]) -> dict[str, str]:
+    """One ``provenance.inputs`` entry, preferring the run's precomputed hash.
+
+    An entry hashed before the runner started describes the input as it was
+    when the run began; anything else (a file the runner reported that was
+    not hashed up front) is hashed here, as it is now.
+    """
+    key = str(Path(os.path.abspath(item)))
+    if key in known:
+        return dict(known[key])
+    return input_entry(item, base)
+
+
+def input_entry(item: Path | str, base: Path) -> dict[str, str]:
     """One ``provenance.inputs`` entry: id and path name the same file.
 
     The input is resolved the way every path is (a relative one from the

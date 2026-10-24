@@ -28,7 +28,7 @@ from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
 from facetmedia.record import RecordSpec
-from facetmedia.registry import Capability, Package, load_active_registry
+from facetmedia.registry import Capability, Field, Package, load_active_registry
 from facetmedia.registry_types import Model
 from facetmedia.runner import Invocation, Outcome, RunAsset, VerifyResult
 
@@ -50,6 +50,9 @@ class RunJob:
     run_id: str
     timeout_s: float | None
     verify: bool
+    piece_path: Path | None
+    input_paths: tuple[Path, ...]
+    input_entries: Mapping[str, Mapping[str, str]]
     accepted: tuple[Mapping[str, object], ...] = ()
 
     @property
@@ -75,16 +78,26 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     pulled, downloaded = _ensure_installed(args, package, run_id)
     try:
         accepted = tuple(licenses.require(package.models))
+        inputs = _piece_inputs(capability, piece, piece_dir)
+        out_dir = Path(args.out) if args.out else piece_dir
+        paths = _input_paths(capability, inputs)
+        piece_path = None if args.piece == "-" else Path(os.path.abspath(args.piece))
+        input_entries = {
+            str(Path(os.path.abspath(path))): record.input_entry(path, out_dir) for path in paths
+        }
         job = RunJob(
             capability=capability,
             package=package,
             home=home,
-            inputs=_piece_inputs(capability, piece, piece_dir),
+            inputs=inputs,
             piece_dir=piece_dir,
-            out_dir=Path(args.out) if args.out else piece_dir,
+            out_dir=out_dir,
             run_id=run_id,
             timeout_s=args.timeout,
             verify=bool(args.verify),
+            piece_path=piece_path,
+            input_paths=paths,
+            input_entries=input_entries,
             accepted=accepted,
         )
         records, exit_code = _run_locked(args, job, ephemeral)
@@ -229,6 +242,25 @@ def _piece_inputs(
     return schema.validate(capability, raw, piece_dir)
 
 
+def _input_paths(capability: Capability, values: Mapping[str, Any]) -> tuple[Path, ...]:
+    """Every ``path`` input the validated values carry, in schema order."""
+    return _field_paths(capability.inputs, values)
+
+
+def _field_paths(fields: tuple[Field, ...], values: Mapping[str, Any]) -> tuple[Path, ...]:
+    """The ``path`` values among ``values``, recursing into array items."""
+    found: list[Path] = []
+    for field in fields:
+        value = values.get(field.name)
+        if field.type == "path" and isinstance(value, str):
+            found.append(Path(value))
+        elif field.type == "array" and isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    found.extend(_field_paths(field.items, item))
+    return tuple(found)
+
+
 def _lock_params(args: argparse.Namespace) -> tuple[bool, float]:
     """``(wait, timeout_s)`` for a lock this verb takes (set by the CLI)."""
     return bool(getattr(args, "wait", True)), float(getattr(args, "wait_timeout", 3600.0))
@@ -325,6 +357,7 @@ def _place(
     verdicts: Mapping[str, VerifyResult],
 ) -> list[dict[str, object]]:
     """Move every asset onto ``<out>/<file>`` and write its record beside it."""
+    _refuse_overwrite(job, assets)
     records: list[dict[str, object]] = []
     for asset in assets:
         target = job.out_dir / asset.file
@@ -333,6 +366,41 @@ def _place(
         record.write_record(target, built)
         records.append(built)
     return records
+
+
+def _refuse_overwrite(job: RunJob, assets: Sequence[RunAsset]) -> None:
+    """Refuse an asset that would land on the run's own input (FR2).
+
+    The check runs before anything is moved, so a refusal never loses the
+    produced files: they stay in the temp directory the caller keeps.
+    """
+    for asset in assets:
+        target = job.out_dir / asset.file
+        for protected in _protected_paths(job):
+            if _same_file(target, protected):
+                raise FacetError(
+                    "invalid_input",
+                    f"asset {asset.file} would overwrite input {protected}",
+                    hint="give the piece a name that differs from its inputs, or pass --out",
+                    details={"asset": asset.file, "input": str(protected)},
+                )
+
+
+def _protected_paths(job: RunJob) -> tuple[Path, ...]:
+    """The files this run must never overwrite: its inputs and the piece."""
+    if job.piece_path is None:
+        return job.input_paths
+    return (*job.input_paths, job.piece_path)
+
+
+def _same_file(target: Path, protected: Path) -> bool:
+    """Whether two paths name one file: same resolved path, or same file."""
+    if target.resolve() == protected.resolve():
+        return True
+    try:
+        return os.path.samefile(target, protected)
+    except OSError:
+        return False
 
 
 def _record_spec(
@@ -360,6 +428,7 @@ def _record_spec(
         inputs=tuple(asset.inputs),
         verification=_verification(verdicts.get(asset.file)),
         license=job.license_section,
+        input_entries=job.input_entries,
     )
 
 

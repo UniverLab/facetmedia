@@ -9,9 +9,11 @@ runner reports its process group before sleeping.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -199,6 +201,131 @@ def doctor(req: Request) -> dict[str, Any]:
 runner.main()
 '''
 
+#: A runner whose one asset is named like the piece's own input image.
+COLLIDING_RUNNER = '''"""Echo run; its asset lands on the piece's own input."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    image = Path(str(req.inputs["image"]))
+    (req.out_dir / image.name).write_bytes(b"collided")
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": image.name,
+                "name": "lamina",
+                "kind": "image",
+                "mime": "image/png",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [str(image)],
+            }
+        ],
+    }
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
+#: A runner that writes into its input file while producing an unrelated asset.
+MUTATING_RUNNER = '''"""Echo run; modifies its input in place, makes an unrelated asset."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    image = Path(str(req.inputs["image"]))
+    image.write_bytes(b"mutated")
+    (req.out_dir / "out.txt").write_text("made", encoding="utf-8")
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": "out.txt",
+                "name": "out",
+                "kind": "text",
+                "mime": "text/plain",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [str(image)],
+            }
+        ],
+    }
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
+#: A runner whose one asset is named like the piece file itself.
+PIECE_HIT_RUNNER = '''"""Echo run; its asset lands on the piece file."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    (req.out_dir / "piece.toml").write_text('asset = true\\n', encoding="utf-8")
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": "piece.toml",
+                "name": "piece",
+                "kind": "text",
+                "mime": "text/plain",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [],
+            }
+        ],
+    }
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
 
 # --- fixtures and helpers.
 
@@ -249,6 +376,38 @@ def swap_echo_runner(facet_home: Path) -> Iterator[Callable[[str], None]]:
 
 def _registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+
+
+#: A capability with a ``path`` input, for the input-overwrite tests.
+PICK_CAPABILITY = """
+[capabilities.pick]
+summary = "Take an image as input."
+kind = "image"
+
+[capabilities.pick.inputs.image]
+type = "path"
+required = true
+description = "The image to take."
+"""
+
+
+def _registry_with_pick(monkeypatch: pytest.MonkeyPatch, directory: Path) -> None:
+    """A registry copy with ``echo.pick`` (a ``path`` input) on the echo package.
+
+    The environment files are copied verbatim, so the shared ``echo`` install
+    still matches the lock and no test triggers a second sync.
+    """
+    target = directory / "registry"
+    shutil.copytree(FIXTURES, target)
+    manifest = target / "packages" / "echo" / "package.toml"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + PICK_CAPABILITY, encoding="utf-8")
+    monkeypatch.setenv("FACET_REGISTRY", str(target))
+
+
+def _pick_piece(directory: Path) -> Path:
+    piece = directory / "piece.toml"
+    piece.write_text('[inputs]\nimage = "lamina.png"\n', encoding="utf-8")
+    return piece
 
 
 def _piece(directory: Path, *, text: str = "hello", repeat: int = 2, extra: str = "") -> Path:
@@ -526,6 +685,88 @@ def test_run_verify_exit_0_without_a_result_is_runner_failed(
     assert code == EXIT_RUNNER_FAILED
     assert error["code"] == "runner_failed"
     assert "wrote no result file" in error["message"]
+
+
+# --- inputs are protected and hashed before the run (FR1, FR2).
+
+
+def test_run_refuses_an_asset_that_would_overwrite_an_input(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Callable[[str], None],
+) -> None:
+    _registry_with_pick(monkeypatch, tmp_path)
+    swap_echo_runner(COLLIDING_RUNNER)
+    image = tmp_path / "lamina.png"
+    image.write_bytes(b"original")
+    piece = _pick_piece(tmp_path)
+
+    code = main(["run", "echo.pick", str(piece), "--no-verify", "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+    assert "would overwrite input" in error["message"]
+    assert error["details"]["asset"] == "lamina.png"
+    assert Path(error["details"]["input"]) == image
+    # Nothing was moved: the input's bytes are untouched, no record was
+    # written, and the temp dir is kept with the produced file in it.
+    assert image.read_bytes() == b"original"
+    assert not (tmp_path / "lamina.png.facet.json").exists()
+    kept = list(tmp_path.glob(".facet-tmp-*"))
+    assert len(kept) == 1
+    assert (kept[0] / "lamina.png").read_bytes() == b"collided"
+
+
+def test_run_hashes_inputs_before_the_runner(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Callable[[str], None],
+) -> None:
+    _registry_with_pick(monkeypatch, tmp_path)
+    swap_echo_runner(MUTATING_RUNNER)
+    image = tmp_path / "lamina.png"
+    image.write_bytes(b"before")
+    piece = _pick_piece(tmp_path)
+    out = tmp_path / "out"
+
+    code = main(["run", "echo.pick", str(piece), "--out", str(out), "--no-verify", "--json"])
+    envelope = _envelope(capsys)
+    assert code == 0
+    # The runner changed the input in place, but the record describes the
+    # input as it was when the run started.
+    assert image.read_bytes() == b"mutated"
+    stored = json.loads((out / "out.txt.facet.json").read_text(encoding="utf-8"))
+    assert envelope["data"]["assets"] == [stored]
+    inputs = stored["provenance"]["inputs"]
+    assert inputs[0]["id"] == f"sha256:{hashlib.sha256(b'before').hexdigest()}"
+    assert (out / inputs[0]["path"]).resolve() == image
+
+
+def test_run_refuses_overwriting_the_piece(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Callable[[str], None],
+) -> None:
+    _registry(monkeypatch)
+    swap_echo_runner(PIECE_HIT_RUNNER)
+    piece = _piece(tmp_path)
+    original = piece.read_bytes()
+
+    code = main(["run", "echo.text", str(piece), "--no-verify", "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+    assert "would overwrite input" in error["message"]
+    assert Path(error["details"]["input"]) == piece
+    assert piece.read_bytes() == original
+    assert not (tmp_path / "piece.toml.facet.json").exists()
+    assert list(tmp_path.glob(".facet-tmp-*")) != []
 
 
 # --- facet killed mid-run and the runner timeout (FR3, FR7).
