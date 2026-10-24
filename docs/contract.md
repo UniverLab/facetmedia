@@ -37,7 +37,7 @@ Branch on the exit code without parsing prose:
 |------|------|------|
 | (success) | 0 | |
 | `internal` | 1 | unexpected error; the traceback goes to the run log under `~/.facet/logs/<YYYY-MM-DD>/`, and `message`/`details.log` name the file |
-| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate` |
+| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate`, a `run` asset that would overwrite one of the run's inputs |
 | `verification_failed` | 3 | the asset was made but its check did not pass |
 | `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
 | `machine_cannot` | 5 | the machine or facet's own health does not meet the requirements (RAM, disk, platform, a failing `facet doctor` check) |
