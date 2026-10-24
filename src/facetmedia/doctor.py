@@ -794,7 +794,7 @@ def execute(
             classes.extend(_section_classes(section, named=bool(target)))
     data: dict[str, object] = {
         "healthy": not classes,
-        "facet": {str(entry["name"]): entry for entry in facet_entries},
+        "facet": _facet_data(facet_entries),
         "packages": {name: section.as_data() for name, section in sections.items()},
     }
     if capability_id is not None and len(selected) == 1:
@@ -896,6 +896,14 @@ def _package_section(
         needs_pull=readiness["installed"]["ok"] is not True
         or readiness["models"]["ok"] is not True,
     )
+
+
+def _facet_data(entries: list[dict[str, object]]) -> dict[str, object]:
+    """The facet section keyed by check name, each check `{ok, detail, fix}`."""
+    return {
+        str(entry["name"]): {"ok": entry["ok"], "detail": entry["detail"], "fix": entry["fix"]}
+        for entry in entries
+    }
 
 
 def _facet_classes(entries: list[dict[str, object]]) -> list[str]:

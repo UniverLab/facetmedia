@@ -113,7 +113,7 @@ empty. `facet registry validate` refuses a runner that does not register
 One envelope; `data` is:
 
 ```json
-{"healthy": true, "facet": {"python": {"name": "python", "ok": true, "detail": "python 3.12.1", "fix": ""}, "...": {}}, "packages": {"echo": {"installed": true, "readiness": {"compatible": {"ok": true, "detail": "...", "fix": ""}, "...": {}}, "doctor": [{"name": "imports", "ok": true, "detail": "...", "fix": ""}]}}}
+{"healthy": true, "facet": {"python": {"ok": true, "detail": "python 3.12.1", "fix": ""}, "...": {}}, "packages": {"echo": {"installed": true, "readiness": {"compatible": {"ok": true, "detail": "...", "fix": ""}, "...": {}}, "doctor": [{"name": "imports", "ok": true, "detail": "...", "fix": ""}]}}}
 ```
 
 A capability target adds `capability`, `can_run` and `needs_pull`.
@@ -124,10 +124,13 @@ A capability target adds `capability`, `can_run` and `needs_pull`.
 
 | Order | Class | Exit | When |
 |-------|-------|------|------|
-| 1 | `machine_cannot` | 5 | a facet check, a readiness check, or a package doctor check failed |
+| 1 | `machine_cannot` | 5 | a facet check, a readiness check other than `licenses`/`installed`/`models`, or a package doctor check failed |
 | 2 | `license_not_accepted` | 4 | a model's terms are not accepted |
 | 3 | `not_installed` | 7 | a named package is not installed |
 | 4 | `runner_failed` | 9 | a doctor verb crashed or broke the protocol |
+
+`installed`/`models` failing on their own pick no class: they are what
+`needs_pull` reports, and the named-but-uninstalled case is row 3.
 
 `invalid_input` (2) is an unknown target; a lock that never comes free is
 `lock_busy` (6).

@@ -7,6 +7,7 @@ depths, and the exit classes.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -209,6 +210,19 @@ def _dead_pid() -> int:
     return process.pid
 
 
+def _spy_hold(calls: list[tuple[str, str, bool, float]]) -> Any:
+    """A ``lock.hold`` that records its arguments and then takes the real lock."""
+    real = doctor_module.lock.hold
+
+    @contextlib.contextmanager
+    def hold(mode: str, purpose: str, wait: bool = True, timeout_s: float = 3600.0) -> Any:
+        calls.append((mode, purpose, wait, timeout_s))
+        with real(mode, purpose, wait, timeout_s):
+            yield
+
+    return hold
+
+
 # --- FR8: the JSON shape, with the capability keys.
 
 
@@ -237,7 +251,7 @@ def test_doctor_capability_target_json_shape(
     assert facet_names == list(doctor_module.FACET_CHECK_ORDER)
     assert set(data["facet"]) == set(doctor_module.FACET_CHECK_ORDER)
     for entry in data["facet"].values():
-        assert set(entry) == {"name", "ok", "detail", "fix"}
+        assert set(entry) == {"ok", "detail", "fix"}
     section = data["packages"]["echo"]
     assert set(section) == {"installed", "readiness", "doctor"}
     assert section["installed"] is False
@@ -307,6 +321,41 @@ def test_doctor_unknown_target_is_invalid_input(
     envelope = _envelope(capsys)
     assert envelope["ok"] is False
     assert envelope["error"]["code"] == "invalid_input"
+
+
+def test_doctor_package_name_target_covers_the_package_without_capability_keys(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    """A package name resolves as a package: the capability keys stay out."""
+    assert facet_home.is_dir()
+
+    code = main(["doctor", "echo", "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["healthy"] is True
+    assert set(data) == {"healthy", "facet", "packages"}
+    assert set(data["packages"]) == {"echo"}
+    section = data["packages"]["echo"]
+    assert section["installed"] is True
+    details = [entry["detail"] for entry in section["doctor"]]
+    assert any("echo.text" in detail for detail in details)
+
+
+def test_doctor_takes_the_lock_shared_and_honours_the_wait_flags(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Doctor holds the facet lock shared and passes --no-wait through."""
+    _fresh_home(monkeypatch, tmp_path)
+    calls: list[tuple[str, str, bool, float]] = []
+    monkeypatch.setattr(doctor_module.lock, "hold", _spy_hold(calls))
+
+    assert main(["doctor", "--json"]) == 0
+    _envelope(capsys)
+    assert calls == [("shared", "facet doctor", True, 3600.0)]
+
+    assert main(["doctor", "--no-wait", "--wait-timeout", "30", "--json"]) == 0
+    _envelope(capsys)
+    assert calls[1] == ("shared", "facet doctor", False, 30.0)
 
 
 # --- FR3: the readiness checks and their fixes.
@@ -646,10 +695,16 @@ def test_gate_skips_the_doctor_before_the_env_exists(
     assert errors == []
 
 
-def test_requirement_errors_include_the_quick_doctor(facet_home: Path) -> None:
+def test_requirement_errors_include_the_quick_doctor(
+    facet_home: Path, swap_echo_runner: Any
+) -> None:
+    """The gate asks the installed package's doctor, so its failure gates too."""
+    swap_echo_runner(FAILING_DOCTOR_RUNNER)
     package = load_registry(FIXTURES).packages["echo"]
+
     errors = doctor_module.requirement_errors(package, Home.from_env(), "test-run")
-    assert errors == []
+    assert [error.code for error in errors] == ["machine_cannot"]
+    assert "cannot import the tool" in errors[0].message
 
 
 def test_human_output_marks_each_check_and_indents_the_fix(
