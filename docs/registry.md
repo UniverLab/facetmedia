@@ -266,9 +266,14 @@ Like every heavy verb, it takes the exclusive lock (see [home.md](home.md)).
 The first command that needs the registry and finds no snapshot fetches it once,
 printing `fetching the registry (first use)` to stderr. With no network and no
 snapshot the error is `download_failed` (exit 8) with the hint `run facet update
-when online`. When the failure is GitHub's rate limit, the message says `GitHub
-rate limit reached` with the reset instant, and the hint names `GITHUB_TOKEN`. A
-failed update changes nothing: the previous snapshot stays in use.
+when online`. When GitHub reports its rate limit (`403` with
+`X-RateLimit-Remaining: 0`, or `429`), the message is `<url>: GitHub rate limit
+reached`, followed by `(retry after <instant>)` when GitHub sent a reset, and
+the hint is `set GITHUB_TOKEN to a GitHub token to lift the limit, or retry
+after the reset` when no token was sent, `retry after the reset` when one was;
+`details` then holds `url`, `rate_limited: true`, and `reset`, an ISO 8601 UTC
+instant or `null`. Any other HTTP status keeps `HTTP <code>` and the hint
+above. A failed update changes nothing: the previous snapshot stays in use.
 
 With `--json`:
 
