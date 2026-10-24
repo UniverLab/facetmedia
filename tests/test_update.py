@@ -10,6 +10,8 @@ import http.client
 import json
 import os
 import shutil
+import urllib.error
+from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,9 @@ FIXTURE_PACKAGES = ["echo", "future", "termsy"]
 #: update_registry makes exactly two GitHub calls: the commit, then the archive.
 GITHUB_CALLS = 2
 EXIT_DOWNLOAD_FAILED = 8
+#: X-RateLimit-Reset epoch 1766000000, formatted the way facet formats it.
+RESET_ISO = "2025-12-17T19:33:20Z"
+NO_TOKEN_HINT = "set GITHUB_TOKEN to a GitHub token to lift the limit, or retry after the reset"
 
 
 def _home() -> Path:
@@ -492,3 +497,75 @@ def test_a_cut_connection_is_a_download_failure(
     assert exc.value.code == "download_failed"
     assert exc.value.hint == "run facet update when online"
     assert list(home.tmp_dir.iterdir()) == []
+
+
+def _http_error(headers: Message | None) -> urllib.error.HTTPError:
+    """A GitHub 403 carrying ``headers``, built without any network."""
+    return urllib.error.HTTPError(
+        "https://api.github.com/repos/UniverLab/facetmedia-registry/commits/main",
+        403,
+        "Forbidden",
+        headers,
+        None,
+    )
+
+
+def _rate_limited() -> urllib.error.HTTPError:
+    """A GitHub 403 that has exhausted the anonymous quota, resetting at the epoch."""
+    headers = Message()
+    headers["X-RateLimit-Remaining"] = "0"
+    headers["X-RateLimit-Reset"] = "1766000000"
+    return _http_error(headers)
+
+
+def _fails_with(error: urllib.error.HTTPError) -> object:
+    def _raise(*_args: object, **_kwargs: object) -> None:
+        raise error
+
+    return _raise
+
+
+def test_rate_limited_403_reports_the_reset_and_the_token_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr("urllib.request.urlopen", _fails_with(_rate_limited()))
+
+    with pytest.raises(FacetError) as exc:
+        update.resolve_ref("main")
+
+    assert exc.value.code == "download_failed"
+    assert "GitHub rate limit reached" in exc.value.message
+    assert RESET_ISO in exc.value.message
+    assert exc.value.hint == NO_TOKEN_HINT
+    assert exc.value.details["rate_limited"] is True
+    assert exc.value.details["reset"] == RESET_ISO
+
+
+def test_rate_limited_403_with_a_token_only_suggests_the_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    monkeypatch.setattr("urllib.request.urlopen", _fails_with(_rate_limited()))
+
+    with pytest.raises(FacetError) as exc:
+        update.resolve_ref("main")
+
+    assert exc.value.code == "download_failed"
+    assert "GitHub rate limit reached" in exc.value.message
+    assert exc.value.hint == "retry after the reset"
+    assert exc.value.details["rate_limited"] is True
+
+
+def test_plain_403_stays_the_plain_http_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    for headers in (Message(), None):  # no rate-limit header at all, and no headers object
+        monkeypatch.setattr("urllib.request.urlopen", _fails_with(_http_error(headers)))
+
+        with pytest.raises(FacetError) as exc:
+            update.resolve_ref("main")
+
+        assert exc.value.code == "download_failed"
+        assert "HTTP 403" in exc.value.message
+        assert "rate_limited" not in exc.value.details
+        assert exc.value.hint == "run facet update when online"

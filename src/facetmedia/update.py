@@ -24,6 +24,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from email.message import Message
 from pathlib import Path
 from typing import Final
 
@@ -54,6 +55,8 @@ COMMIT_HEX_LEN: Final[int] = 40
 TIMEOUT_S: Final[float] = 60.0
 ARCHIVE_SUFFIX: Final[str] = ".tar.gz"
 HINT: Final[str] = "run facet update when online"
+#: GitHub's status for a quota that is already spent (429 has no Remaining header).
+RATE_LIMITED_STATUS: Final[int] = 429
 
 
 def default_ref() -> str:
@@ -212,6 +215,9 @@ def _opened(url: str, accept: str | None) -> Iterator[http.client.HTTPResponse]:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
             yield response
     except urllib.error.HTTPError as exc:
+        rate_limited = _rate_limit_error(url, exc)
+        if rate_limited is not None:
+            raise rate_limited from exc
         raise _failed(url, f"HTTP {exc.code}") from exc
     except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
@@ -220,6 +226,37 @@ def _opened(url: str, accept: str | None) -> Iterator[http.client.HTTPResponse]:
 
 def _failed(url: str, why: str) -> FacetError:
     return FacetError("download_failed", f"{url}: {why}", hint=HINT, details={"url": url})
+
+
+def _rate_limit_error(url: str, exc: urllib.error.HTTPError) -> FacetError | None:
+    """The GitHub rate-limit failure for ``exc``, or ``None`` for any other HTTP error."""
+    if exc.code not in (403, 429):
+        return None
+    headers: Message | None = getattr(exc, "headers", None)
+    remaining = headers.get("X-RateLimit-Remaining") if headers is not None else None
+    if exc.code != RATE_LIMITED_STATUS and (remaining is None or remaining.strip() != "0"):
+        return None
+    raw = headers.get("X-RateLimit-Reset") if headers is not None else None
+    reset: str | None = None
+    if raw is not None:
+        try:
+            reset = datetime.fromtimestamp(int(raw), tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, OverflowError, OSError):
+            reset = None  # an unreadable reset is reported as null
+    message = f"{url}: GitHub rate limit reached"
+    if reset is not None:
+        message = f"{message} (retry after {reset})"
+    hint = (
+        "retry after the reset"
+        if os.environ.get("GITHUB_TOKEN")
+        else "set GITHUB_TOKEN to a GitHub token to lift the limit, or retry after the reset"
+    )
+    return FacetError(
+        "download_failed",
+        message,
+        hint=hint,
+        details={"url": url, "rate_limited": True, "reset": reset},
+    )
 
 
 def _refuse_member(member: tarfile.TarInfo) -> None:

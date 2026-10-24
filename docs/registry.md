@@ -247,7 +247,9 @@ Like every heavy verb, it takes the exclusive lock (see [home.md](home.md)).
 - The reference is resolved with
   `GET https://api.github.com/repos/UniverLab/facetmedia-registry/commits/<REF>`.
   Set `GITHUB_TOKEN` to lift the anonymous rate limit; facet sends it as
-  `Authorization: Bearer` only when it is set.
+  `Authorization: Bearer` only when it is set. The fetch uses the GitHub API
+  (60 requests/hour anonymous); `GITHUB_TOKEN` is sent when set and lifts that
+  limit.
 - `https://codeload.github.com/UniverLab/facetmedia-registry/tar.gz/<commit>` is
   downloaded to `<home>/tmp/registry-<commit>.tar.gz`, unpacked there, and the
   tarball is removed once the snapshot is installed or refused. Its one top
