@@ -19,7 +19,6 @@ SHORT_TIMEOUT_S = 5.0
 UNIMPLEMENTED_ARGV = [
     ["list"],
     ["describe"],
-    ["check"],
     ["preview"],
     ["gc"],
     ["rm"],

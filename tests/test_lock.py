@@ -27,13 +27,20 @@ LOCKING_VERBS = [
     ["update"],
     ["pull", "echo"],
     ["run", "echo.text", "piece.toml"],
-    ["check"],
     ["rm"],
     ["gc"],
     ["license", "accept", "termsy-weights"],
 ]
 
-LIGHT_VERBS = [["list"], ["describe"], ["preview"], ["license", "list"]]
+LIGHT_VERBS = [
+    ["list"],
+    ["describe"],
+    # `check` takes no lock flags: without an asset it takes no lock at all,
+    # and with one it holds the lock itself with the default wait.
+    ["check", "echo.text"],
+    ["preview"],
+    ["license", "list"],
+]
 
 HolderStart = Callable[[str, str], tuple[mp.Process, Any]]
 

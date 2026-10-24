@@ -35,14 +35,16 @@ read from stdin, for clients that build pieces in memory.
 ## What happens, in order
 
 1. The capability is resolved from the registry; an unknown id is
-   `invalid_input` with the known ids, an incompatible package is
-   `machine_cannot`.
-2. If the package is not installed, it is pulled first (same lock rules and
+   `invalid_input` with the known ids.
+2. Before anything is pulled, the machine gate of [`facet check`](check.md)
+   runs (compatibility, platform, RAM, disk, GPU, host libraries and model
+   acceptance); a refusal is `machine_cannot` (exit 5) or
+   `license_not_accepted` (exit 4) for a model whose terms were not accepted
+   with `facet license accept`.
+3. If the package is not installed, it is pulled first (same lock rules and
    checks as [`facet pull`](pull.md), its plan printed to stderr and the run
    log before it starts) — unless `--no-pull`, which is `not_installed`
    (exit 7).
-3. Every model with `requires_acceptance` needs its recorded acceptance
-   (`facet license accept`), else `license_not_accepted` (exit 4).
 4. The piece is validated against the capability's inputs.
 5. The [facet lock](home.md#the-lock) is taken: exclusive if the package's
    `requirements.exclusive` says so, else shared. `--no-wait` and

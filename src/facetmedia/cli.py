@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, contract, env, licenses, lock, registry, run, update
+from facetmedia import __version__, check, contract, env, licenses, lock, registry, run, update
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import load_active_registry, validate_registry
@@ -24,7 +24,7 @@ _VERBS: tuple[tuple[str, str], ...] = (
     ("pull", "install a tool into its own pinned environment"),
     ("list", "list installed and available tools"),
     ("describe", "show a tool's manifest"),
-    ("check", "verify an installed tool"),
+    ("check", "report machine readiness or re-verify an asset"),
     ("run", "run a tool through the --json contract"),
     ("preview", "render a tool's output for a person"),
     ("rm", "remove an installed tool"),
@@ -37,8 +37,10 @@ _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
 )
 
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
-# describe, preview, license list) take no lock and reject them.
-_LOCK_VERBS: frozenset[str] = frozenset({"check", "gc", "pull", "rm", "run", "update"})
+# describe, preview, license list) take no lock and reject them. `check`
+# without an asset takes no lock (a machine-only report); with an asset it
+# holds the lock itself, so it also rejects the flags.
+_LOCK_VERBS: frozenset[str] = frozenset({"gc", "pull", "rm", "run", "update"})
 
 
 class FacetParser(argparse.ArgumentParser):
@@ -168,7 +170,47 @@ def _announce_run(data: dict[str, object]) -> None:
     print(f"out {data.get('out_dir')}")
 
 
+def _handle_check(args: argparse.Namespace) -> int:
+    """Machine-only `check` takes no lock; re-verifying an asset holds it."""
+    home = Home.from_env()
+    if args.asset is None:
+        data, code = check.run_check(args.capability, home, args.run_id)
+        contract.emit(contract.ok(data), args.json)
+        if not args.json:
+            _announce_check(data)
+        return code
+    _capability, package = check.resolve(args.capability)
+    mode: lock.LockMode = "exclusive" if package.requirements.exclusive else "shared"
+    wait, wait_timeout = run._lock_params(args)
+    with lock.hold(mode, "facet check", wait, wait_timeout):
+        data, code = check.reverify(args.capability, args.asset, home, args.run_id)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_reverify(data)
+    return code
+
+
+def _announce_check(data: dict[str, object]) -> None:
+    state = "can run" if data.get("can_run") is True else "cannot run"
+    suffix = ", needs pull" if data.get("needs_pull") is True else ""
+    print(f"{data.get('capability')}: {state}{suffix}")
+    checks = data.get("checks")
+    if not isinstance(checks, dict):
+        return
+    for name, entry in checks.items():
+        if not isinstance(entry, dict):
+            continue
+        mark = "ok" if entry.get("ok") is True else "FAIL"
+        print(f"  {mark} {name}: {entry.get('detail')}")
+
+
+def _announce_reverify(data: dict[str, object]) -> None:
+    state = "passed" if data.get("passed") is True else "failed"
+    print(f"{data.get('asset')} {state}")
+
+
 _HANDLERS: dict[str, Handler] = {
+    "check": _handle_check,
     "pull": _handle_pull,
     "run": _handle_run,
     "update": _handle_update,
@@ -308,6 +350,16 @@ def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_check_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("capability", help="registry capability id to check")
+    parser.add_argument(
+        "asset",
+        nargs="?",
+        default=None,
+        help="asset or record to re-verify (without it, facet reports machine readiness)",
+    )
+
+
 def _add_run_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("capability", help="registry capability id to run")
     parser.add_argument("piece", help="piece file to run, or - for JSON on stdin")
@@ -359,6 +411,8 @@ def build_parser() -> FacetParser:
             _add_update_flags(verb_parser)
         elif verb == "pull":
             _add_pull_flags(verb_parser)
+        elif verb == "check":
+            _add_check_flags(verb_parser)
         elif verb == "run":
             _add_run_flags(verb_parser)
     license_parsers = _add_group(

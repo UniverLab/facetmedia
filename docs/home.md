@@ -52,7 +52,8 @@ re-verification of `check` when the package manifest sets
 and overlap; `list`, `describe`, `preview` and a machine-only `check` take no
 lock at all.
 
-Every verb that locks accepts two flags:
+Every verb that locks accepts two flags, except the asset form of `check`,
+which always waits with the defaults:
 
 ```bash
 facet pull --no-wait              # fail at once instead of waiting

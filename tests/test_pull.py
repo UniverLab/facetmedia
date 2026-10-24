@@ -22,6 +22,7 @@ from types import SimpleNamespace
 import pytest
 
 from facetmedia import __version__
+from facetmedia import check as check_module
 from facetmedia import env as env_module
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
@@ -488,7 +489,7 @@ def test_ram_requirement_fails(
     fragment: str,
 ) -> None:
     _registry(monkeypatch)
-    monkeypatch.setattr(env_module, "_mem_total_gb", lambda: mem_gb)
+    monkeypatch.setattr(check_module, "mem_total_gb", lambda: mem_gb)
 
     code, envelope = _pull(capsys, "pull", "echo")
     assert code == EXIT_MACHINE_CANNOT

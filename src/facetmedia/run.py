@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from facetmedia import __version__, env, licenses, record, runner, schema
+from facetmedia import __version__, check, env, licenses, record, runner, schema
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
@@ -66,6 +66,7 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     """Run one piece; returns the ``--json`` data and the process exit code."""
     piece, piece_dir = _read_piece(args.piece)
     capability, package = _resolve_capability(args.capability)
+    _require_machine(package)
     pulled, downloaded = _ensure_installed(args, package)
     accepted = tuple(licenses.require(package.models))
     job = RunJob(
@@ -136,6 +137,13 @@ def _resolve_capability(capability_id: str) -> tuple[Capability, Package]:
         )
     package.require_compatible()
     return capability, package
+
+
+def _require_machine(package: Package) -> None:
+    """The ``facet check`` gate, before anything is pulled, planned or run."""
+    errors = check.requirement_errors(package, Home.from_env())
+    if errors:
+        raise errors[0]
 
 
 def _ensure_installed(args: argparse.Namespace, package: Package) -> tuple[bool, int]:

@@ -10,7 +10,6 @@ pull: there is no repair command.
 
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import json
 import logging
@@ -31,7 +30,7 @@ from typing import IO, Any, Final
 import uv
 
 from facetmedia import __version__
-from facetmedia import licenses as licenses_module
+from facetmedia import check as check_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import Model, Package
@@ -54,7 +53,6 @@ SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.m
 #: feat(run) ships the runner SDK; until then there is nothing to copy.
 RUNNER_SDK: Final[Path] = Path(__file__).with_name("runner_sdk.py")
 SDK_MODULE: Final[str] = "facet_runner_sdk.py"
-NO_HOST_LIBS_HINT: Final[str] = "facet never installs host libraries"
 
 
 def is_installed(package: Package, home: Home) -> bool:
@@ -94,98 +92,16 @@ def pull(package: Package, home: Home, verify_models: bool = False) -> dict[str,
 
 
 def _preflight(package: Package, home: Home) -> None:
-    """The FR2 checks, in order, before any disk or network write."""
+    """The FR2 checks, in order, before any disk or network write.
+
+    The checks themselves live in ``facetmedia.check`` so ``facet check``
+    reports exactly what ``pull`` refuses; only the probe (which needs an
+    installed environment) is ``check``-only.
+    """
     require_posix()
-    _require_platform(package)
-    _require_ram(package)
-    _require_disk(home, package)
-    package.require_compatible()
-    _require_host_libs(package)
-    licenses_module.require(package.models)
-
-
-def _require_platform(package: Package) -> None:
-    if sys.platform in package.requirements.platforms:
-        return
-    raise FacetError(
-        "machine_cannot",
-        f"{package.name} does not support this platform ({sys.platform})",
-        details={"platform": sys.platform, "platforms": list(package.requirements.platforms)},
-    )
-
-
-def _require_ram(package: Package) -> None:
-    needed = package.requirements.ram_gb
-    if needed <= 0:
-        return
-    have = _mem_total_gb()
-    if have is None:
-        raise FacetError("machine_cannot", "cannot read MemTotal from /proc/meminfo")
-    if have < needed:
-        raise FacetError(
-            "machine_cannot",
-            f"{package.name} needs {needed} GB of RAM, this machine has {have:.2f} GB",
-            details={"required_gb": needed, "available_gb": round(have, 3)},
-        )
-
-
-def _mem_total_gb() -> float | None:
-    """Total RAM from ``/proc/meminfo`` in GB, or ``None`` when unreadable."""
-    try:
-        text = Path("/proc/meminfo").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    for line in text.splitlines():
-        key, _, rest = line.partition(":")
-        if key != "MemTotal":
-            continue
-        try:
-            return int(rest.split()[0]) / (1024 * 1024)
-        except (IndexError, ValueError):
-            return None
-    return None
-
-
-def _require_disk(home: Home, package: Package) -> None:
-    """Free disk at ``<home>`` must cover disk_gb x 1.1 minus what is installed."""
-    installed = _tree_bytes(home.envs_dir) + _tree_bytes(home.models_dir)
-    free = shutil.disk_usage(home.root).free
-    need = int(package.requirements.disk_gb * 1.1 * GB) - installed
-    if free >= need:
-        return
-    raise FacetError(
-        "machine_cannot",
-        f"{package.name} needs {need / GB:.2f} GB free at {home.root}: "
-        f"{free / GB:.2f} GB free, {installed / GB:.2f} GB already installed",
-        details={"free_bytes": free, "need_bytes": need, "installed_bytes": installed},
-    )
-
-
-def _tree_bytes(path: Path) -> int:
-    """Bytes used by the files under ``path``; 0 when it does not exist."""
-    if not path.exists():
-        return 0
-    total = 0
-    for entry in path.rglob("*"):
-        try:
-            if entry.is_file():
-                total += entry.stat().st_size
-        except OSError:
-            continue
-    return total
-
-
-def _require_host_libs(package: Package) -> None:
-    for soname in package.requirements.host_libs:
-        try:
-            ctypes.CDLL(soname)
-        except OSError as exc:
-            raise FacetError(
-                "machine_cannot",
-                f"cannot load {soname}: {exc}; {NO_HOST_LIBS_HINT}",
-                hint=package.requirements.host_hint or None,
-                details={"soname": soname},
-            ) from exc
+    errors = check_module.requirement_errors(package, home)
+    if errors:
+        raise errors[0]
 
 
 # --- The plan, printed to stderr before anything happens.

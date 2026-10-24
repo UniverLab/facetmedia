@@ -18,17 +18,19 @@ facet pull kokoro --verify-models   # recompute sha256 of models already present
 
 ## What it checks first
 
-Nothing is written or downloaded until every check passes, in this order; each
-refusal is `machine_cannot` (exit 5), except the licence check, which has its
-own error:
+Nothing is written or downloaded until every check passes. This is the same
+gate [`facet check`](check.md) reports, in this order; each refusal is
+`machine_cannot` (exit 5), except the licence check, which has its own error:
 
+- the package is `compatible` with this facet version, with the hint
+  `facet update, or upgrade facet`;
 - the platform is in `requirements.platforms`;
 - total RAM (`/proc/meminfo` `MemTotal`) meets `requirements.ram_gb`;
 - free disk at the home meets `requirements.disk_gb` × 1.1, minus the bytes
   already installed under `envs/` and `models/` — the message carries both
   numbers;
-- the package is `compatible` with this facet version, with the hint
-  `facet update, or upgrade facet`;
+- a GPU answers `nvidia-smi` when `requirements.gpu` says one is required (no
+  v0.1 package does);
 - every soname in `requirements.host_libs` loads with `ctypes.CDLL` (facet
   never installs host libraries; the manifest's `host_hint` is the hint);
 - every model with `requires_acceptance = true` has an acceptance record in
