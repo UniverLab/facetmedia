@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from facetmedia import introspect
+from facetmedia import introspect, licenses
 from facetmedia import schema as schema_module
 from facetmedia.cli import main
 from facetmedia.home import Home
@@ -21,6 +22,7 @@ GOLDEN = Path(__file__).resolve().parent / "golden" / "discover"
 EXIT_INVALID_INPUT = 2
 EXIT_USAGE = 2
 FIXTURE_CAPABILITY_COUNT = 3
+TERMSY_MODEL_BYTES = 21
 
 
 def _registry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,8 +155,65 @@ def test_every_piece_example_validates(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert checked == FIXTURE_CAPABILITY_COUNT
 
 
-def test_piece_example_covers_every_field_kind() -> None:
-    """Each type gets a schema-valid value: enum first, min, false, [], text."""
+def test_list_reports_the_recorded_snapshot_identity(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``FACET_REGISTRY`` the snapshot's commit and ref are reported."""
+    home = Home.peek_env()
+    shutil.copytree(FIXTURES, home.registry_dir("abc123"))
+    home.state_file("registry.json").parent.mkdir(parents=True, exist_ok=True)
+    home.state_file("registry.json").write_text(
+        json.dumps({"commit": "abc123", "ref": "main"}), encoding="utf-8"
+    )
+    monkeypatch.delenv("FACET_REGISTRY", raising=False)
+
+    assert main(["list", "--json"]) == 0
+    data = _data(capsys)
+    assert data["registry"] == {"commit": "abc123", "ref": "main"}
+    assert data["packages"] == []
+
+
+def test_describe_termsy_reports_models_licences_and_download(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The describe payload's model rows: licence state, download, tools."""
+    _registry(monkeypatch)
+    assert main(["describe", "termsy.make", "--json"]) == 0
+    data = _data(capsys)
+    assert data["installed"] is False
+    assert data["download_bytes"] == TERMSY_MODEL_BYTES
+    assert data["piece_example"] == "[inputs]\n"
+    assert data["licenses"] == {
+        "tools": [{"subject": "termsy", "spdx": "CC-BY-NC-4.0"}],
+        "models": [
+            {
+                "id": "termsy-weights",
+                "spdx": "CC-BY-NC-4.0",
+                "commercial_use": False,
+                "requires_acceptance": True,
+                "accepted": False,
+            }
+        ],
+    }
+
+    assert licenses.accept("termsy-weights", assume_yes=True) is not None
+    capsys.readouterr()
+    assert main(["describe", "termsy.make", "--json"]) == 0
+    assert _data(capsys)["licenses"]["models"][0]["accepted"] is True
+
+    model_file = Home.peek_env().models_dir / "direct" / "termsy-weights" / "termsy.bin"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"x" * TERMSY_MODEL_BYTES)
+    assert main(["describe", "termsy.make", "--json"]) == 0
+    assert _data(capsys)["download_bytes"] == 0
+    assert main(["list", "--available", "--json"]) == 0
+    row = next(row for row in _data(capsys)["packages"] if row["name"] == "termsy")
+    assert row["models_bytes"] == TERMSY_MODEL_BYTES
+    assert row["env_bytes"] == 0
+
+
+def test_piece_example_covers_every_field_kind(tmp_path: Path) -> None:
+    """Each type gets a schema-valid value: enum first, min, false, [], path."""
     capability = Capability(
         id="demo.every",
         package="demo",
@@ -166,11 +225,13 @@ def test_piece_example_covers_every_field_kind() -> None:
             Field(name="loud", type="boolean", default=True),
             Field(name="count", type="integer", required=True, min=2.0),
             Field(name="src", type="path", required=True),
+            Field(name="offset", type="number", required=True, max=-1.0),
             Field(name="untouched", type="string"),
             Field(
                 name="takes",
                 type="array",
                 required=True,
+                min_items=2,
                 items=(Field(name="label", type="string", required=True),),
             ),
         ),
@@ -182,8 +243,12 @@ def test_piece_example_covers_every_field_kind() -> None:
         "gain = 0.5\n"
         "loud = false\n"
         "count = 2\n"
-        'src = "text"\n'
+        'src = "."\n'
+        "offset = -1.0\n"
+        "[[inputs.takes]]\n"
+        'label = "text"\n'
         "[[inputs.takes]]\n"
         'label = "text"\n'
     )
-    tomllib.loads(example)
+    piece: Any = tomllib.loads(example)
+    schema_module.validate(capability, piece["inputs"], tmp_path)

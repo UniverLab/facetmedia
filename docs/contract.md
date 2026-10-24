@@ -13,7 +13,7 @@ debug log under `~/.facet/logs/<YYYY-MM-DD>/`, so stdout is safe to parse.
 ## Success
 
 ```json
-{"contract": 1, "data": {"tools": []}, "facet": "0.1.0.dev0", "ok": true}
+{"contract": 1, "data": {"packages": [], "registry": {"commit": "9f2c1ab", "ref": "main"}}, "facet": "0.1.0.dev0", "ok": true}
 ```
 
 `contract` is the contract version (currently `1`); it changes only on a

@@ -131,8 +131,9 @@ def _piece_example(capability: Capability) -> str:
 
     Every field that is required or carries a default gets a value the
     capability's schema accepts: the first enum value, the numeric minimum,
-    and so on.  Arrays of objects become one ``[[inputs.name]]`` block, kept
-    after the scalar keys so the TOML table stays unambiguous.
+    and so on.  Arrays of objects become one ``[[inputs.name]]`` block per
+    ``min_items`` (at least one), kept after the scalar keys so the TOML
+    table stays unambiguous.
     """
     lines = ["[inputs]"]
     arrays: list[Field] = []
@@ -149,11 +150,13 @@ def _piece_example(capability: Capability) -> str:
 
 
 def _array_example_lines(field: Field) -> list[str]:
-    """One ``[[inputs.<field>]]`` block with the item fields filled in."""
-    lines = [f"[[inputs.{field.name}]]"]
-    for item in field.items:
-        if item.required or item.has_default:
-            lines.append(f"{item.name} = {_toml_value(_example_value(item))}")
+    """One ``[[inputs.<field>]]`` block per item ``min_items`` requires."""
+    lines: list[str] = []
+    for _ in range(max(field.min_items or 0, 1)):
+        lines.append(f"[[inputs.{field.name}]]")
+        for item in field.items:
+            if item.required or item.has_default:
+                lines.append(f"{item.name} = {_toml_value(_example_value(item))}")
     return lines
 
 
@@ -161,15 +164,25 @@ def _example_value(field: Field) -> Any:
     """One schema-valid value for ``field``: enum first, minimum, false."""
     if field.type == "enum" and field.values:
         return field.values[0]
-    if field.type == "integer":
-        return math.ceil(field.min) if field.min is not None else 0
-    if field.type == "number":
-        return field.min if field.min is not None else 0
+    if field.type in {"integer", "number"}:
+        return _example_number(field)
     if field.type == "boolean":
         return False
     if field.type == "array":
         return []
+    if field.type == "path":
+        # The piece's own directory: the one path that always exists.
+        return "."
     return "text"
+
+
+def _example_number(field: Field) -> float | int:
+    """The minimum when there is one, else 0 — or the maximum, below zero."""
+    if field.min is not None:
+        return math.ceil(field.min) if field.type == "integer" else field.min
+    if field.max is not None and field.max < 0:
+        return math.floor(field.max) if field.type == "integer" else field.max
+    return 0
 
 
 def _toml_value(value: Any) -> str:
