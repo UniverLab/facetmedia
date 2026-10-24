@@ -109,7 +109,9 @@ The data of a successful envelope (errors use the standard
 ```
 
 `pulled` says whether this run had to install the package first, and
-`downloaded_bytes` how much that fetched. Each entry of `assets` is the
+`downloaded_bytes` how much that fetched. An optional `warnings` list is
+present only when the machine gate warned instead of refusing (a quick
+doctor past its 10 s budget). Each entry of `assets` is the
 complete record written beside the asset: capability, package lock, tool,
 models, parameters, seed, inputs, the verification verdict
 (`passed`/`failed`, or `skipped` with `--no-verify`) and the licences it was
