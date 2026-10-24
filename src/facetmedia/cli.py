@@ -18,6 +18,7 @@ from facetmedia import (
     introspect,
     licenses,
     lock,
+    preview,
     registry,
     run,
     update,
@@ -220,6 +221,13 @@ def _announce_reverify(data: dict[str, object]) -> None:
     print(f"{data.get('asset')} {state}")
 
 
+def _handle_preview(args: argparse.Namespace) -> int:
+    """A light verb: no lock; ``--json`` prints data, otherwise serve it."""
+    data, code = preview.execute(args, args.run_id)
+    contract.emit(contract.ok(data), args.json)
+    return code
+
+
 def _handle_list(args: argparse.Namespace) -> int:
     """A light verb: the registry snapshot and the home, no lock, no network."""
     data = introspect.list_data(args.available)
@@ -285,6 +293,7 @@ _HANDLERS: dict[str, Handler] = {
     "check": _handle_check,
     "describe": _handle_describe,
     "list": _handle_list,
+    "preview": _handle_preview,
     "pull": _handle_pull,
     "run": _handle_run,
     "update": _handle_update,
@@ -476,6 +485,29 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_preview_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("asset", help="asset or record to preview")
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="print the preview URL without opening the system browser",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="port to serve the viewer on (default: a free port)",
+    )
+    parser.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=600.0,
+        metavar="SECONDS",
+        help="stop the server after this many seconds without requests (default: 600)",
+    )
+
+
 def build_parser() -> FacetParser:
     parser = FacetParser(
         prog="facet",
@@ -505,6 +537,8 @@ def build_parser() -> FacetParser:
             _add_check_flags(verb_parser)
         elif verb == "run":
             _add_run_flags(verb_parser)
+        elif verb == "preview":
+            _add_preview_flags(verb_parser)
     license_parsers = _add_group(
         subparsers,
         "license",

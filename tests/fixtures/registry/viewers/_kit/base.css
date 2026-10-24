@@ -1,0 +1,5 @@
+/* Facet viewer kit base styles (registry test fixture). */
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+}
