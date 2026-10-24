@@ -21,7 +21,7 @@ Linux and WSL only. Everything facet installs or remembers lives under one direc
 | `facet list` | list installed and available tools |
 | `facet describe` | show a tool's manifest |
 | `facet check` | verify an installed tool |
-| `facet run` | run a tool through the --json contract |
+| `facet run` | turn a piece file into verified assets with records |
 | `facet preview` | render a tool's output for a person |
 | `facet license accept` | accept a model's terms before it may be used |
 | `facet license list` | list models that need acceptance, with status |

@@ -56,8 +56,10 @@ uv sync --frozen --no-install-project --no-dev --python <engine.python> --projec
 with `UV_PYTHON_INSTALL_DIR` under the home, so the managed interpreter is
 downloaded into `~/.facet/python` and nothing goes to the system. uv's output
 streams to stderr and to the run log; a non-zero exit is `download_failed`
-(exit 8) carrying the last 40 lines. When facet ships a runner SDK it is
-copied into the environment as `facet_runner_sdk.py`.
+(exit 8) carrying the last 40 lines. facet's runner SDK is copied into the
+environment as `facet_runner_sdk.py` (see
+[run.md](run.md#the-runner-protocol)), so a package runner only writes tool
+code.
 
 Models are stored under `~/.facet/models/direct/`. A `url` model (either
 `https://` or `file://`) streams through `tmp/<model-id>.<random>.part` while

@@ -14,6 +14,7 @@ echo '{"inputs": {"text": "hi"}}' | facet run echo.text - --out out --json
 facet run echo.text piece.toml --no-verify     # skip the verify verb
 facet run echo.text piece.toml --no-pull       # fail instead of pulling
 facet run echo.text piece.toml --timeout 600   # kill the runner after 600 s
+facet run echo.text piece.toml --no-wait       # fail at once instead of waiting
 ```
 
 A piece is data — facet never evaluates code from one. The only code that
@@ -23,12 +24,13 @@ package's environment.
 ## The piece
 
 A piece is a TOML table with one `inputs` map, validated against the
-capability's declared inputs (`facet describe` shows them; the schema lives
-in the registry). An unknown key, a missing required input or a value outside
-its `min`/`max`/`enum`/`pattern` is `invalid_input` (exit 2) listing every
-problem at once. `path` inputs are resolved relative to the piece file (with
-stdin: the current directory) before the runner sees them. With `-` the piece
-is JSON read from stdin, for clients that build pieces in memory.
+capability's declared inputs, which the registry declares per capability
+([registry.md](registry.md#input-schema)). An unknown key, a missing required
+input or a value outside its `min`/`max`/`enum`/`pattern` is
+`invalid_input` (exit 2) listing every problem at once in `details.errors`.
+`path` inputs are resolved relative to the piece file (with stdin: the
+current directory) before the runner sees them. With `-` the piece is JSON
+read from stdin, for clients that build pieces in memory.
 
 ## What happens, in order
 
@@ -43,14 +45,16 @@ is JSON read from stdin, for clients that build pieces in memory.
    (`facet license accept`), else `license_not_accepted` (exit 4).
 4. The piece is validated against the capability's inputs.
 5. The [facet lock](home.md#the-lock) is taken: exclusive if the package's
-   `requirements.exclusive` says so, else shared.
+   `requirements.exclusive` says so, else shared. `--no-wait` and
+   `--wait-timeout S` (default 3600) shape the wait, as for every verb that
+   locks.
 6. The runner is called through the file protocol: facet writes a request
    file, the package's runner (its own interpreter, its own process group)
    writes assets into `<out>/.facet-tmp-<run-id>/` and a result file, then —
    unless `--no-verify` — its `verify` verb judges those assets.
 7. Each asset is moved onto `<out>/<file>` (`os.replace`; an existing file of
    the same name is replaced) and its record (`<asset>.facet.json`) is
-   written beside it.
+   written beside it; then the temporary directory is removed.
 8. Exit 0 when every asset passed (or verification was skipped), exit 3
    (`verification_failed`) when any failed. Either way the `--json` envelope
    is printed with every record; failed assets and their records are kept so
@@ -86,19 +90,27 @@ models, parameters, seed, inputs, the verification verdict
 (`passed`/`failed`, or `skipped` with `--no-verify`) and the licences it was
 made under.
 
+Without `--json`, each asset prints one line —
+`<file> <name> <passed|failed|skipped>` — and then `out <out-dir>`.
+
 ## The runner protocol
 
 The runner is a separate interpreter, invoked through the package manifest's
 `transport.invocation_template` with `{{python}}` = the environment's
 interpreter, `{{entry}}` = the runner script, `{{verb}}`, `{{input}}` and
 `{{result}}`. facet writes a request file (`{"protocol": 1, "verb",
-"capability", "inputs", "out_dir", "piece_dir", "models", "assets"}`) and the
-runner writes a result file: for `run`, its tool and one entry per produced
-asset (file, name, kind, mime, properties, params, seed, inputs); for
-`verify`, one verdict per asset; `preview` and `probe` serve `facet preview`
-and `facet check`. The `src/facetmedia/runner_sdk.py` module ships with facet
-and is copied into every environment as `facet_runner_sdk`, so a package
-runner only writes tool code:
+"capability", "inputs", "out_dir", "piece_dir", "models", "assets"}`, where
+`models` maps each model id to its absolute path under
+`~/.facet/models/direct`) and the runner writes a result file: for `run`, its
+tool and one entry per produced asset (file, name, kind, mime, properties,
+params, seed, inputs); for `verify`, one verdict per asset; `preview` and
+`probe` serve `facet preview` and `facet check`. A `file` is one bare name
+inside the temporary directory — never a path, and never the reserved
+`.facet-` prefix. The runner's environment is facet's own plus `FACET_MODELS`
+(that models directory) and an empty `CUDA_VISIBLE_DEVICES` when the manifest
+says `gpu = false`. The `src/facetmedia/runner_sdk.py` module ships with
+facet and is copied into every environment as `facet_runner_sdk`, so a
+package runner only writes tool code:
 
 ```python
 from facet_runner_sdk import Runner
@@ -114,3 +126,8 @@ def run(req) -> dict:
 
 runner.main()
 ```
+
+`req` carries the request: `inputs` (validated, defaults filled, paths
+absolute), `out_dir`, `piece_dir`, `assets` (the files to judge, on `verify`
+and `preview`) and `model_path(id)`. An unknown verb or an exception exits 1
+with the reason on stderr, which facet turns into `runner_failed`.
