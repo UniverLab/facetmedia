@@ -13,12 +13,13 @@ from facetmedia.cli import build_parser, main
 
 EXIT_USAGE = 2
 EXIT_MACHINE_CANNOT = 5
+DEFAULT_WAIT_TIMEOUT_S = 3600.0
+SHORT_TIMEOUT_S = 5.0
 
 UNIMPLEMENTED_ARGV = [
     ["list"],
     ["describe"],
     ["check"],
-    ["run"],
     ["preview"],
     ["gc"],
     ["rm"],
@@ -70,6 +71,28 @@ def test_json_flag_accepted_before_and_after_verb(argv: list[str]) -> None:
 
 def test_json_flag_defaults_to_false() -> None:
     assert build_parser().parse_args(["list"]).json is False
+
+
+def test_run_flags_default_to_the_spec() -> None:
+    args = build_parser().parse_args(["run", "echo.text", "piece.toml"])
+    assert args.capability == "echo.text"
+    assert args.piece == "piece.toml"
+    assert args.out is None
+    assert args.verify is True
+    assert args.pull is True
+    assert args.timeout is None
+    assert args.wait is True
+    assert args.wait_timeout == DEFAULT_WAIT_TIMEOUT_S
+
+
+def test_run_no_flags_flip_their_dests() -> None:
+    args = build_parser().parse_args(
+        ["run", "echo.text", "-", "--no-verify", "--no-pull", "--timeout", "5", "--no-wait"]
+    )
+    assert args.verify is False
+    assert args.pull is False
+    assert args.timeout == SHORT_TIMEOUT_S
+    assert args.wait is False
 
 
 def test_no_verb_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:

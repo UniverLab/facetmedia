@@ -36,7 +36,7 @@ from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import Model, Package
 
-__all__ = ["pull"]
+__all__ = ["is_installed", "pull"]
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
@@ -55,6 +55,15 @@ SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.m
 RUNNER_SDK: Final[Path] = Path(__file__).with_name("runner_sdk.py")
 SDK_MODULE: Final[str] = "facet_runner_sdk.py"
 NO_HOST_LIBS_HINT: Final[str] = "facet never installs host libraries"
+
+
+def is_installed(package: Package, home: Home) -> bool:
+    """Whether ``package``'s environment is complete for its current lock.
+
+    ``facet run`` asks this before pulling: an environment whose ``.complete``
+    marker holds this package's ``uv.lock`` hash needs no network.
+    """
+    return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
 
 
 def pull(package: Package, home: Home, verify_models: bool = False) -> dict[str, object]:
@@ -183,9 +192,12 @@ def _require_host_libs(package: Package) -> None:
 
 
 def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> None:
-    """FR2's plan: python, environment, each model, and the total to download."""
-    print(f"python {package.python}", file=sys.stderr)
-    print(f"environment {env_dir}", file=sys.stderr)
+    """FR2's plan: python, environment, each model, and the total to download.
+
+    Every line goes to stderr and to the run log, so a ``facet run`` that
+    pulls first records what it was about to download.
+    """
+    lines = [f"python {package.python}", f"environment {env_dir}"]
     total = 0
     for model in package.models:
         present = _model_present(model, home, verify)
@@ -194,8 +206,11 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
         else:
             state = "to download"
             total += model.bytes
-        print(f"model {model.id} {model.bytes} bytes {state}", file=sys.stderr)
-    print(f"total to download {total} bytes", file=sys.stderr)
+        lines.append(f"model {model.id} {model.bytes} bytes {state}")
+    lines.append(f"total to download {total} bytes")
+    for line in lines:
+        print(line, file=sys.stderr)
+        logger.info("%s", line)
 
 
 # --- FR3: the environment at <home>/envs/<package>/<version>/.

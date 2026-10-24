@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, contract, env, licenses, lock, registry, update
+from facetmedia import __version__, contract, env, licenses, lock, registry, run, update
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import load_active_registry, validate_registry
@@ -146,7 +146,33 @@ def _announce_pull(report: dict[str, object]) -> None:
     )
 
 
-_HANDLERS: dict[str, Handler] = {"pull": _handle_pull, "update": _handle_update}
+def _handle_run(args: argparse.Namespace) -> int:
+    """The envelope carries every record; the exit code reports verification."""
+    data, exit_code = run.execute(args, args.run_id)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_run(data)
+    return exit_code
+
+
+def _announce_run(data: dict[str, object]) -> None:
+    assets = data.get("assets")
+    for entry in assets if isinstance(assets, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        verification = entry.get("verification")
+        status = (
+            verification.get("status", "unknown") if isinstance(verification, dict) else "unknown"
+        )
+        print(f"{entry.get('path')} {entry.get('name')} {status}")
+    print(f"out {data.get('out_dir')}")
+
+
+_HANDLERS: dict[str, Handler] = {
+    "pull": _handle_pull,
+    "run": _handle_run,
+    "update": _handle_update,
+}
 
 
 def _handle_registry_validate(args: argparse.Namespace) -> int:
@@ -282,6 +308,36 @@ def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_run_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("capability", help="registry capability id to run")
+    parser.add_argument("piece", help="piece file to run, or - for JSON on stdin")
+    parser.add_argument(
+        "--out",
+        default=None,
+        metavar="DIR",
+        help="asset directory (default: the piece file's directory)",
+    )
+    parser.add_argument(
+        "--no-verify",
+        dest="verify",
+        action="store_false",
+        help="skip the runner's verify verb; records say skipped",
+    )
+    parser.add_argument(
+        "--no-pull",
+        dest="pull",
+        action="store_false",
+        help="fail with not_installed instead of pulling the package",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="kill the runner's process group after this many seconds",
+    )
+
+
 def build_parser() -> FacetParser:
     parser = FacetParser(
         prog="facet",
@@ -303,6 +359,8 @@ def build_parser() -> FacetParser:
             _add_update_flags(verb_parser)
         elif verb == "pull":
             _add_pull_flags(verb_parser)
+        elif verb == "run":
+            _add_run_flags(verb_parser)
     license_parsers = _add_group(
         subparsers,
         "license",
@@ -348,6 +406,7 @@ def _run_logged(argv: list[str] | None, run_id: str) -> int:
     try:
         try:
             args = build_parser().parse_args(argv)
+            args.run_id = run_id
             as_json = bool(getattr(args, "json", as_json))
             handler_fn: Handler = args.handler
             return handler_fn(args)

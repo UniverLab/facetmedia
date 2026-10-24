@@ -95,8 +95,9 @@ def test_pull_echo_installs_then_reports_already_installed(
     )
     assert run.returncode == 0
     assert run.stdout.strip() == "(3, 12)"
-    # runner_sdk.py ships with feat(run); without it the pull still succeeds.
-    assert list((env_dir / "venv").rglob("facet_runner_sdk.py")) == []
+    # feat(run) ships the runner SDK: exactly one copy lands in the venv.
+    copied = list((env_dir / "venv").rglob("facet_runner_sdk.py"))
+    assert len(copied) == 1
 
     code, envelope = _pull(capsys, "pull", "echo")
     assert code == 0

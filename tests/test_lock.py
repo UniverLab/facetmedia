@@ -26,7 +26,7 @@ SHORT_WAIT_S = 0.7
 LOCKING_VERBS = [
     ["update"],
     ["pull", "echo"],
-    ["run"],
+    ["run", "echo.text", "piece.toml"],
     ["check"],
     ["rm"],
     ["gc"],
