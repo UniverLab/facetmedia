@@ -50,7 +50,7 @@ time: `update`, `pull`, `rm`, `gc`, `license accept`, plus `run` and the asset
 re-verification of `check` when the package manifest sets
 `requirements.exclusive = true` (the default). Light runs take the lock shared
 and overlap; [`facet doctor`](doctor.md) takes it shared as well. `list`,
-`describe` and `preview` take no lock at all.
+`describe`, `skill` and `preview` take no lock at all.
 
 Every verb that locks accepts two flags — `doctor` among them — except the
 asset form of `check`, which always waits with the defaults:
