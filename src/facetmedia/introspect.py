@@ -213,8 +213,8 @@ def skill_data(
 ) -> dict[str, Any]:
     """The ``facet skill`` payload: the skill text plus the machine section.
 
-    A light verb: no lock, offline, from the snapshot in use.  ``target``
-    names a package or a capability id; ``None`` is the core skill.
+    A light verb: no lock.  ``target`` names a package or a capability
+    id; ``None`` is the core skill, which prints without a registry.
     """
     if target is None:
         return _core_skill_data(reference)
@@ -251,8 +251,11 @@ def _core_skill_data(reference: str | None) -> dict[str, Any]:
             details={"known": []},
         )
     text = skill.core_skill_text()
-    active = load_active_registry()
-    identity = snapshot_identity()
+    try:
+        active = load_active_registry()
+        identity = snapshot_identity()
+    except FacetError as exc:
+        return _core_skill_no_registry(text, exc)
     if identity.get("commit"):
         registry_line = f"Registry commit {identity['commit']} (ref {identity.get('ref')})."
     else:
@@ -292,7 +295,32 @@ def _core_skill_data(reference: str | None) -> dict[str, Any]:
         "description": skill.skill_description(text),
         "body": "\n".join(parts).rstrip("\n") + "\n",
         "references": [],
-        "state": {"registry": identity, "facets": facets},
+        "state": {"registry": identity, "facets": facets, "registry_error": None},
+    }
+
+
+def _core_skill_no_registry(text: str, error: FacetError) -> dict[str, Any]:
+    """The core skill with a ``Registry not available`` line, no registry."""
+    parts = [
+        text.rstrip("\n"),
+        "",
+        "## Packages in this registry",
+        "",
+        (f"Registry not available: {error.message}. Run `facet update`, then `facet skill` again."),
+    ]
+    return {
+        "scope": "core",
+        "name": "facet",
+        "facet": None,
+        "weight": None,
+        "description": skill.skill_description(text),
+        "body": "\n".join(parts).rstrip("\n") + "\n",
+        "references": [],
+        "state": {
+            "registry": None,
+            "facets": {},
+            "registry_error": {"code": error.code, "message": error.message},
+        },
     }
 
 

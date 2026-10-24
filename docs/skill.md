@@ -28,6 +28,8 @@ acceptance needed); and, when installed and unless `--no-doctor`, the quick
 doctor's checks, one line each with its fix when failing. For a capability
 id the section names that capability first.
 
+When no registry can be loaded, the core skill still prints with one `Registry not available: ...` line under `## Packages in this registry`, and its `state` carries `registry: null` plus `registry_error` (`{code, message}`).
+
 `--reference <ref>` prints that reference file only; an unknown ref fails
 with `invalid_input` listing the known ones. An unknown package or
 capability fails with `invalid_input` with the known names, as `describe`

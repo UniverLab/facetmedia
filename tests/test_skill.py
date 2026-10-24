@@ -9,15 +9,18 @@ from typing import Any
 
 import pytest
 
+from facetmedia import introspect as introspect_module
 from facetmedia import skill as skill_module
 from facetmedia.cli import main
+from facetmedia.contract import FacetError
 from facetmedia.doctor import CHECK_ORDER
 from facetmedia.home import Home
 from facetmedia.registry import load_registry, validate_registry
-from facetmedia.registry_types import Model, Package, Requirements, weight
+from facetmedia.registry_types import Model, Package, Registry, Requirements, weight
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
+EXIT_DOWNLOAD_FAILED = 8
 MAX_CORE_SKILL_LINES = 150
 
 MANIFEST = """name = "pkg"
@@ -317,6 +320,62 @@ def test_skill_core_json_shape(
     assert [package["name"] for package in facets["text"]] == ["echo", "future", "termsy"]
     assert [package["weight"] for package in facets["text"]] == ["light", "cpu-heavy", "cpu-heavy"]
     assert data["body"].rstrip("\n").endswith(facets["text"][-1]["description"])
+    assert data["state"]["registry_error"] is None
+
+
+def _loader_fails(monkeypatch: pytest.MonkeyPatch, error: FacetError) -> None:
+    def failing() -> Registry:
+        raise error
+
+    monkeypatch.setattr(introspect_module, "load_active_registry", failing)
+
+
+def test_skill_core_fetch_failure_still_prints(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _loader_fails(monkeypatch, FacetError("download_failed", "HTTP 403"))
+    assert main(["skill"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("---\nname: facet\n")
+    assert "## Packages in this registry" in out
+    assert "Registry not available: HTTP 403. Run `facet update`, then `facet skill` again." in out
+    assert "- echo" not in out
+    assert main(["skill", "--json"]) == 0
+    data = _data(capsys)
+    assert data["state"] == {
+        "registry": None,
+        "facets": {},
+        "registry_error": {"code": "download_failed", "message": "HTTP 403"},
+    }
+
+
+def test_skill_core_invalid_snapshot_still_prints(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _loader_fails(monkeypatch, FacetError("internal", "index.toml: : missing"))
+    assert main(["skill"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("---\nname: facet\n")
+    assert "## Packages in this registry" in out
+    assert (
+        "Registry not available: index.toml: : missing. "
+        "Run `facet update`, then `facet skill` again."
+    ) in out
+    assert main(["skill", "--json"]) == 0
+    data = _data(capsys)
+    assert data["state"] == {
+        "registry": None,
+        "facets": {},
+        "registry_error": {"code": "internal", "message": "index.toml: : missing"},
+    }
+
+
+def test_skill_package_target_still_needs_registry(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _loader_fails(monkeypatch, FacetError("download_failed", "HTTP 403"))
+    assert main(["skill", "echo", "--json"]) == EXIT_DOWNLOAD_FAILED
+    assert _error(capsys)["code"] == "download_failed"
 
 
 # --- `facet skill <package|capability>`: the skill plus the machine section.
