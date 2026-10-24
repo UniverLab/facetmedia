@@ -73,28 +73,28 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     home = Home.from_env()
     ephemeral = _ephemeral(args, package, home)
     pulled, downloaded = _ensure_installed(args, package)
-    accepted = tuple(licenses.require(package.models))
-    job = RunJob(
-        capability=capability,
-        package=package,
-        home=home,
-        inputs=_piece_inputs(capability, piece, piece_dir),
-        piece_dir=piece_dir,
-        out_dir=Path(args.out) if args.out else piece_dir,
-        run_id=run_id,
-        timeout_s=args.timeout,
-        verify=bool(args.verify),
-        accepted=accepted,
-    )
-    exclusive = package.requirements.exclusive or ephemeral
-    mode: LockMode = "exclusive" if exclusive else "shared"
-    wait, wait_timeout = _lock_params(args)
-    with hold(mode, "facet run", wait, wait_timeout):
-        try:
-            records, exit_code = _produce(job)
-        finally:
-            if ephemeral:
-                prune.rm_env(job.home, package.name, package.version)
+    try:
+        accepted = tuple(licenses.require(package.models))
+        job = RunJob(
+            capability=capability,
+            package=package,
+            home=home,
+            inputs=_piece_inputs(capability, piece, piece_dir),
+            piece_dir=piece_dir,
+            out_dir=Path(args.out) if args.out else piece_dir,
+            run_id=run_id,
+            timeout_s=args.timeout,
+            verify=bool(args.verify),
+            accepted=accepted,
+        )
+        records, exit_code = _run_locked(args, job, ephemeral)
+    except BaseException:
+        # The install happened but the run never took the lock (a bad piece,
+        # a lock that never came free): that environment is nobody's either.
+        # When the lock was taken, ``_run_locked`` already removed it and this
+        # second call is a no-op.
+        _drop_ephemeral(home, package, ephemeral)
+        raise
     data: dict[str, object] = {
         "capability": capability.id,
         "out_dir": str(job.out_dir),
@@ -120,6 +120,30 @@ def _ephemeral(args: argparse.Namespace, package: Package, home: Home) -> bool:
         file=sys.stderr,
     )
     return False
+
+
+def _run_locked(
+    args: argparse.Namespace, job: RunJob, ephemeral: bool
+) -> tuple[list[dict[str, object]], int]:
+    """Produce the run under the lock, removing an ephemeral install before it drops.
+
+    The removal shares the lock with the run so no other job can start against
+    an environment that is about to disappear.
+    """
+    exclusive = job.package.requirements.exclusive or ephemeral
+    mode: LockMode = "exclusive" if exclusive else "shared"
+    wait, wait_timeout = _lock_params(args)
+    with hold(mode, "facet run", wait, wait_timeout):
+        try:
+            return _produce(job)
+        finally:
+            _drop_ephemeral(job.home, job.package, ephemeral)
+
+
+def _drop_ephemeral(home: Home, package: Package, ephemeral: bool) -> None:
+    """Remove the environment this run installed; a no-op for every other run."""
+    if ephemeral:
+        prune.rm_env(home, package.name, package.version)
 
 
 # --- before the lock: the piece, the capability, the package, the licence.

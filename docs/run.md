@@ -46,13 +46,14 @@ read from stdin, for clients that build pieces in memory.
    checks as [`facet pull`](pull.md), its plan printed to stderr and the run
    log before it starts) — unless `--no-pull`, which is `not_installed`
    (exit 7). With `--ephemeral` a package this run installed is removed again
-   after the run (its models stay); a package that was already installed is
-   left alone, and facet says so on stderr.
+   before facet exits — after a successful run, a failed one, or a piece it
+   never got to run — while its models stay; a package that was already
+   installed is left alone, and facet says so on stderr.
 4. The piece is validated against the capability's inputs.
 5. The [facet lock](home.md#the-lock) is taken: exclusive if the package's
-   `requirements.exclusive` says so, else shared. `--no-wait` and
-   `--wait-timeout S` (default 3600) shape the wait, as for every verb that
-   locks.
+   `requirements.exclusive` says so or `--ephemeral` is given, else shared.
+   `--no-wait` and `--wait-timeout S` (default 3600) shape the wait, as for
+   every verb that locks.
 6. The runner is called through the file protocol: facet writes a request
    file, the package's runner (its own interpreter, its own process group)
    writes assets into `<out>/.facet-tmp-<run-id>/` and a result file, then —

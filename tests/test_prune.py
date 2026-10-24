@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from facetmedia import prune as prune_module
 from facetmedia.cli import main
 from facetmedia.home import Home
 
@@ -22,6 +24,7 @@ TERMSY_MODEL = "termsy-weights"
 CURRENT_COMMIT = "a" * 40
 OTHER_COMMIT = "b" * 40
 EXIT_RUNNER_FAILED = 9
+EXIT_BAD_INPUT = 2
 PAYLOAD = b"x" * 16
 
 #: A runner that dies before it writes any result: run keeps its temp dir.
@@ -184,6 +187,21 @@ path = "{TERMSY_MODEL}/termsy.bin"
 
 
 # --- facet gc (FR2): the environment and model families.
+
+
+def test_gc_removes_environments_of_packages_the_snapshot_no_longer_has(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    orphan = _plant_env(home, "gone-package", "0.1.0")
+    current = _plant_env(home, "echo", "0.1.0")
+
+    code, data = _run_json(capsys, "gc")
+    assert code == 0
+    assert _reason_by_path(data)[orphan] == "orphan-package"
+    assert not orphan.exists()
+    assert current.is_dir() and (current / ".complete").is_file()
 
 
 def test_gc_removes_incomplete_and_stale_environments_and_keeps_the_current(
@@ -372,6 +390,32 @@ def test_a_failed_run_records_its_kept_directory_for_gc(
     assert (env_dir / ".complete").is_file()
 
 
+def test_gc_prunes_the_uv_cache_with_facets_cache_dir(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    entry = home.uv_cache_dir / "unused-entry"
+    entry.mkdir()
+    (entry / "blob").write_bytes(PAYLOAD)
+    seen: dict[str, Any] = {}
+
+    def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen["argv"] = argv
+        seen["env"] = kwargs["env"]
+        shutil.rmtree(entry)  # exactly what `uv cache prune` would free
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(prune_module.subprocess, "run", fake_run)
+
+    code, data = _run_json(capsys, "gc")
+    assert code == 0
+    assert seen["argv"][1:] == ["cache", "prune"]
+    assert seen["env"]["UV_CACHE_DIR"] == str(home.uv_cache_dir)
+    # The item's bytes are what the prune actually freed, measured around it.
+    assert _bytes_by_path(data)[home.uv_cache_dir] == len(PAYLOAD)
+
+
 # --- facet run --ephemeral (FR3).
 
 
@@ -408,4 +452,21 @@ def test_ephemeral_keeps_an_installed_environment_and_removes_a_fresh_one(
     stored = json.loads((fresh_out / "echo.txt.facet.json").read_text(encoding="utf-8"))
     assert stored["name"] == "echo"
     assert stored["provenance"]["capability"] == "echo.text"
+    assert not (home.envs_dir / "echo").exists()
+
+
+def test_ephemeral_removes_the_environment_when_the_run_never_starts(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    piece = tmp_path / "piece.toml"
+    piece.write_text('[inputs]\ntext = "hello"\nrepeat = "twice"\n', encoding="utf-8")
+
+    # The piece is invalid, so no run happens — but the pull already did, and
+    # an ephemeral install must not outlive the run it was made for.
+    code = main(["run", "echo.text", str(piece), "--ephemeral", "--json"])
+    envelope = json.loads(capsys.readouterr().out)
+    assert code == EXIT_BAD_INPUT
+    assert envelope["error"]["code"] == "invalid_input"
     assert not (home.envs_dir / "echo").exists()
