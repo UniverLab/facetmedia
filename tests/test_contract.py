@@ -109,7 +109,7 @@ def test_emit_human_success_is_noop(capsys: pytest.CaptureFixture[str]) -> None:
 def test_main_json_single_doc_on_unimplemented(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = main(["list", "--json"])
+    code = main(["preview", "--json"])
     assert code == 1
     captured = capsys.readouterr()
     assert captured.out.count("\n") == 1
@@ -182,14 +182,14 @@ def test_main_returns_each_exit_code(
 def test_stderr_never_contains_envelope_on_json_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert main(["list", "--json"]) == 1
+    assert main(["preview", "--json"]) == 1
     captured = capsys.readouterr()
     assert '"ok"' not in captured.err
     assert '"contract"' not in captured.err
 
 
 def test_unimplemented_is_internal(capsys: pytest.CaptureFixture[str]) -> None:
-    code = main(["list"])
+    code = main(["preview"])
     assert code == 1
     captured = capsys.readouterr()
     assert captured.out == ""

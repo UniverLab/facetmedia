@@ -10,7 +10,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
-from facetmedia import __version__, check, contract, env, licenses, lock, registry, run, update
+from facetmedia import (
+    __version__,
+    check,
+    contract,
+    env,
+    introspect,
+    licenses,
+    lock,
+    registry,
+    run,
+    update,
+)
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import load_active_registry, validate_registry
@@ -209,8 +220,71 @@ def _announce_reverify(data: dict[str, object]) -> None:
     print(f"{data.get('asset')} {state}")
 
 
+def _handle_list(args: argparse.Namespace) -> int:
+    """A light verb: the registry snapshot and the home, no lock, no network."""
+    data = introspect.list_data(args.available)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_list(data)
+    return 0
+
+
+def _announce_list(data: dict[str, object]) -> None:
+    for package in _packages(data):
+        suffix = "  [installed]" if package.get("installed") is True else ""
+        capabilities = package.get("capabilities")
+        for capability in capabilities if isinstance(capabilities, list) else []:
+            if not isinstance(capability, dict):
+                continue
+            cap_id = capability.get("id")
+            kind = capability.get("kind")
+            summary = capability.get("summary")
+            print(f"{cap_id}  {kind}  {summary}{suffix}")
+
+
+def _handle_describe(args: argparse.Namespace) -> int:
+    data = introspect.describe_data(args.capability)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_describe(data)
+    return 0
+
+
+def _announce_describe(data: dict[str, object]) -> None:
+    print(f"summary: {data['summary']}")
+    package = data.get("package")
+    if isinstance(package, dict):
+        print(
+            f"package: {package.get('name')} {package.get('version')} "
+            f"({package.get('tool_name')}, {package.get('provider')})"
+        )
+    print(f"inputs: {_describe_inputs(data)}")
+    print(f"installed: {'yes' if data.get('installed') is True else 'no'}")
+
+
+def _describe_inputs(data: dict[str, object]) -> str:
+    """One ``name (type, required|default X)`` fragment per input field."""
+    inputs = data.get("inputs")
+    properties = inputs.get("properties") if isinstance(inputs, dict) else None
+    required = inputs.get("required") if isinstance(inputs, dict) else None
+    parts: list[str] = []
+    for name, field_schema in properties.items() if isinstance(properties, dict) else []:
+        if not isinstance(field_schema, dict):
+            continue
+        kind = field_schema.get("type", "?")
+        if isinstance(required, list) and name in required:
+            parts.append(f"{name} ({kind}, required)")
+        elif "default" in field_schema:
+            parts.append(f"{name} ({kind}, default {field_schema['default']})")
+        else:
+            parts.append(f"{name} ({kind})")
+    return ", ".join(parts)
+
+
 _HANDLERS: dict[str, Handler] = {
     "check": _handle_check,
+    "describe": _handle_describe,
+    "list": _handle_list,
     "pull": _handle_pull,
     "run": _handle_run,
     "update": _handle_update,
@@ -331,6 +405,18 @@ def _add_update_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_list_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--available",
+        action="store_true",
+        help="list every package in the registry snapshot, installed or not",
+    )
+
+
+def _add_describe_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("capability", help="registry capability id to describe")
+
+
 def _add_license_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
     accept = parsers["accept"]
     accept.add_argument("model", help="registry model id to accept")
@@ -409,6 +495,10 @@ def build_parser() -> FacetParser:
         )
         if verb == "update":
             _add_update_flags(verb_parser)
+        elif verb == "list":
+            _add_list_flags(verb_parser)
+        elif verb == "describe":
+            _add_describe_flags(verb_parser)
         elif verb == "pull":
             _add_pull_flags(verb_parser)
         elif verb == "check":

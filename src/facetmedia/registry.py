@@ -45,6 +45,7 @@ __all__ = [
     "override_dir",
     "registry_dir",
     "snapshot_commit",
+    "snapshot_identity",
     "validate_registry",
 ]
 
@@ -168,19 +169,43 @@ def snapshot_commit() -> str | None:
     return _recorded_commit(Home.peek_env())
 
 
+def snapshot_identity() -> dict[str, str]:
+    """Which snapshot is in use: the ``FACET_REGISTRY`` path, else commit+ref.
+
+    ``facet list`` reports this so a client knows what it discovered against;
+    with the override set the path says it, otherwise ``state/registry.json``
+    names the commit ``facet update`` pinned and the ref it pinned from.
+    """
+    override = override_dir()
+    if override is not None:
+        return {"path": str(override)}
+    state = _recorded_state(Home.peek_env())
+    commit = state.get("commit")
+    ref = state.get("ref")
+    return {
+        "commit": commit if isinstance(commit, str) else "",
+        "ref": ref if isinstance(ref, str) else "",
+    }
+
+
 def _recorded_commit(home: Home) -> str | None:
     """The commit ``state/registry.json`` records, or ``None`` when absent."""
+    commit = _recorded_state(home).get("commit")
+    if not isinstance(commit, str) or not commit:
+        return None
+    return commit
+
+
+def _recorded_state(home: Home) -> dict[str, object]:
+    """The parsed ``state/registry.json``; ``{}`` when absent or not a table."""
     state_file = home.state_file("registry.json")
     try:
         state = json.loads(state_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return None
+        return {}
     except (OSError, ValueError) as exc:
         raise FacetError("internal", f"{state_file}: corrupt registry state") from exc
-    commit = state.get("commit") if isinstance(state, dict) else None
-    if not isinstance(commit, str) or not commit:
-        return None
-    return commit
+    return state if isinstance(state, dict) else {}
 
 
 def _first_use(home: Home) -> str:

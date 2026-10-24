@@ -52,6 +52,16 @@ def acceptance_ids() -> list[str]:
     return sorted(found)
 
 
+def accepted_models(models: Iterable[Model]) -> dict[str, bool]:
+    """Whether an acceptance is recorded for each model, by id.
+
+    ``facet describe`` reports this per model; a record matches only when its
+    ``spdx`` equals the manifest's current ``spdx``, as in :func:`require`.
+    """
+    records = _read_accepted(Home.peek_env())
+    return {model.id: _matching_record(model, records) is not None for model in models}
+
+
 def warn(package: Package, model: Model) -> None:
     """Print what is being accepted to stderr, always before accepting."""
     print(f"model {model.id}", file=sys.stderr)

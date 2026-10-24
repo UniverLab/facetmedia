@@ -1,0 +1,58 @@
+{
+  "packages": [
+    {
+      "capabilities": [
+        {
+          "id": "echo.text",
+          "kind": "text",
+          "summary": "Echo text back, repeated."
+        }
+      ],
+      "compatible": true,
+      "env_bytes": 0,
+      "installed": false,
+      "models_bytes": 0,
+      "name": "echo",
+      "provider": "facet",
+      "tool_name": "Echo",
+      "version": "0.1.0"
+    },
+    {
+      "capabilities": [
+        {
+          "id": "future.thing",
+          "kind": "text",
+          "summary": "A capability from the future."
+        }
+      ],
+      "compatible": false,
+      "env_bytes": 0,
+      "installed": false,
+      "models_bytes": 0,
+      "name": "future",
+      "provider": "facet",
+      "tool_name": "Future",
+      "version": "0.1.0"
+    },
+    {
+      "capabilities": [
+        {
+          "id": "termsy.make",
+          "kind": "text",
+          "summary": "Make one termsy asset."
+        }
+      ],
+      "compatible": true,
+      "env_bytes": 0,
+      "installed": false,
+      "models_bytes": 0,
+      "name": "termsy",
+      "provider": "facet",
+      "tool_name": "Termsy",
+      "version": "0.1.0"
+    }
+  ],
+  "registry": {
+    "path": "<path>"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "capability": "echo.text",
+  "contract": 1,
+  "download_bytes": 0,
+  "inputs": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "description": "Echo text back, repeated.",
+    "properties": {
+      "repeat": {
+        "default": 1,
+        "maximum": 10.0,
+        "minimum": 1.0,
+        "type": "integer"
+      },
+      "text": {
+        "description": "Text to echo.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "title": "echo.text",
+    "type": "object"
+  },
+  "installed": false,
+  "kind": "text",
+  "licenses": {
+    "models": [],
+    "tools": [
+      {
+        "spdx": "Apache-2.0",
+        "subject": "echo"
+      }
+    ]
+  },
+  "package": {
+    "name": "echo",
+    "provider": "facet",
+    "tool_name": "Echo",
+    "version": "0.1.0"
+  },
+  "piece_example": "[inputs]\nrepeat = 1\ntext = \"text\"\n",
+  "preview": {
+    "viewer": "generic"
+  },
+  "requirements": {
+    "disk_gb": 0.01,
+    "exclusive": false,
+    "gpu": false,
+    "platforms": [
+      "linux"
+    ],
+    "ram_gb": 0.1
+  },
+  "summary": "Echo text back, repeated.",
+  "verify": {
+    "thresholds": {}
+  }
+}

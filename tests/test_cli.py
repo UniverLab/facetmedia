@@ -17,8 +17,6 @@ DEFAULT_WAIT_TIMEOUT_S = 3600.0
 SHORT_TIMEOUT_S = 5.0
 
 UNIMPLEMENTED_ARGV = [
-    ["list"],
-    ["describe"],
     ["preview"],
     ["gc"],
     ["rm"],
@@ -138,7 +136,7 @@ def test_unexpected_exception_is_logged_to_run_log(
 
 
 def test_every_invocation_creates_the_home_layout(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["list"]) == 1
+    assert main(["preview"]) == 1
     capsys.readouterr()
     root = Path(os.environ["FACET_HOME"])
     for directory in (
