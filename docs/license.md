@@ -46,6 +46,10 @@ Accepting again replaces the earlier record for that model. A licence change
 asks again: the record matches only while its `spdx` equals the manifest's
 current `spdx`.
 
+`facet describe <capability-id>` reports, per model, its `spdx`,
+`commercial_use`, `requires_acceptance` and whether it is already `accepted`
+— see [discover.md](discover.md#facet-describe).
+
 ## `facet license list`
 
 Lists every registry model that requires acceptance, with `accepted`, `by`,

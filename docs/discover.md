@@ -44,16 +44,29 @@ can see what a newer facet would offer.
 something: the input schema, a minimal example piece, the verification
 thresholds, the requirements, the licences, and what is still to download.
 The human form prints the summary, the package, the input fields with their
-required/default state, and whether it is installed; `--json` is the whole
-contract:
+required/default state, and whether it is installed:
+
+```bash
+$ facet describe echo.text
+summary: Echo text back, repeated.
+package: echo 0.1.0 (Echo, facet)
+inputs: repeat (integer, default 1), text (string, required)
+installed: no
+```
+
+`--json` is the whole contract, inside the same
+[`--json` envelope](contract.md) as every other verb:
 
 ```json
 {"contract": 1, "data": {"contract": 1, "capability": "echo.text", "summary": "Echo text back, repeated.", "kind": "text", "package": {"name": "echo", "version": "0.1.0", "tool_name": "Echo", "provider": "facet"}, "inputs": {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "echo.text", "description": "Echo text back, repeated.", "type": "object", "properties": {"text": {"type": "string", "description": "Text to echo."}, "repeat": {"type": "integer", "default": 1, "minimum": 1.0, "maximum": 10.0}}, "required": ["text"], "additionalProperties": false}, "piece_example": "[inputs]\nrepeat = 1\ntext = \"text\"\n", "verify": {"thresholds": {}}, "preview": {"viewer": "generic"}, "requirements": {"gpu": false, "ram_gb": 0.1, "disk_gb": 0.01, "exclusive": false, "platforms": ["linux"]}, "licenses": {"tools": [{"subject": "echo", "spdx": "Apache-2.0"}], "models": []}, "download_bytes": 0, "installed": false}, "facet": "0.1.0.dev0", "ok": true}
 ```
 
 - `inputs` is JSON Schema draft 2020-12, and `piece_example` is a minimal
-  valid piece generated from the required fields and defaults — the starting
-  point for a piece file.
+  valid piece generated from the fields that are required or carry a default
+  — the starting point for a piece file. Enum fields take their first value,
+  numbers their minimum, booleans `false`, path fields `.` (the piece's own
+  directory), and an array of objects becomes one `[[inputs.<field>]]` block
+  per item its `min_items` requires.
 - `licenses.models` carries, per model, its `spdx`, `commercial_use`,
   `requires_acceptance` and whether the acceptance is already `accepted`
   (see [docs/license.md](license.md)).

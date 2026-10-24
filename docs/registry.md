@@ -136,6 +136,9 @@ summary = "Text to speech."
 kind = "audio"   # audio | video | image | cad | presentation | text
 ```
 
+These fields are what `facet list` and `facet describe` report; see
+[discover.md](discover.md) for the discovery output.
+
 `[capabilities.<c>.verify]` holds numeric thresholds, for example:
 
 ```toml
