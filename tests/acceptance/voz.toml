@@ -1,0 +1,10 @@
+# The lab's reference narration, the same clip as the registry's
+# packages/kokoro/examples/laboratorio.toml, named after this check so the
+# asset never lands on an input.
+[inputs]
+voice = "ef_dora"
+language = "es"
+
+[[inputs.clip]]
+name = "aceptacion"
+text = "En este laboratorio probamos una voz en español generada localmente. Queremos medir si se entiende bien, cuánto tarda y cómo suena frente a las voces que ya usamos."
