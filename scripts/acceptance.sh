@@ -48,6 +48,10 @@ TIMED_MS=0
 ROOT_CREATED=0
 FACET=""
 SNAP=""
+#: Empty until prepare_root points them at the root; die() reports before that.
+FACET_HOME=""
+UV_CACHE_DIR=""
+UV_PYTHON_INSTALL_DIR=""
 
 absolute() {
   case $1 in
@@ -182,7 +186,7 @@ build_wheel() {
     return
   fi
   step_begin "build wheel"
-  uv build
+  uv build || die "uv build failed"
   WHEEL=$(ls -t dist/*.whl | awk 'NR == 1') || WHEEL=""
   [ -n "$WHEEL" ] || die "uv build wrote no wheel into dist/"
   WHEEL=$(cd "$(dirname "$WHEEL")" && pwd)/$(basename "$WHEEL")
@@ -194,7 +198,7 @@ build_wheel() {
 install_and_run() {
   step_begin "install + voice run (timed)"
   local rc=0
-  uv tool install "$WHEEL"
+  uv tool install "$WHEEL" || die "uv tool install $WHEEL failed"
   [ -x "$FACET" ] || die "uv tool install left no facet at $FACET"
   "$FACET" run kokoro.speak tests/acceptance/voz.toml --out "$ROOT/out" --json \
     >"$ROOT/kokoro.json" || rc=$?
@@ -307,8 +311,9 @@ run_example() {
   local envelope="$ROOT/envelopes/$pkg-$cap.json"
   local before="$ROOT/hashes/$pkg-$cap.before"
   local after="$ROOT/hashes/$pkg-$cap.after"
-  local rc=0
+  local rc=0 ms t0
   printf '  %s %s\n' "$cap" "$piece"
+  t0=$(date +%s%N)
   mkdir -p "$out"
   hash_inputs "$dir" >"$before"
   "$FACET" run "$cap" "$dir/$piece.toml" --out "$out" --json >"$envelope" || rc=$?
@@ -319,6 +324,8 @@ run_example() {
   hash_inputs "$dir" >"$after"
   cmp -s "$before" "$after" || die "$cap $piece changed one of its inputs"
   preview_assets "$pkg" "$envelope" "$out"
+  ms=$((($(date +%s%N) - t0) / 1000000))
+  SUMMARY+=("$(summary_line "$cap $piece" "$(seconds "$ms")")")
 }
 
 assert_example() {
@@ -414,12 +421,24 @@ if missing:
 ' "$1" "$SNAP"
 }
 
+# Run a light verb into a file; a failure prints the envelope and the summary.
+capture() {
+  local out=$1 rc=0
+  shift
+  "$@" >"$out" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '\n--- %s ---\n' "$out" >&2
+    cat "$out" >&2 || true
+    die "$* exited $rc"
+  fi
+}
+
 check_discovery() {
   step_begin "discovery (list, skill)"
-  "$FACET" list --available --json >"$ROOT/envelopes/list.json"
+  capture "$ROOT/envelopes/list.json" "$FACET" list --available --json
   assert_list "$ROOT/envelopes/list.json" ||
     die "facet list --available does not show the v0.1 packages under their facets"
-  "$FACET" skill kokoro --json >"$ROOT/envelopes/skill.json"
+  capture "$ROOT/envelopes/skill.json" "$FACET" skill kokoro --json
   assert_skill "$ROOT/envelopes/skill.json" ||
     die "facet skill kokoro has no body or no machine state"
   step_end
