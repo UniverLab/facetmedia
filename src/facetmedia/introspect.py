@@ -393,7 +393,7 @@ def _machine_section(
     if installed:
         lines.append("- installed: yes.")
     else:
-        lines.append(f"- installed: no — run `facet pull {package.name}` ({missing} bytes).")
+        lines.append(_not_installed_line(package, missing))
     for row in models:
         lines.append(_model_line(row))
     doctor_checks: list[dict[str, Any]] | None = None
@@ -410,6 +410,13 @@ def _machine_section(
         "doctor": doctor_checks,
     }
     return lines, state
+
+
+def _not_installed_line(package: Package, missing: int) -> str:
+    pull = f"`facet pull {package.name}`"
+    if not package.models:
+        return f"- installed: no — run {pull} (no model downloads)."
+    return f"- installed: no — run {pull} ({missing} bytes)."
 
 
 def _model_line(row: dict[str, Any]) -> str:

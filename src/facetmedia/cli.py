@@ -152,14 +152,17 @@ def _handle_pull(args: argparse.Namespace) -> int:
         )
     contract.emit(contract.ok(report), args.json)
     if not args.json:
-        _announce_pull(report)
+        _announce_pull(report, bool(package.models))
     return 0
 
 
-def _announce_pull(report: dict[str, object]) -> None:
+def _announce_pull(report: dict[str, object], has_models: bool) -> None:
     name = f"{report['package']} {report['version']}"
     if report["already_installed"] is True:
         print(f"{name} already installed at {report['env']}")
+        return
+    if not has_models:
+        print(f"{name} installed at {report['env']} (no model downloads in {report['seconds']} s)")
         return
     print(
         f"{name} installed at {report['env']} "
@@ -336,20 +339,22 @@ def _handle_list(args: argparse.Namespace) -> int:
     data = introspect.list_data(args.available, args.facet)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
-        _announce_list(data)
+        _announce_list(data, args.available, args.facet)
     return 0
 
 
-def _announce_list(data: dict[str, object]) -> None:
-    for facet in FACETS:
+def _announce_list(data: dict[str, object], available: bool, facet: str | None) -> None:
+    printed = False
+    for group in FACETS:
         rows = [
             package
             for package in _packages(data)
-            if isinstance(package, dict) and package.get("facet") == facet
+            if isinstance(package, dict) and package.get("facet") == group
         ]
         if not rows:
             continue
-        print(f"{facet}:")
+        printed = True
+        print(f"{group}:")
         for package in sorted(rows, key=lambda row: str(row.get("name", ""))):
             suffix = "  [installed]" if package.get("installed") is True else ""
             print(f"  {package.get('name')}  {package.get('weight')}{suffix}")
@@ -361,6 +366,17 @@ def _announce_list(data: dict[str, object]) -> None:
                     f"    {capability.get('id')}  {capability.get('kind')}  "
                     f"{capability.get('summary')}"
                 )
+    if not printed and not available:
+        print(_no_packages_line(facet))
+
+
+def _no_packages_line(facet: str | None) -> str:
+    if facet is None:
+        return "no packages installed; `facet list --available` shows the registry's"
+    return (
+        f"no {facet} packages installed; "
+        f"`facet list --available --facet {facet}` shows the registry's"
+    )
 
 
 def _handle_describe(args: argparse.Namespace) -> int:

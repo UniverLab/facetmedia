@@ -46,6 +46,11 @@ Without `--available` only installed packages are listed; incompatible
 packages (`"compatible": false`) appear only with `--available`, so a client
 can see what a newer facet would offer.
 
+With nothing installed the human form prints one line instead of nothing at
+all — ``no packages installed; `facet list --available` shows the
+registry's`` — and `--facet <name>` names that facet the same way. `--json`
+still reports an empty `packages` list.
+
 ## `facet describe`
 
 `facet describe <capability-id>` answers what a client needs to make

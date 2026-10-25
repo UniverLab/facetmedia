@@ -399,6 +399,7 @@ def test_skill_echo_not_installed(
     assert "echo.text" in out
     assert out.split("## On this machine")[1].startswith("\n\n- installed: no")
     assert "`facet pull echo`" in out
+    assert "run `facet pull echo` (no model downloads)." in out
     assert main(["skill", "echo", "--json"]) == 0
     data = _data(capsys)
     assert data["scope"] == "package"

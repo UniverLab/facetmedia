@@ -80,6 +80,7 @@ recomputed only with `--verify-models`. Requests carry only
 `.complete` is written last, atomically; its presence is the only meaning of
 "installed". Without `--json`, a successful pull prints one line to stdout —
 `<name> <version> installed at <env> (N bytes downloaded in T s)`, or
+`(no model downloads in T s)` when the package has no models, or
 `already installed at <env>`.
 
 ## `--json` data

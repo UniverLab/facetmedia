@@ -22,7 +22,8 @@ With no argument the core skill prints first, then a generated
 weight, its capability ids and its skill `description`, grouped by facet,
 plus the registry commit. With a package name or capability id that
 package's `SKILL.md` prints, then `## On this machine`: installed or not
-(and `facet pull <package>` with its download size when not); each model's
+(and `facet pull <package>` with its download size when not — `(no model
+downloads)` when the package lists no models); each model's
 licence state (accepted, needs `facet license accept <model>`, or no
 acceptance needed); and, when installed and unless `--no-doctor`, the quick
 doctor's checks, one line each with its fix when failing. For a capability

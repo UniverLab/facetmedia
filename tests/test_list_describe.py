@@ -123,6 +123,22 @@ def test_fake_installed_echo_is_listed_alone(
     )
 
 
+def test_list_text_says_nothing_is_installed(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["list"]) == 0
+    assert capsys.readouterr().out == (
+        "no packages installed; `facet list --available` shows the registry's\n"
+    )
+    assert main(["list", "--facet", "text"]) == 0
+    assert capsys.readouterr().out == (
+        "no text packages installed; `facet list --available --facet text` shows the registry's\n"
+    )
+    assert main(["list", "--json"]) == 0
+    assert _data(capsys)["packages"] == []
+
+
 @pytest.mark.parametrize(
     "argv",
     [
