@@ -58,8 +58,7 @@ set). It keeps three things about who accepted and when:
 - `method` — `"interactive"` (typed in the terminal) or `"flag"`
   (`--yes` passed by command line).
 
-`facet list` never shows an unaccepted model's terms next to a download
-button; acceptance happens through `license accept` alone, and until then
+Acceptance happens through `license accept` alone, and until then
 every gate (`pull`, `run`, `doctor`, `check`) names the exact accept
 command.
 

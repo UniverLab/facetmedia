@@ -89,10 +89,9 @@ exact `facet license accept <model>` command instead. An interrupted pull
 is repaired by the next pull; `.complete` written last marks "installed".
 Lock: exclusive.
 
-Exit codes: `0` (also `already installed` and the no-op answer for an
-unknown package is `2`, not 0); `2` unknown package; `4` a model's terms
-are not accepted; `5` a readiness check fails; `8` the environment build,
-a model download or its hash failed.
+Exit codes: `0` (`already installed` is also `0`); `2` unknown package;
+`4` a model's terms are not accepted; `5` a readiness check fails; `8`
+the environment build, a model download or its hash failed.
 
 ## `facet list`
 
