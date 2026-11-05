@@ -314,7 +314,7 @@ def _attempt(job: RunJob, temp_dir: Path) -> tuple[list[dict[str, object]], bool
 
 
 def _keep_leftover(home: Home, temp_dir: Path) -> None:
-    """Record the kept temp directory so ``facet gc`` can remove it later.
+    """Record the kept temp directory so ``facet clean`` can remove it later.
 
     Recording must never mask the run's own failure: a state file that cannot
     be written is logged and the original exception is re-raised by the caller.

@@ -36,8 +36,8 @@ packages, the first run, and how an agent starts with `facet skill`.
 | `facet license accept` | accept a model's terms before it may be used |
 | `facet license list` | list models that need acceptance, with status |
 | `facet registry validate` | validate a registry checkout |
-| `facet gc` | remove unused environments and caches |
-| `facet rm` | remove an installed tool |
+| `facet clean` | remove unused environments and caches |
+| `facet remove` | remove an installed tool |
 
 Every verb with its flags, lock behaviour and exit codes is documented in
 [docs/commands.md](docs/commands.md); the `--json` envelope and the asset

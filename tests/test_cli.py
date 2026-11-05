@@ -61,12 +61,12 @@ def test_run_flags_are_booleans_that_flip() -> None:
     assert args.ephemeral is True
 
 
-def test_rm_and_gc_flags_default_to_the_spec() -> None:
-    rm = build_parser().parse_args(["rm", "echo"])
+def test_remove_and_gc_flags_default_to_the_spec() -> None:
+    rm = build_parser().parse_args(["remove", "echo"])
     assert rm.package == "echo"
     assert rm.models is False
     assert rm.wait is True
-    gc = build_parser().parse_args(["gc"])
+    gc = build_parser().parse_args(["clean"])
     assert gc.dry_run is False
     assert gc.wait is True
 
@@ -128,7 +128,7 @@ def test_every_invocation_creates_the_home_layout(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
-    assert main(["gc"]) == 0
+    assert main(["clean"]) == 0
     capsys.readouterr()
     root = Path(os.environ["FACET_HOME"])
     for directory in (

@@ -27,8 +27,8 @@ LOCKING_VERBS = [
     ["update"],
     ["pull", "echo"],
     ["run", "echo.text", "piece.toml"],
-    ["rm", "echo"],
-    ["gc"],
+    ["remove", "echo"],
+    ["clean"],
     ["license", "accept", "termsy-weights"],
 ]
 
@@ -120,7 +120,7 @@ def test_exclusive_blocks_exclusive(
     started = time.monotonic()
     with (
         pytest.raises(FacetError) as exc_info,
-        hold("exclusive", "gc", wait=True, timeout_s=SHORT_WAIT_S),
+        hold("exclusive", "clean", wait=True, timeout_s=SHORT_WAIT_S),
     ):
         pass
     waited = time.monotonic() - started
@@ -131,7 +131,7 @@ def test_exclusive_blocks_exclusive(
     assert "installing kokoro" in err
     assert err.count("waiting for the facet lock") == 1, "the waiting line prints once"
     release.set()
-    with hold("exclusive", "gc", wait=True, timeout_s=JOIN_S):
+    with hold("exclusive", "clean", wait=True, timeout_s=JOIN_S):
         pass  # free again now that the holder released
 
 
@@ -159,7 +159,7 @@ def test_no_wait_fails_at_once_naming_the_holder(holder_factory: HolderStart) ->
     started = time.monotonic()
     with (
         pytest.raises(FacetError) as exc_info,
-        hold("exclusive", "gc", wait=False, timeout_s=3600.0),
+        hold("exclusive", "clean", wait=False, timeout_s=3600.0),
     ):
         pass
     assert time.monotonic() - started < 1.0, "--no-wait must not sit out the timeout"

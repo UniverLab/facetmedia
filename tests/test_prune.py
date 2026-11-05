@@ -1,4 +1,4 @@
-"""``facet rm`` and ``facet gc``: what they free, what they keep, what they cost.
+"""``facet remove`` and ``facet clean``: what they free, what they keep, what they cost.
 
 Only the tests that need a real environment pull the dependency-free ``echo``
 fixture; everything else is planted on disk, so gc's fixed reasons are asserted
@@ -103,10 +103,10 @@ def _piece(directory: Path, text: str = "hello", repeat: int = 2) -> Path:
     return piece
 
 
-# --- facet rm (FR1).
+# --- facet remove (FR1).
 
 
-def test_rm_echo_frees_its_environment_then_is_a_noop(
+def test_remove_echo_frees_its_environment_then_is_a_noop(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -116,19 +116,19 @@ def test_rm_echo_frees_its_environment_then_is_a_noop(
     env_dir = home.env_dir("echo", "0.1.0")
     assert (env_dir / ".complete").is_file()
 
-    code, data = _run_json(capsys, "rm", "echo")
+    code, data = _run_json(capsys, "remove", "echo")
     assert code == 0
     assert data["removed"] == [str(env_dir)]
     assert int(data["freed_bytes"]) > 0
     assert not (home.envs_dir / "echo").exists()
 
     # Removing a package that is not installed is a no-op with exit 0.
-    code, data = _run_json(capsys, "rm", "echo")
+    code, data = _run_json(capsys, "remove", "echo")
     assert code == 0
     assert data == {"removed": [], "freed_bytes": 0}
 
 
-def test_rm_models_deletes_the_model_of_the_package(
+def test_remove_models_deletes_the_model_of_the_package(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -140,7 +140,7 @@ def test_rm_models_deletes_the_model_of_the_package(
     expected = sum(entry.stat().st_size for entry in env_dir.rglob("*") if entry.is_file())
     expected += len(b"weights")
 
-    code, data = _run_json(capsys, "rm", "termsy", "--models")
+    code, data = _run_json(capsys, "remove", "termsy", "--models")
     assert code == 0
     assert data["removed"] == [str(env_dir), str(model.parent)]
     assert int(data["freed_bytes"]) == expected
@@ -148,7 +148,7 @@ def test_rm_models_deletes_the_model_of_the_package(
     assert not model.parent.exists()
 
 
-def test_rm_keeps_a_model_another_installed_package_lists(
+def test_remove_keeps_a_model_another_installed_package_lists(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     registry = tmp_path / "registry"
@@ -177,7 +177,7 @@ path = "{TERMSY_MODEL}/termsy.bin"
     model.parent.mkdir(parents=True)
     model.write_bytes(b"weights")
 
-    code, data = _run_json(capsys, "rm", "termsy", "--models")
+    code, data = _run_json(capsys, "remove", "termsy", "--models")
     assert code == 0
     assert str(home.env_dir("termsy", "0.1.0")) in data["removed"]
     # echo still lists that model, so removing termsy must not take it away.
@@ -185,16 +185,16 @@ path = "{TERMSY_MODEL}/termsy.bin"
     assert model.read_bytes() == b"weights"
 
     # Once echo is gone too, nothing lists it any more.
-    code, data = _run_json(capsys, "rm", "echo", "--models")
+    code, data = _run_json(capsys, "remove", "echo", "--models")
     assert code == 0
     assert str(model.parent) in data["removed"]
     assert not model.parent.exists()
 
 
-# --- facet gc (FR2): the environment and model families.
+# --- facet clean (FR2): the environment and model families.
 
 
-def test_gc_removes_environments_of_packages_the_snapshot_no_longer_has(
+def test_clean_removes_environments_of_packages_the_snapshot_no_longer_has(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -202,14 +202,14 @@ def test_gc_removes_environments_of_packages_the_snapshot_no_longer_has(
     orphan = _plant_env(home, "gone-package", "0.1.0")
     current = _plant_env(home, "echo", "0.1.0")
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert _reason_by_path(data)[orphan] == "orphan-package"
     assert not orphan.exists()
     assert current.is_dir() and (current / ".complete").is_file()
 
 
-def test_gc_removes_incomplete_and_stale_environments_and_keeps_the_current(
+def test_clean_removes_incomplete_and_stale_environments_and_keeps_the_current(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -218,7 +218,7 @@ def test_gc_removes_incomplete_and_stale_environments_and_keeps_the_current(
     stale = _plant_env(home, "echo", "0.0.9")
     unfinished = _plant_env(home, "termsy", "0.1.0", complete=False)
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert data["dry_run"] is False
     reasons = _reason_by_path(data)
@@ -231,7 +231,7 @@ def test_gc_removes_incomplete_and_stale_environments_and_keeps_the_current(
     assert not unfinished.exists()
 
 
-def test_gc_removes_models_no_package_lists(
+def test_clean_removes_models_no_package_lists(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -243,7 +243,7 @@ def test_gc_removes_models_no_package_lists(
     known.mkdir()
     (known / "termsy.bin").write_bytes(PAYLOAD)
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert _reasons(data)[orphan.name] == "orphan-model"
     assert int(data["freed_bytes"]) == len(PAYLOAD)
@@ -251,7 +251,7 @@ def test_gc_removes_models_no_package_lists(
     assert known.is_dir()
 
 
-def test_gc_dry_run_deletes_nothing_and_reports_the_same_list(
+def test_clean_dry_run_deletes_nothing_and_reports_the_same_list(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -262,7 +262,7 @@ def test_gc_dry_run_deletes_nothing_and_reports_the_same_list(
     part = home.tmp_dir / "hf-weights.1a2b.part"
     part.write_bytes(PAYLOAD)
 
-    code, dry = _run_json(capsys, "gc", "--dry-run")
+    code, dry = _run_json(capsys, "clean", "--dry-run")
     assert code == 0
     assert dry["dry_run"] is True
     assert stale.exists() and unfinished.exists() and part.exists()
@@ -273,7 +273,7 @@ def test_gc_dry_run_deletes_nothing_and_reports_the_same_list(
     assert _reasons(dry)[part.name] == "tmp"
     assert _bytes_by_path(dry)[part] == len(PAYLOAD)
 
-    code, real = _run_json(capsys, "gc")
+    code, real = _run_json(capsys, "clean")
     assert code == 0
     assert real["dry_run"] is False
     assert [item["path"] for item in _items(real)] == [item["path"] for item in _items(dry)]
@@ -282,10 +282,10 @@ def test_gc_dry_run_deletes_nothing_and_reports_the_same_list(
     assert current.is_dir()
 
 
-# --- facet gc: the snapshot, leftover and log families.
+# --- facet clean: the snapshot, leftover and log families.
 
 
-def test_gc_removes_old_and_partial_snapshots_offline(
+def test_clean_removes_old_and_partial_snapshots_offline(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("FACET_REGISTRY", raising=False)
@@ -304,7 +304,7 @@ def test_gc_removes_old_and_partial_snapshots_offline(
         encoding="utf-8",
     )
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     reasons = _reasons(data)
     assert reasons[OTHER_COMMIT] == "old-snapshot"
@@ -315,7 +315,7 @@ def test_gc_removes_old_and_partial_snapshots_offline(
     assert CURRENT_COMMIT not in reasons
 
 
-def test_gc_removes_old_log_directories_only(
+def test_clean_removes_old_log_directories_only(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -327,14 +327,14 @@ def test_gc_removes_old_log_directories_only(
     recent.mkdir()
     (recent / "run.log").write_text("recent\n", encoding="utf-8")
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert _reasons(data)["2020-01-01"] == "old-log"
     assert not old.exists()
     assert recent.is_dir()
 
 
-def test_gc_removes_only_the_leftovers_the_state_file_lists(
+def test_clean_removes_only_the_leftovers_the_state_file_lists(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _registry(monkeypatch)
@@ -344,13 +344,13 @@ def test_gc_removes_only_the_leftovers_the_state_file_lists(
     state = home.state_file("leftovers.json")
     state.write_text(json.dumps([str(kept), "/nonexistent/already-gone"]), encoding="utf-8")
 
-    code, dry = _run_json(capsys, "gc", "--dry-run")
+    code, dry = _run_json(capsys, "clean", "--dry-run")
     assert code == 0
     leftover = [Path(item["path"]) for item in _items(dry) if item["reason"] == "leftover"]
     assert leftover == [kept]
     assert kept.is_dir()
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert [Path(item["path"]) for item in _items(data) if item["reason"] == "leftover"] == [kept]
     assert not kept.exists()
@@ -386,7 +386,7 @@ def test_a_failed_run_records_its_kept_directory_for_gc(
     state = home.state_file("leftovers.json")
     assert json.loads(state.read_text(encoding="utf-8")) == [str(kept[0].resolve())]
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert any(item["reason"] == "leftover" for item in _items(data))
     assert not kept[0].exists()
@@ -395,7 +395,7 @@ def test_a_failed_run_records_its_kept_directory_for_gc(
     assert (env_dir / ".complete").is_file()
 
 
-def test_gc_prunes_the_uv_cache_with_facets_cache_dir(
+def test_clean_prunes_the_uv_cache_with_facets_cache_dir(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
@@ -413,7 +413,7 @@ def test_gc_prunes_the_uv_cache_with_facets_cache_dir(
 
     monkeypatch.setattr(prune_module.subprocess, "run", fake_run)
 
-    code, data = _run_json(capsys, "gc")
+    code, data = _run_json(capsys, "clean")
     assert code == 0
     assert seen["argv"][1:] == ["cache", "prune"]
     assert seen["env"]["UV_CACHE_DIR"] == str(home.uv_cache_dir)
@@ -446,7 +446,7 @@ def test_ephemeral_keeps_an_installed_environment_and_removes_a_fresh_one(
     assert (installed_out / "echo.txt").is_file()
 
     # Not installed: this run installs it, uses it, and removes it again.
-    assert main(["rm", "echo", "--json"]) == 0
+    assert main(["remove", "echo", "--json"]) == 0
     capsys.readouterr()
     fresh_out = tmp_path / "fresh-out"
     code = main(["run", "echo.text", str(piece), "--out", str(fresh_out), "--ephemeral", "--json"])

@@ -1,13 +1,13 @@
-"""``facet rm`` and ``facet gc``: giving the disk back.
+"""``facet remove`` and ``facet clean``: giving the disk back.
 
 Environments are persistent by default — re-downloading 2–4 GB of torch or
 onnx for every run costs more than keeping them — so removing one is always an
-explicit act.  ``facet rm`` removes one package's environments (and, on
-request, the models only it lists); ``facet gc`` sweeps what nothing uses any
+explicit act.  ``facet remove`` removes one package's environments (and, on
+request, the models only it lists); ``facet clean`` sweeps what nothing uses any
 more: stale or unfinished environments, environments of packages the registry
 no longer has, models no package lists, registry snapshots and download
 scratch, the directories failed runs kept, old logs, and uv's unused cache
-entries.  Models survive both unless ``facet rm --models`` is asked, because
+entries.  Models survive both unless ``facet remove --models`` is asked, because
 downloading them again is the expensive part.
 
 Sizes are measured before anything is deleted, with walks that follow no
@@ -66,7 +66,7 @@ UV_CACHE: Final[str] = "uv-cache"
 
 @dataclass(frozen=True)
 class GcItem:
-    """One path ``facet gc`` removes, with its measured size and its reason."""
+    """One path ``facet clean`` removes, with its measured size and its reason."""
 
     path: Path
     bytes: int
@@ -158,7 +158,7 @@ def _leftover_paths(state: Path) -> list[str]:
     return [item for item in listed if isinstance(item, str) and Path(item).is_absolute()]
 
 
-# --- facet rm.
+# --- facet remove.
 
 
 def rm_env(home: Home, name: str, version: str) -> None:
@@ -226,11 +226,11 @@ def _installed_model_dirnames(home: Home, registry: Registry, exclude: str) -> s
     return names
 
 
-# --- facet gc.
+# --- facet clean.
 
 
 def orphans(home: Home, registry: Registry) -> list[GcItem]:
-    """Environments and models no installed package references: what ``gc`` frees.
+    """Environments and models no installed package references: what ``clean`` frees.
 
     Only these two families, so ``facet doctor`` can report the disk an
     orphaned install is holding without listing logs or scratch as a problem.

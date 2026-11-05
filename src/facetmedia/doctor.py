@@ -616,7 +616,7 @@ def _orphans_check(home: Home) -> Check:
         return Check(True, "no orphaned environments or models")
     listed = ", ".join(str(item.path) for item in items[:ORPHAN_LISTED])
     more = "" if len(items) <= ORPHAN_LISTED else f" (+{len(items) - ORPHAN_LISTED} more)"
-    return Check(False, f"{len(items)} orphaned: {listed}{more}", "facet gc")
+    return Check(False, f"{len(items)} orphaned: {listed}{more}", "facet clean")
 
 
 def _gpu_present_check() -> Check:

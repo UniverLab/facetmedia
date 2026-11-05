@@ -26,8 +26,8 @@ The two verbs that look similar answer two different questions:
 | `facet run` | turn a piece into verified assets with records | per manifest |
 | `facet preview` | show an asset to a person or to an agent | none |
 | `facet license` | accept and list model licences | `accept` exclusive; `list` none |
-| `facet rm` | remove an installed tool | exclusive |
-| `facet gc` | remove unused environments and caches | exclusive |
+| `facet remove` | remove an installed tool | exclusive |
+| `facet clean` | remove unused environments and caches | exclusive |
 | `facet registry` | validate a registry checkout | none |
 
 Verbs that lock accept `--no-wait` (fail at once with `lock_busy`, exit 6)
@@ -361,7 +361,7 @@ termsy-weights CC-BY-NC-4.0 not accepted
 when `accept` runs not on a terminal and without `--yes` (exit 2 when the
 typed confirmation does not match — nothing is recorded).
 
-## `facet rm`
+## `facet remove`
 
 Removes every environment of one package. The models stay — downloading
 them again is the expensive part; `--models` deletes them too, but only
@@ -370,7 +370,7 @@ those no other installed package lists.
 Flags: `--models`.
 
 ```console
-$ facet rm ascii
+$ facet remove ascii
 /tmp/opencode/facet-docs/envs/ascii/0.1.0
 freed 86478727 bytes
 ```
@@ -382,7 +382,7 @@ Exit codes: `0`, always the no-op case included; `2` an unknown package
 name is not an error here — a package not in the registry is a no-op too;
 `6` the lock is busy and `--no-wait` was given.
 
-## `facet gc`
+## `facet clean`
 
 Removes what nothing uses and reports what it freed. Nothing is collected
 on its own; this verb is the only garbage collector.
@@ -392,7 +392,7 @@ first: its `uv-cache` entry is the size of the whole cache, while a real
 sweep reports what pruning freed.
 
 ```console
-$ facet gc --dry-run
+$ facet clean --dry-run
 /tmp/opencode/facet-docs/cache/uv 280264681 bytes uv-cache
 would free 280264681 bytes
 ```

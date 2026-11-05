@@ -83,9 +83,9 @@ FACET_HOME=/data/facet`. The directory is created on first use:
 
 Environments are persistent and safe to keep: heavy work takes a
 `state/lock` exclusively, so only one heavy job runs at a time — `update`,
-`pull`, `rm`, `gc`, `license accept` and a run under an exclusive manifest,
+`pull`, `remove`, `clean`, `license accept` and a run under an exclusive manifest,
 while light runs overlap. A crashed job leaves no stuck lock; the kernel
-holds it. `facet rm` and `facet gc` are how disk comes back when you want it
+holds it. `facet remove` and `facet clean` are how disk comes back when you want it
 back. Every invocation leaves a debug log under
 `logs/<YYYY-MM-DD>/<run-id>.log`, and state files are written through
 atomic renames, so a machine that powers off mid-write keeps its state.

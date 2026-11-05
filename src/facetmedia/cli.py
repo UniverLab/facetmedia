@@ -45,8 +45,8 @@ _VERBS: tuple[tuple[str, str], ...] = (
     ("check", "re-verify an asset against its record"),
     ("run", "run a tool through the --json contract"),
     ("preview", "render a tool's output for a person"),
-    ("rm", "remove an installed tool"),
-    ("gc", "remove unused environments and caches"),
+    ("remove", "remove an installed tool"),
+    ("clean", "remove unused environments and caches"),
 )
 
 _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
@@ -57,7 +57,7 @@ _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
 # describe, preview, license list) take no lock and reject them. `check`
 # holds the lock itself, so it also rejects the flags.
-_LOCK_VERBS: frozenset[str] = frozenset({"doctor", "gc", "pull", "rm", "run", "update"})
+_LOCK_VERBS: frozenset[str] = frozenset({"doctor", "clean", "pull", "remove", "run", "update"})
 
 
 class FacetParser(argparse.ArgumentParser):
@@ -286,7 +286,7 @@ def _handle_preview(args: argparse.Namespace) -> int:
 
 def _handle_rm(args: argparse.Namespace) -> int:
     """Exclusive: delete a package's environments, and with ``--models`` its models."""
-    with lock.hold("exclusive", "facet rm", *_lock_params(args)):
+    with lock.hold("exclusive", "facet remove", *_lock_params(args)):
         active = load_active_registry() if args.models else None
         data = prune.rm_package(
             Home.from_env(),
@@ -302,7 +302,7 @@ def _handle_rm(args: argparse.Namespace) -> int:
 
 def _handle_gc(args: argparse.Namespace) -> int:
     """Exclusive: remove what nothing uses any more, or list it with ``--dry-run``."""
-    with lock.hold("exclusive", "facet gc", *_lock_params(args)):
+    with lock.hold("exclusive", "facet clean", *_lock_params(args)):
         data = prune.gc_sweep(
             Home.from_env(),
             load_active_registry(),
@@ -433,11 +433,11 @@ _HANDLERS: dict[str, Handler] = {
     "check": _handle_check,
     "describe": _handle_describe,
     "doctor": _handle_doctor,
-    "gc": _handle_gc,
+    "clean": _handle_gc,
     "list": _handle_list,
     "preview": _handle_preview,
     "pull": _handle_pull,
-    "rm": _handle_rm,
+    "remove": _handle_rm,
     "run": _handle_run,
     "skill": _handle_skill,
     "update": _handle_update,
@@ -743,9 +743,9 @@ def build_parser() -> FacetParser:
             _add_doctor_flags(verb_parser)
         elif verb == "check":
             _add_check_flags(verb_parser)
-        elif verb == "rm":
+        elif verb == "remove":
             _add_rm_flags(verb_parser)
-        elif verb == "gc":
+        elif verb == "clean":
             _add_gc_flags(verb_parser)
         elif verb == "run":
             _add_run_flags(verb_parser)

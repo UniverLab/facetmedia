@@ -644,7 +644,7 @@ def test_doctor_reports_orphaned_environments_with_the_gc_fix(
     orphans = data["facet"]["orphans"]
     assert orphans["ok"] is False
     assert "ghost" in orphans["detail"]
-    assert orphans["fix"] == "facet gc"
+    assert orphans["fix"] == "facet clean"
     # Reported, never removed.
     assert (home / "envs" / "ghost" / "1.0.0").is_dir()
 
