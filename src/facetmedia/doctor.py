@@ -32,7 +32,7 @@ from typing import Any, Final
 
 import uv
 
-from facetmedia import __version__, licenses, lock, prune, runner
+from facetmedia import __version__, licenses, lock, prune, runner, shared
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.home import Home, require_posix
 from facetmedia.registry import (
@@ -86,10 +86,11 @@ CHECK_ORDER: Final[tuple[str, ...]] = (
     "installed",
     "licenses",
     "models",
+    "shared_modules",
 )
 
-#: The checks ``can_run`` needs: everything but ``installed`` and ``models``,
-#: which a pull (which ``run`` does by itself) fixes.
+#: The checks ``can_run`` needs: everything but ``installed``, ``models`` and
+#: ``shared_modules``, which a pull (which ``run`` does by itself) fixes.
 CAN_RUN_CHECKS: Final[tuple[str, ...]] = (
     "compatible",
     "platform",
@@ -220,6 +221,9 @@ def machine_checks(
         "installed": _installed(package, home),
         "licenses": _licenses(package),
         "models": _models(package, home),
+        "shared_modules": Check(
+            *shared.check(package, home.env_dir(package.name, package.version))
+        ),
     }
     checks = {
         name: {"ok": entries[name].ok, "detail": entries[name].detail, "fix": entries[name].fix}
@@ -919,7 +923,8 @@ def _package_section(
         failures=failures,
         doctor_failure=doctor_failure,
         needs_pull=readiness["installed"]["ok"] is not True
-        or readiness["models"]["ok"] is not True,
+        or readiness["models"]["ok"] is not True
+        or readiness["shared_modules"]["ok"] is not True,
     )
 
 
@@ -964,6 +969,4 @@ def _exit_code(classes: list[str]) -> int:
 
 
 def _first_capability(package: Package) -> str:
-    if package.capabilities:
-        return package.capabilities[0].id
-    return package.name
+    return package.capabilities[0].id if package.capabilities else package.name

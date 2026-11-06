@@ -11,6 +11,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,9 +21,11 @@ from typing import Any
 import pytest
 
 from facetmedia import doctor as doctor_module
+from facetmedia import shared as shared_module
 from facetmedia.cli import main
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
+from tests.registry_server import COMMIT, OTHER_COMMIT
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -819,3 +822,124 @@ def test_human_output_marks_each_check_and_indents_the_fix(
     assert "    → fix: facet license accept termsy-weights" in out
     assert "✗ installed:" in out
     assert "    → fix: facet pull termsy" in out
+
+
+# --- FR4: the shared-modules check and its stale environment.
+
+
+def _fake_env(home: Home, package: Any, marker: str) -> Path:
+    """An environment directory whose markers say what a pull would have written."""
+    env_dir = home.env_dir(package.name, package.version)
+    env_dir.mkdir(parents=True)
+    (env_dir / ".complete").write_text(package.lock_sha256, encoding="utf-8")
+    (env_dir / ".registry").write_text(marker, encoding="utf-8")
+    return env_dir
+
+
+def _shared_entry(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    data = _data(_envelope(capsys))
+    entry = data["packages"]["echo"]["readiness"]["shared_modules"]
+    assert isinstance(entry, dict)
+    return entry
+
+
+def test_shared_modules_check_reports_the_pulled_copy(facet_home: Path) -> None:
+    assert facet_home.is_dir()
+    package = load_registry(FIXTURES).packages["echo"]
+    home = Home.from_env()
+
+    checks, failures = doctor_module.machine_checks(package, home)
+    assert checks["shared_modules"] == {
+        "ok": True,
+        "detail": "1 shared module(s) present",
+        "fix": "",
+    }
+    assert failures == []
+
+
+def test_shared_modules_check_is_absent_from_can_run_checks() -> None:
+    """What a pull fixes never gates a pull or a run."""
+    assert "shared_modules" in doctor_module.CHECK_ORDER
+    assert "shared_modules" not in doctor_module.CAN_RUN_CHECKS
+    assert list(doctor_module.CHECK_ORDER)[-1] == "shared_modules"
+
+
+def test_shared_modules_check_without_uses_or_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _fresh_home(monkeypatch, tmp_path)
+    home = Home.from_env()
+    registry = load_registry(FIXTURES)
+
+    echo_checks, _ = doctor_module.machine_checks(registry.packages["echo"], home)
+    assert echo_checks["shared_modules"] == {
+        "ok": True,
+        "detail": "no environment to be stale",
+        "fix": "",
+    }
+    termsy_checks, _ = doctor_module.machine_checks(registry.packages["termsy"], home)
+    assert termsy_checks["shared_modules"] == {
+        "ok": True,
+        "detail": "no shared modules declared",
+        "fix": "",
+    }
+
+
+def test_doctor_detects_stale_shared_modules_in_override_mode(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry_copy)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry_copy))
+    Home.from_env()
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
+    assert main(["doctor", "echo", "--json"]) == 0
+    assert _shared_entry(capsys)["ok"] is True
+
+    module = registry_copy / "lib" / "textnorm.py"
+    module.write_text(module.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+    assert main(["doctor", "echo.text", "--json"]) == 0
+    data = _data(_envelope(capsys))
+    entry = data["packages"]["echo"]["readiness"]["shared_modules"]
+    assert isinstance(entry, dict)
+    assert entry["ok"] is False
+    assert entry["detail"].endswith("the shared modules are stale")
+    assert entry["fix"] == "facet pull echo"
+    assert data["needs_pull"] is True
+    assert data["can_run"] is True
+
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
+    assert main(["doctor", "echo.text", "--json"]) == 0
+    data = _data(_envelope(capsys))
+    entry = data["packages"]["echo"]["readiness"]["shared_modules"]
+    assert isinstance(entry, dict)
+    assert entry["ok"] is True
+    assert data["needs_pull"] is False
+
+
+def test_doctor_detects_stale_shared_modules_in_pinned_mode(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("FACET_REGISTRY", raising=False)
+    home = Home.from_env()
+    shutil.copytree(FIXTURES, home.registry_dir(COMMIT))
+    shutil.copytree(FIXTURES, home.registry_dir(OTHER_COMMIT))
+    home.state_file("registry.json").write_text(
+        json.dumps({"commit": COMMIT, "ref": "main"}), encoding="utf-8"
+    )
+    package = load_registry(home.registry_dir(COMMIT)).packages["echo"]
+    assert shared_module.fingerprint(package) == COMMIT
+    _fake_env(home, package, COMMIT)
+
+    main(["doctor", "echo", "--json"])
+    assert _shared_entry(capsys)["ok"] is True
+
+    home.state_file("registry.json").write_text(
+        json.dumps({"commit": OTHER_COMMIT, "ref": "main"}), encoding="utf-8"
+    )
+    main(["doctor", "echo", "--json"])
+    entry = _shared_entry(capsys)
+    assert entry["ok"] is False
+    assert entry["fix"] == "facet pull echo"

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from facet_lib import textnorm
 from facet_runner_sdk import Request, Runner
 
 runner = Runner()
@@ -19,7 +20,7 @@ runner = Runner()
 
 @runner.verb("run")
 def run(req: Request) -> dict[str, Any]:
-    text = str(req.inputs["text"])
+    text = textnorm.normalize(str(req.inputs["text"]))
     repeat = int(req.inputs.get("repeat", 1))
     (req.out_dir / "echo.txt").write_text(text * repeat, encoding="utf-8")
     return {

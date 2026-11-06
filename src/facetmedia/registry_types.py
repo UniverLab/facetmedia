@@ -162,6 +162,7 @@ class Package:
     licenses: tuple[License, ...] = ()
     models: tuple[Model, ...] = ()
     capabilities: tuple[Capability, ...] = ()
+    uses: tuple[str, ...] = ()
 
     @property
     def dir(self) -> Path:

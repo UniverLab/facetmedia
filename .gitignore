@@ -45,6 +45,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!tests/fixtures/registry/lib/
 lib64/
 parts/
 sdist/

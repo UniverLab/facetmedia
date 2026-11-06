@@ -25,6 +25,7 @@ packages/<name>/pyproject.toml    # the environment's dependencies
 packages/<name>/uv.lock           # the pinned lock, authoritative
 packages/<name>/runner.py         # the package runner
 packages/<name>/skill/SKILL.md    # the package skill
+lib/<name>.py                     # shared modules packages may declare
 viewers/<viewer>/index.html       # person-facing viewers
 schemas/preview/<kind>.schema.json  # one preview schema per asset kind
 ```
@@ -152,6 +153,54 @@ download, models need no acceptance when `requires_acceptance = false`,
 and a model needing acceptance fails every gate with the exact
 `facet license accept <id>` command (see [licenses.md](licenses.md)).
 
+## Shared modules
+
+Packages run in separate environments, so a helper they both need is kept
+once in the registry and copied into each environment at pull time:
+
+```text
+lib/<name>.py    # <name> matches [a-z][a-z0-9_]*
+```
+
+A module starts with a docstring whose first line is a one-line summary,
+and carries a line naming the distributions it imports beyond the
+standard library — or exactly `stdlib`:
+
+```python
+"""Normalise text before synthesis.
+
+Requires: charset-normalizer, regex
+"""
+```
+
+A package declares the modules it uses in an optional top-level key of its
+`package.toml`:
+
+```toml
+uses = ["textnorm"]
+```
+
+`facet registry validate` rejects a name with no `lib/<name>.py`, a
+duplicate, and a module whose `Requires:` names a distribution that is
+absent from the package's `pyproject.toml` dependencies. Distribution
+names are compared normalised, the PEP 503 way, so `Charset_Normalizer`
+matches `charset-normalizer`.
+
+At pull time each declared module lands in the environment's site-packages
+as `facet_lib/<name>.py`, next to an empty `facet_lib/__init__.py`, and a
+runner imports it with `from facet_lib import textnorm`. Only declared
+modules are copied. A package that declares no `uses` gets nothing new,
+exactly as before.
+
+The environment remembers what it copied in a `.registry` marker next to
+`.complete`. The fingerprint in that marker is the pinned snapshot commit
+when the registry is a snapshot, or, with `FACET_REGISTRY` set, an
+`override:<sha256>` over the used modules (sorted by name) and the
+package's `package.toml`. A changed lock hash **or** a changed fingerprint
+makes the environment stale, so the next `facet pull` rebuilds it and
+rewrites both markers. `facet doctor` reports a stale copy with the fix
+`facet pull <package>`; that fix never gates a pull or a run.
+
 ## Capabilities and their inputs
 
 Each capability is `[capabilities.<name>]`, its id is
@@ -216,7 +265,10 @@ its own process group, with `FACET_MODELS` pointing at the models
 directory.
 
 The `facet_runner_sdk` module ships with facet and is copied into every
-environment, so a package runner writes tool code and nothing else:
+environment; the registry's shared modules, when a package declares
+`uses`, are copied the same way as `facet_lib`, so a runner may
+`from facet_lib import <name>`. A package runner otherwise writes tool
+code and nothing else:
 
 ```python
 from facet_runner_sdk import Request, Runner

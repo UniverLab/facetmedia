@@ -247,6 +247,71 @@ def test_validate_rejects_a_runner_without_a_doctor_verb(tmp_path: Path) -> None
     assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
 
 
+def _package_with_uses(
+    tmp_path: Path,
+    uses: str,
+    *,
+    module: str | None = None,
+    dependencies: tuple[str, ...] = (),
+    module_name: str = "textnorm",
+) -> Path:
+    """A complete package that declares ``uses``, with one optional lib module."""
+    manifest = MANIFEST_TEMPLATE.replace('facet = "text"', f'facet = "text"\nuses = {uses}')
+    pkg_dir = _write_package(tmp_path, manifest)
+    listed = ", ".join(f'"{name}"' for name in dependencies)
+    (pkg_dir / "pyproject.toml").write_text(
+        f'[project]\nname = "test"\nversion = "0.1.0"\ndependencies = [{listed}]\n',
+        encoding="utf-8",
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    (tmp_path / "lib").mkdir(exist_ok=True)
+    if module is not None:
+        (tmp_path / "lib" / f"{module_name}.py").write_text(module, encoding="utf-8")
+    return pkg_dir
+
+
+def _lib_module(requires: str) -> str:
+    return f'"""A shared helper.\n\nRequires: {requires}\n"""\n'
+
+
+def test_validate_rejects_an_unknown_shared_module(tmp_path: Path) -> None:
+    _package_with_uses(tmp_path, '["nope"]')
+
+    found = _problems(tmp_path)
+    assert ("packages/missing/package.toml", "uses[0]", "missing") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_duplicate_shared_module(tmp_path: Path) -> None:
+    _package_with_uses(tmp_path, '["textnorm", "textnorm"]', module=_lib_module("stdlib"))
+
+    found = _problems(tmp_path)
+    assert ("packages/missing/package.toml", "uses[1]", "duplicate") in found
+    assert ("packages/missing/package.toml", "uses[0]", "duplicate") not in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_module_dependency_the_package_lacks(tmp_path: Path) -> None:
+    _package_with_uses(tmp_path, '["textnorm"]', module=_lib_module("notadep"))
+
+    found = _problems(tmp_path)
+    assert ("packages/missing/package.toml", "uses[0]", "missing dependency: notadep") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_compares_dependency_names_the_pep_503_way(tmp_path: Path) -> None:
+    _package_with_uses(
+        tmp_path,
+        '["textnorm"]',
+        module=_lib_module("Charset_Normalizer"),
+        dependencies=("charset-normalizer>=3",),
+    )
+
+    assert _problems(tmp_path) == set()
+    assert main(["registry", "validate", str(tmp_path)]) == 0
+
+
 def test_validate_rejects_a_runner_that_still_registers_probe(tmp_path: Path) -> None:
     probe_runner = (
         DOCTOR_STUB + '\n@runner.verb("probe")\ndef probe(req: object) -> dict:\n    return {}\n'

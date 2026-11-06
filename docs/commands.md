@@ -81,6 +81,14 @@ $ facet pull ffmpeg
 ffmpeg 0.1.0 installed at /tmp/opencode/facet-docs/envs/ffmpeg/0.1.0 (no model downloads in 5.898 s)
 ```
 
+When a package's manifest declares `uses`, its shared modules are copied
+from the registry's `lib/` into the environment as `facet_lib/<name>.py`
+in the same step that installs `facet_runner_sdk`. The environment records
+their fingerprint in a `.registry` marker, and a pull whose lock hash and
+marker both still match is `already installed`; a change in either
+rebuilds the environment. A package without `uses` writes no `.registry`
+and keeps the lock-only behaviour.
+
 Nothing is written or downloaded before the doctor's readiness checks
 (compatibility, platform, RAM, disk, GPU, host libraries — plus the
 package's own `doctor` verb at quick depth when it is already installed)
@@ -196,7 +204,9 @@ throwaway output that facet removes). It reports; it never downloads or
 repairs.
 
 Flags: `--quick` (only the quick depth), plus a target: nothing (facet and
-every installed package), a package name, or a capability id.
+every installed package), a package name, or a capability id. The readiness
+list ends with `shared_modules`, which reports a stale `facet_lib` copy
+with the fix `facet pull <package>` and never gates a run by itself.
 
 ```console
 $ facet doctor --quick
@@ -221,6 +231,7 @@ ascii (installed):
   ✓ installed: installed at /tmp/opencode/facet-docs/envs/ascii/0.1.0
   ✓ licenses: no model requires acceptance
   ✓ models: 1 model(s) present
+  ✓ shared_modules: no shared modules declared
   ✓ imports: PIL 13.0.0, numpy 2.5.4, pyfiglet 1.0.4 import
   ✓ figlet_font: dos_rebel is installed with pyfiglet
   ✓ mono_font: sometype-mono 64308 bytes, opens with Pillow
@@ -234,6 +245,7 @@ ffmpeg (installed):
   ✓ installed: installed at /tmp/opencode/facet-docs/envs/ffmpeg/0.1.0
   ✓ licenses: no model requires acceptance
   ✓ models: the package has no models
+  ✓ shared_modules: no shared modules declared
   ✓ binary: ffmpeg 7.0.2-static at ffmpeg-linux-x86_64-v7.0.2
   ✓ encoders: flac, libmp3lame, libopus, pcm_s16le
   ✓ imports: numpy 2.5.4, pyloudnorm 0.2.0, soundfile 0.13.1

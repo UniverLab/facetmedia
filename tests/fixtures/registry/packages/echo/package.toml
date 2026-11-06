@@ -6,6 +6,7 @@ provider = "facet"
 tool_name = "Echo"
 description = "Echo text back; the dependency-free registry fixture."
 facet = "text"
+uses = ["textnorm"]
 
 [engine]
 type = "python-env"

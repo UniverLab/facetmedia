@@ -37,6 +37,9 @@ _MODEL_ID_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}\Z")
 _REVISION_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}\Z")
 _PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(\.\d+)?\Z")
+_USES_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]*\Z")
+_REQUIRES_RE: Final[re.Pattern[str]] = re.compile(r"^Requires:[ \t]*(.*)$", re.MULTILINE)
+_LIB_DIR: Final[str] = "lib"
 
 
 def _default_type_matches(field_type: str, default: object) -> bool:
@@ -62,6 +65,53 @@ def _is_relative_path(value: str) -> bool:
     return not path.is_absolute() and ".." not in path.parts
 
 
+def _canonical_name(name: str) -> str:
+    """A distribution name normalised the way PEP 503 says to compare them."""
+
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _dependency_names(path: Path) -> frozenset[str] | None:
+    """The canonical names in a ``pyproject.toml``'s dependencies, or ``None``."""
+
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    project = data.get("project")
+    dependencies = project.get("dependencies") if isinstance(project, dict) else None
+    if not isinstance(dependencies, list):
+        return frozenset()
+    names: set[str] = set()
+    for item in dependencies:
+        if isinstance(item, str) and item.strip():
+            requirement = item.strip()
+            names.add(_canonical_name(re.split(r"[<>=!~;\[(\s]", requirement, maxsplit=1)[0]))
+    return frozenset(names)
+
+
+def _missing_requirements(module: Path, dependencies: frozenset[str] | None) -> str | None:
+    """The first distribution a module's ``Requires:`` line names but the package lacks."""
+
+    try:
+        text = module.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    found = _REQUIRES_RE.search(text)
+    if found is None:
+        return None
+    body = found.group(1).strip()
+    if not body or body == "stdlib":
+        return None
+    known = dependencies if dependencies is not None else frozenset()
+    for part in body.split(","):
+        name = _canonical_name(part.strip())
+        if name and name not in known:
+            return name
+    return None
+
+
 _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
     {
         "name",
@@ -78,6 +128,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "licenses",
         "models",
         "capabilities",
+        "uses",
     }
 )
 _ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python"})
@@ -311,6 +362,8 @@ class RegistryLoader:
         licenses = self.licenses(data.get("licenses"), file)
         models = self.models(data.get("models"), file)
         capabilities = self.capabilities(data.get("capabilities"), name, file)
+        dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
+        uses = self.uses(data.get("uses"), file, dependencies)
         if len(self.problems) != before:
             return None
         if (
@@ -342,7 +395,38 @@ class RegistryLoader:
             licenses=licenses,
             models=models,
             capabilities=capabilities,
+            uses=uses,
         )
+
+    def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
+        """The shared modules this package declares, validated against ``lib/``."""
+
+        if raw is None:
+            return ()
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            self.add(file, "uses", "type")
+            return ()
+        found: list[str] = []
+        seen: set[str] = set()
+        for position, name in enumerate(raw):
+            key = f"uses[{position}]"
+            if not _USES_RE.fullmatch(name):
+                self.add(file, key, "value")
+                continue
+            if name in seen:
+                self.add(file, key, "duplicate")
+                continue
+            seen.add(name)
+            module = self.root / _LIB_DIR / f"{name}.py"
+            if not module.is_file():
+                self.add(file, key, "missing")
+                continue
+            missing = _missing_requirements(module, dependencies)
+            if missing is not None:
+                self.add(file, key, f"missing dependency: {missing}")
+                continue
+            found.append(name)
+        return tuple(found)
 
     def manifest_version(self, data: Mapping[str, Any], file: str) -> str | None:
         version = self.string(data, "version", file, "", required=True)

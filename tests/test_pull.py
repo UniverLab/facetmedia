@@ -21,13 +21,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from facetmedia import __version__
+from facetmedia import __version__, update
 from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
+from facetmedia import shared as shared_module
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
+from tests.registry_server import COMMIT, OTHER_COMMIT, FakeGitHub
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 REAL_SHA = "85a73737b5d85eaba43e73ba33ceade28de49f1f4f7573377f02d58408f715c7"
@@ -512,3 +514,121 @@ def test_missing_host_lib_fails_with_the_manifest_hint() -> None:
     assert error.hint == "install libfacet_fixture_missing"
     assert "libfacet_fixture_missing.so" in error.message
     assert list(home.envs_dir.iterdir()) == []
+
+
+# --- shared modules: the ``uses`` surface copied into the environment.
+
+
+def _registry_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, copy)
+    monkeypatch.setenv("FACET_REGISTRY", str(copy))
+    return copy
+
+
+def test_pull_copies_the_declared_shared_modules_and_only_those(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_copy = _registry_copy(tmp_path, monkeypatch)
+    home = Home.from_env()
+    env_dir = home.env_dir("echo", "0.1.0")
+    package = load_registry(registry_copy).packages["echo"]
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    lib = env_module._purelib(env_dir) / "facet_lib"
+    assert (lib / "textnorm.py").read_bytes() == (
+        registry_copy / "lib" / "textnorm.py"
+    ).read_bytes()
+    assert (lib / "__init__.py").read_text(encoding="utf-8") == ""
+    assert not (lib / "other.py").exists()
+    assert (env_dir / ".registry").read_text(encoding="utf-8").strip() == (
+        shared_module.fingerprint(package)
+    )
+    # .complete keeps holding only the lock hash.
+    assert (env_dir / ".complete").read_text(encoding="utf-8") == package.lock_sha256
+
+    run = subprocess.run(
+        [
+            str(env_dir / "venv" / "bin" / "python"),
+            "-c",
+            "from facet_lib import textnorm; print(textnorm.normalize('ok'))",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert run.returncode == 0
+    assert run.stdout.strip() == "ok"
+
+
+def test_pull_refreshes_shared_modules_when_the_override_content_changes(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_copy = _registry_copy(tmp_path, monkeypatch)
+    home = Home.from_env()
+    env_dir = home.env_dir("echo", "0.1.0")
+    # A recorded snapshot must not leak into FACET_REGISTRY's content hash.
+    home.state_file("registry.json").parent.mkdir(parents=True, exist_ok=True)
+    home.state_file("registry.json").write_text(
+        json.dumps({"commit": COMMIT, "ref": "main"}), encoding="utf-8"
+    )
+    _pull(capsys, "pull", "echo")
+    assert (env_dir / ".registry").read_text(encoding="utf-8").startswith("override:")
+    module = registry_copy / "lib" / "textnorm.py"
+    module.write_text(
+        module.read_text(encoding="utf-8").replace("return text\n", "return text.upper()\n"),
+        encoding="utf-8",
+    )
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    copied = env_module._purelib(env_dir) / "facet_lib" / "textnorm.py"
+    assert "return text.upper()" in copied.read_text(encoding="utf-8")
+
+
+def test_pull_pinned_rebuilds_when_the_snapshot_changes(
+    capsys: pytest.CaptureFixture[str],
+    fake_github: FakeGitHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = Home.from_env()
+    update.update_registry(home, "main")
+    assert fake_github.archive_hits == 1
+    env_dir = home.env_dir("echo", "0.1.0")
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert (env_dir / ".registry").read_text(encoding="utf-8").strip() == COMMIT
+
+    other = home.registry_dir(OTHER_COMMIT)
+    shutil.copytree(home.registry_dir(COMMIT), other)
+    home.state_file("registry.json").write_text(
+        json.dumps({"commit": OTHER_COMMIT, "ref": "main"}), encoding="utf-8"
+    )
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    assert (env_dir / ".registry").read_text(encoding="utf-8").strip() == OTHER_COMMIT
+
+
+def test_pull_of_a_package_without_uses_writes_no_registry_marker(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    _accept_termsy(home)
+    package = load_registry(FIXTURES).packages["termsy"]
+
+    code, _envelope = _pull(capsys, "pull", "termsy")
+    assert code == 0
+    env_dir = home.env_dir("termsy", "0.1.0")
+    assert not (env_dir / ".registry").exists()
+    assert env_module._is_current(package, env_dir) is True
+    # A stray marker is ignored: without ``uses`` it is never read.
+    (env_dir / ".registry").write_text("bogus", encoding="utf-8")
+    assert env_module._is_current(package, env_dir) is True

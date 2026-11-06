@@ -29,7 +29,7 @@ from typing import IO, Any, Final
 
 import uv
 
-from facetmedia import __version__
+from facetmedia import __version__, shared
 from facetmedia import doctor as doctor_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
@@ -71,12 +71,14 @@ def pull(
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
-    up_to_date = _is_complete(env_dir, package.lock_sha256)
+    up_to_date = _is_current(package, env_dir)
     if not up_to_date:
         _rebuild(package, home, env_dir)
     records, downloaded = _fetch_models(package, home, verify_models)
     if not up_to_date:
         atomic_write_text(env_dir / COMPLETE, package.lock_sha256, home.tmp_dir)
+        if package.uses:
+            atomic_write_text(env_dir / shared.MARKER, shared.fingerprint(package), home.tmp_dir)
     return {
         "package": package.name,
         "version": package.version,
@@ -141,6 +143,13 @@ def _is_complete(env_dir: Path, lock_sha256: str) -> bool:
         return False
 
 
+def _is_current(package: Package, env_dir: Path) -> bool:
+    """Whether the lock hash and, when the package has uses, the marker match."""
+    if not _is_complete(env_dir, package.lock_sha256):
+        return False
+    return not package.uses or shared.matches(package, env_dir)
+
+
 def _rebuild(package: Package, home: Home, env_dir: Path) -> None:
     """Redo the environment from scratch: delete, copy, sync, install the SDK."""
     if env_dir.exists():
@@ -151,6 +160,8 @@ def _rebuild(package: Package, home: Home, env_dir: Path) -> None:
     shutil.copytree(package.dir, env_dir / "package")
     _uv_sync(home, env_dir, package.python)
     _install_sdk(env_dir)
+    if package.uses:
+        shared.copy_into(package, _purelib(env_dir))
 
 
 def _uv_sync(home: Home, env_dir: Path, python: str) -> None:
