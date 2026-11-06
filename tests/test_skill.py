@@ -51,6 +51,9 @@ spdx = "Apache-2.0"
 [capabilities.speak]
 summary = "speaks"
 kind = "audio"
+
+[capabilities.speak.preview]
+viewer = "generic"
 """
 
 VALID_SKILL = """---

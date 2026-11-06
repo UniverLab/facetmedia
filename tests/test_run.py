@@ -384,6 +384,9 @@ PICK_CAPABILITY = """
 summary = "Take an image as input."
 kind = "image"
 
+[capabilities.pick.preview]
+viewer = "generic"
+
 [capabilities.pick.inputs.image]
 type = "path"
 required = true

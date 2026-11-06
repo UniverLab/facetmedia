@@ -11,6 +11,9 @@ $ facet preview out/take-voice.wav --no-open       # serve the viewer, print the
 $ facet preview out/take-voice.wav --port 8901 --idle-timeout 60
 ```
 
+One kind is different: for a `document` asset the person form opens the
+PDF itself — see [the document exception](#person-form-facet-preview-asset).
+
 The argument names the asset or its record. The record's provenance names
 the capability, whose package must still be installed: when its
 environment is gone facet fails with `not_installed` and the hint
@@ -45,6 +48,22 @@ draft-2020-12 schema per asset kind:
 A package whose preview does not match its kind's schema is a registry
 review blocker — see the [schemas README](https://github.com/UniverLab/facetmedia-registry/blob/main/schemas/preview/README.md).
 
+### Document pages
+
+A `document` preview writes the PDF's page images, one PNG per page in
+page order, as its `pages` list plus a `page_count`. The agent form rides
+them on the same `images` array, at most
+10 pages; past 10, the `preview` object carries `truncated: true` and the
+rest of the pages never reach the agent — it still sees them through
+`preview.pages`, so judging the text layout of a 300-page thesis means
+asking the package for what pages matter, not facet for the whole book:
+
+```json
+{"asset": "assets/thesis.pdf", "record": {"name": "thesis", "kind": "document", "…": "the full record"},
+ "preview": {"kind": "document", "preview": 1, "page_count": 11, "pages": ["page-01.png", "…", "page-11.png"], "summary": "a footnoted draft", "truncated": true},
+ "images": ["/abs/out/page-01.png", "…", "/abs/out/page-10.png"]}
+```
+
 ## Person form: `facet preview <asset>`
 
 The viewer is the capability's `preview.viewer` (default `generic`) from
@@ -74,3 +93,16 @@ prints the preview JSON and exits 0. The core carries no HTML of its own —
 the viewers live in the registry's
 [`viewers/`](https://github.com/UniverLab/facetmedia-registry/blob/main/viewers/README.md),
 one directory per kind with a `_kit/` shared between them.
+
+### The document exception
+
+A `document` asset needs no viewer: the person preview is the PDF itself.
+Facet prints its `file://` URL — the asset's own path, not a local
+server — and opens it with the same platform opener; the `pages` PNGs are
+for agents, and no viewer starts for the person. `--no-open` prints the
+URL only; `--port` and `--idle-timeout` do nothing for a document.
+
+```console
+$ facet preview out/thesis.pdf --no-open
+file:///home/facet/out/thesis.pdf
+```

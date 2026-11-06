@@ -739,6 +739,7 @@ class RegistryLoader:
 
     def preview(self, raw: object, file: str, prefix: str) -> str:
         if raw is None:
+            self.add(file, f"{prefix}preview", "required")
             return "generic"
         if not isinstance(raw, dict):
             self.add(file, f"{prefix}preview", "type")

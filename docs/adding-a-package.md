@@ -237,6 +237,42 @@ is missing or unverified with the fix `facet pull <package>`; like
 `installed`, `models` and `shared_modules`, that check never gates the pull
 that fixes it.
 
+## The document kind
+
+Long written documents — the texforge thesis, articles, reports — are a
+kind of their own. A `document` capability writes a multi-page PDF
+(`kind = "document"`, `mime = "application/pdf"`), and a finished
+document package needs all of it: the schema, `run`, `verify`, `preview`
+(person and agent), `doctor` and its skill.
+
+The agent preview is the schema's `document.preview.json`: the runner's
+`preview` verb produces one PNG per page, in page order, into the asset's
+directory, and writes `pages` (the list of PNG names) and `page_count`:
+
+```json
+{"preview": 1, "kind": "document", "summary": "…", "page_count": 12, "pages": ["page-01.png", "…", "page-12.png"]}
+```
+
+The runner renders the pages itself: the reference mechanism is the
+shared [browser artifact](#browser-artifact) this manifest declares via
+`[browser]`, screenshotting each PDF page at roughly 150 dpi. facet
+installs no renderer of its own — no system poppler, no PDF library in
+facet itself; the pages are the browser's work, produced by the package.
+
+To a person, `facet preview` of a document opens the PDF itself: facet
+prints the asset's `file://` URL and opens it with the platform opener,
+there is no viewer and no server (see
+[preview.md](preview.md)). To an agent, the page PNGs ride the `--json`
+`images` array, at most 10 pages, with `truncated` marking an 11+-page
+book.
+
+The package's `verify` verb carries the kind's own contract: it parses
+the PDF, opens every page PNG beside the asset, reads the sibling record
+file, and compares its fresh `page_count` metric against the recorded
+one — a missing or extra page fails the verdict, and `facet check`
+reports it. All parsing stays in the package: core dependencies are
+`uv` and `packaging` only, and they stay that way.
+
 ## Server engine
 
 Some tools cannot be pip-installed: they are cloned at a pinned commit, built
@@ -481,11 +517,12 @@ Each capability is `[capabilities.<name>]`, its id is
 ```toml
 [capabilities.strip]
 summary = "One line, shown by facet list and describe."
-kind = "text"   # audio | video | image | cad | presentation | text
+kind = "text"   # audio | video | image | cad | presentation | text | document
 ```
 
 `kind` is the asset the capability writes; it alone picks the preview
-schema and the viewer.
+schema and the viewer (`textured` tools make `text`; long written
+documents make [`document`](#the-document-kind)).
 
 Inputs are fields under `[capabilities.<c>.inputs.<field>]`:
 
@@ -514,8 +551,12 @@ valid on its types. Verify thresholds and the viewer:
 thresholds = { columns_max = 300 }
 
 [capabilities.strip.preview]
-viewer = "text"     # defaults to "generic"; the viewer must exist under viewers/
+viewer = "text"     # the viewer must exist under viewers/
 ```
+
+Every capability declares its `[capabilities.<c>.preview]` table —
+`validate` rejects a capability without one, for every kind: no kind
+ships without an agent preview. Omitting `viewer` keeps `generic`.
 
 ## The runner protocol
 

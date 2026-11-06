@@ -8,6 +8,7 @@ import pytest
 
 from facetmedia.cli import main
 from facetmedia.registry import validate_registry
+from facetmedia.registry_types import CAPABILITY_KINDS
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
 EXIT_INVALID = 2
@@ -195,6 +196,53 @@ def test_validate_missing_uv_lock(tmp_path: Path) -> None:
     (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
     assert _problems(tmp_path) == {("packages/missing/uv.lock", "", "missing")}
     assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+@pytest.mark.parametrize("kind", sorted(CAPABILITY_KINDS))
+def test_every_kind_requires_a_preview_table(tmp_path: Path, kind: str) -> None:
+    """A capability of any kind must declare its agent preview."""
+    pkg_dir = _write_package(tmp_path, _manifest_with_capability(kind, preview=False))
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    assert _problems(tmp_path) == {
+        ("packages/missing/package.toml", "capabilities.test.preview", "required")
+    }
+
+
+@pytest.mark.parametrize("kind", sorted(CAPABILITY_KINDS))
+def test_a_declared_preview_table_satisfies_the_rule(tmp_path: Path, kind: str) -> None:
+    """A `[preview]` table is enough; ``viewer`` may default to generic."""
+    pkg_dir = _write_package(tmp_path, _manifest_with_capability(kind, preview=True))
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    _inline_viewer(tmp_path, "generic")
+    assert _problems(tmp_path) == set()
+
+
+def _inline_viewer(root: Path, name: str) -> None:
+    """A one-page viewer directory, so the manifest's viewer names a file."""
+    viewer = root / "viewers" / name
+    viewer.mkdir(parents=True)
+    (viewer / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+
+
+def _manifest_with_capability(kind: str, *, preview: bool) -> str:
+    """The template manifest plus one `test` capability of kind `kind`."""
+    table = '\n[capabilities.test.preview]\nviewer = "generic"\n' if preview else ""
+    return (
+        MANIFEST_TEMPLATE
+        + f"""
+[capabilities.test]
+summary = "test"
+kind = "{kind}"
+{table}"""
+    )
 
 
 def test_validate_missing_runner_entry(tmp_path: Path) -> None:

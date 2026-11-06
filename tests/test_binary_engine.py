@@ -160,6 +160,9 @@ spdx = "Apache-2.0"
 summary = "Echo text back through the binary stub."
 kind = "text"
 
+[capabilities.echo.preview]
+viewer = "generic"
+
 [capabilities.echo.inputs.text]
 type = "string"
 required = true

@@ -25,7 +25,7 @@ DEFAULT_INVOCATION_TEMPLATE: Final[str] = (
 )
 
 CAPABILITY_KINDS: Final[frozenset[str]] = frozenset(
-    {"audio", "video", "image", "cad", "presentation", "text"}
+    {"audio", "video", "image", "cad", "presentation", "text", "document"}
 )
 FACETS: Final[tuple[str, ...]] = (
     "voice",

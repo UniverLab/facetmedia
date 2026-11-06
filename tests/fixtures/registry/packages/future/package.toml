@@ -31,3 +31,6 @@ spdx = "Apache-2.0"
 [capabilities.thing]
 summary = "A capability from the future."
 kind = "text"
+
+[capabilities.thing.preview]
+viewer = "generic"

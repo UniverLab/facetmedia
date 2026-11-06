@@ -162,6 +162,9 @@ spdx = "Apache-2.0"
 [capabilities.health]
 summary = "Report what the per-run server answered."
 kind = "text"
+
+[capabilities.health.preview]
+viewer = "generic"
 """
 
 HEALTHY_LAUNCH = '["python", "serve.py", "--port", "{{port}}"]'

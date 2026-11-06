@@ -397,7 +397,11 @@ uninstalled package; `9` the runner crashed or broke the protocol.
 ## `facet preview`
 
 Shows one asset: to an agent as data, to a person through the capability's
-viewer — see [preview.md](preview.md).
+viewer — see [preview.md](preview.md). A `document` asset is different:
+its person preview is the PDF itself — the printed URL is the asset's
+`file://` path and the browser opens exactly that — and its `--json`
+`images` array carries the page PNGs, at most 10, with the `preview`
+object saying `page_count` and `truncated` one way or the other.
 
 Flags: `--no-open` (print the viewer URL only), `--port PORT`,
 `--idle-timeout SECONDS` (stop the server after idle; default 600).
@@ -405,8 +409,12 @@ Flags: `--no-open` (print the viewer URL only), `--port PORT`,
 ```console
 $ facet preview assets/canopy.txt --json
 {"contract": 1, "data": {"asset": "assets/canopy.txt", "images": [], "preview": {"fields": {"columns": 60, "font": "dos_rebel", "rows": 9}, "kind": "text", "preview": 1, "summary": "DOS Rebel · 60×9"}, "record": {"name": "canopy", "kind": "text", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
+$ facet preview out/thesis.pdf --json              # a document: pages ride on images
+{"contract": 1, "data": {"asset": "out/thesis.pdf", "images": ["/abs/out/page-01.png", "…", "/abs/out/page-10.png"], "preview": {"kind": "document", "page_count": 11, "pages": ["page-01.png", "…", "page-11.png"], "preview": 1, "summary": "a footnoted draft", "truncated": true}, "record": {"name": "thesis", "kind": "document", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
 $ facet preview assets/canopy.txt --no-open
 http://127.0.0.1:39651/viewer/index.html?asset=canopy.txt
+$ facet preview out/thesis.pdf --no-open           # a document prints its file URL
+file:///home/facet/out/thesis.pdf
 ```
 
 Lock: none.

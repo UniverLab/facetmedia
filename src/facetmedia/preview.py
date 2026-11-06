@@ -44,6 +44,9 @@ logger = logging.getLogger("facetmedia")
 #: ``echo.txt`` -> ``echo.txt.preview.json``, beside the asset.
 PREVIEW_SUFFIX: Final[str] = ".preview.json"
 
+#: How many page images ``--json`` may carry before it truncates documents.
+PAGE_LIMIT: Final[int] = 10
+
 
 def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], int]:
     """Preview one asset; returns the ``--json`` data and the exit code."""
@@ -65,11 +68,13 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
         package, home, run_id, capability_id, params, asset_path, preview_file
     )
     images = _images(preview_data, asset_path.parent)
+    _mark_truncated(preview_data)
+    shown = images[:PAGE_LIMIT] if isinstance(preview_data.get("pages"), list) else images
     data: dict[str, object] = {
         "asset": _relative_asset(asset_path),
         "record": stored,
         "preview": preview_data,
-        "images": [str(path) for path in images],
+        "images": [str(path) for path in shown],
     }
     if bool(getattr(args, "json", False)):
         return data, 0
@@ -190,8 +195,8 @@ def _load_preview(preview_file: Path) -> dict[str, object]:
 def _images(preview: Mapping[str, object], asset_dir: Path) -> list[Path]:
     """The preview's image files: absolute paths strictly inside ``asset_dir``.
 
-    Both ``images`` entries and every view's ``file`` count; anything
-    outside the asset's directory, or not a file, is ignored.
+    The ``images`` entries, every view's ``file`` and the document ``pages``
+    count; anything outside the asset's directory, or not a file, is ignored.
     """
     names: list[str] = []
     raw_images = preview.get("images")
@@ -204,7 +209,21 @@ def _images(preview: Mapping[str, object], asset_dir: Path) -> list[Path]:
                 file_value = view.get("file")
                 if isinstance(file_value, str):
                     names.append(file_value)
+    raw_pages = preview.get("pages")
+    if isinstance(raw_pages, list):
+        names.extend(item for item in raw_pages if isinstance(item, str))
     return _inside(names, asset_dir)
+
+
+def _mark_truncated(preview: dict[str, object]) -> None:
+    """Flag a document preview whose pages exceed the ``--json`` page limit."""
+    raw_pages = preview.get("pages")
+    if not isinstance(raw_pages, list):
+        return
+    count: object = preview.get("page_count")
+    if not isinstance(count, int):
+        count = len(raw_pages)
+    preview["truncated"] = bool(count > PAGE_LIMIT)
 
 
 def _inside(names: list[str], asset_dir: Path) -> list[Path]:
@@ -243,7 +262,14 @@ def _show(
     preview_file: Path,
     images: list[Path],
 ) -> None:
-    """Serve the capability's viewer for the asset until it idles out."""
+    """Show the asset to a person.
+
+    A document opens the PDF itself in the system browser; every other
+    kind gets the capability's viewer, served by facet.
+    """
+    if capability.kind == "document":
+        _show_document(args, asset_path)
+        return
     viewer_root = registry.registry_dir() / "viewers" / (capability.viewer or "generic")
     if not (viewer_root / "index.html").is_file():
         viewer_root = registry.registry_dir() / "viewers" / "generic"
@@ -271,6 +297,18 @@ def _show(
         open_url(url)
     with contextlib.suppress(KeyboardInterrupt):
         serve(server, float(getattr(args, "idle_timeout", 600.0)))
+
+
+def _show_document(args: argparse.Namespace, asset_path: Path) -> None:
+    """Open the document asset itself in the system browser, not a viewer.
+
+    The PDF is the person's preview: the URL is on stdout even when no
+    opener can start.
+    """
+    url = asset_path.resolve().as_uri()
+    print(url, flush=True)
+    if not bool(getattr(args, "no_open", False)):
+        open_url(url)
 
 
 def _asset_names(asset_path: Path, preview_file: Path, images: list[Path]) -> frozenset[str]:

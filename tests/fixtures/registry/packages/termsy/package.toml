@@ -42,3 +42,6 @@ path = "termsy-weights/termsy.bin"
 [capabilities.make]
 summary = "Make one termsy asset."
 kind = "text"
+
+[capabilities.make.preview]
+viewer = "generic"

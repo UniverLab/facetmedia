@@ -150,6 +150,9 @@ host_hint = ""
 [capabilities.render]
 summary = "Render through the host application stub."
 kind = "cad"
+
+[capabilities.render.preview]
+viewer = "generic"
 """
 
 SKILL = """---
