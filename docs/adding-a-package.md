@@ -85,8 +85,8 @@ than 100 MB of models), `gpu`.
 
 ```toml
 [engine]
-type = "python-env"   # or "node" / "host-app"; see the engine sections below
-python = "3.12"       # required for python-env, forbidden for node and host-app
+type = "python-env"   # or "node" / "host-app" / "binary"; see the engine sections below
+python = "3.12"       # required for python-env, forbidden for node, host-app and binary
 
 [transport]
 type = "cli"          # the only transport in v0.1
@@ -339,6 +339,62 @@ The runner environment additionally exports `FACET_NODE` (the managed
 `:`-joined) for scripts the entry spawns. `facet doctor` reports a missing
 or unverified extraction with the fix `facet pull <package>`; a verified
 runtime the host cannot execute is a `machine_cannot`, not a pull problem.
+
+## Binary engine
+
+Some tools are single static binaries — no Python environment, no server,
+no host install. A package like that declares `type = "binary"` and pins
+one release archive, which is always a **zip** (extracted with the
+standard library's `zipfile`, the browser precedent):
+
+```toml
+[engine]
+type = "binary"
+
+[engine.binary]
+name = "rhubarb"                    # the extraction's directory name
+version = "1.14.0"                  # the release version
+url = "https://example.com/rhubarb-1.14.0-linux-x64.zip"  # https only
+sha256 = "<64 lowercase hex>"       # of the zip archive
+bin = "rhubarb"                     # executable inside the zip, possibly nested
+version_arg = "--version"           # default; how facet checks the version
+```
+
+`engine.python` is forbidden here, exactly as for `node`, and
+`[transport].entry` is forbidden too: there is no entry script. Every
+binary package writes its `invocation_template` with the `{{binary}}`
+token — `facet registry validate` rejects a template without it, a
+non-https `url`, a malformed `sha256`, an empty `bin`, and a `name` or
+`version` that is not a single directory name. Versions live in package
+manifests, never in the core.
+
+`facet pull` downloads the zip — the same three attempts and backoff as
+models — verifies its sha256, and extracts it under
+`<home>/bin/<name>/<version>/`. The executable bit is set on `bin`, and a
+`.facet-verified` marker holding the archive's sha256 is written last; a
+verified extraction is never re-downloaded, and a tampered archive fails
+`download_failed` with nothing left behind.
+
+`{{binary}}` is owned by the runner, not the template: it resolves to
+`<home>/bin/<name>/<version>/<bin>` and the runner prepends it as
+`argv[0]`, exactly as `{{node}}` resolves to the managed runtime:
+
+```toml
+[transport]
+type = "cli"
+invocation_template = "{{binary}} {{verb}} --input {{input}} --result {{result}}"
+```
+
+Before every run the runner re-probes `<bin> <version_arg>`: a missing
+extraction or a version output that does not contain the declared version
+fails `machine_cannot`, so a direct run can never execute the wrong
+binary. The runner environment prepends the resolved executable's parent
+directory to `PATH` — `bin` may sit nested beside sibling libraries — and
+exports `FACET_BIN` with the resolved binary's absolute path, mirroring
+`FACET_NODE`. `facet doctor` runs the same probe: a missing extraction
+fails with the fix `facet pull <package>`; a verified binary that cannot
+run, or whose version output misses the declared version, is a
+`machine_cannot`, not a pull problem.
 
 ## Host-app engine
 

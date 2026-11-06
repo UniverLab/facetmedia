@@ -105,7 +105,10 @@ A package that declares `[engine.server]` also gets its pinned checkout at
 A package that declares `[engine.node]` instead installs a pinned Node
 runtime under `~/.facet/runtimes/node/<version>/` and its npm package
 tarballs under `~/.facet/node_pkgs/<name>/<version>/`, each verified by
-hash, with no Python environment built.
+hash, with no Python environment built. A package that declares
+`[engine.binary]` downloads its pinned zip once into
+`~/.facet/bin/<name>/<version>/`, verified by sha256, with the executable
+bit set on the declared `bin`.
 
 Nothing is written or downloaded before the doctor's readiness checks
 (compatibility, platform, RAM, disk, GPU, host libraries — plus the

@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Final
 
-from facetmedia import config
+from facetmedia import config, env_binary
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, uv_env
 from facetmedia.registry import PROTOCOL_VERSION, Package
@@ -148,6 +148,8 @@ def build_argv(
     """The runner command: the manifest template with its tokens substituted."""
     if package.host_app is not None:
         return _host_app_argv(package, home, verb, input_path, result_path)
+    if package.binary is not None:
+        return _binary_argv(package, home, verb, input_path, result_path)
     node, entry = _entry_points(package, home, env_dir)
     replacements = (
         ("{{node}}", node),
@@ -193,6 +195,38 @@ def _host_app_argv(
         if token not in {"{{app}}", "{{entry}}"}
     ]
     return [*_host_prefix(app.app, resolved.path, entry), *remaining]
+
+
+def _binary_argv(
+    package: Package,
+    home: Home,
+    verb: str,
+    input_path: Path,
+    result_path: Path,
+) -> list[str]:
+    """The managed binary's argv: ``{{binary}}`` is owned by the runner.
+
+    The resolved executable is re-probed here — ``<bin> <version_arg>`` —
+    so a direct call can never run a missing extraction or the wrong
+    version; the template's remaining tokens follow it.
+    """
+    binary = package.binary
+    assert binary is not None
+    problem = env_binary.binary_problem(package, home)
+    resolved = env_binary.binary_path(binary, home)
+    if problem is not None:
+        raise FacetError("machine_cannot", problem)
+    replacements = (
+        ("{{verb}}", verb),
+        ("{{input}}", str(input_path)),
+        ("{{result}}", str(result_path)),
+    )
+    remaining = [
+        _substitute(token, replacements)
+        for token in shlex.split(package.invocation_template)
+        if token != "{{binary}}"
+    ]
+    return [str(resolved), *remaining]
 
 
 def _host_prefix(app: str, binary: str, entry: str) -> list[str]:
@@ -296,6 +330,10 @@ def runner_env(home: Home, package: Package) -> dict[str, str]:
         env_vars["FACET_NODE_PATH"] = os.pathsep.join(
             str(home.node_pkg_dir(spec.name, spec.version)) for spec in package.node.packages
         )
+    if package.binary is not None:
+        resolved = env_binary.binary_path(package.binary, home)
+        env_vars["FACET_BIN"] = str(resolved)
+        env_vars["PATH"] = str(resolved.parent) + os.pathsep + env_vars.get("PATH", "")
     if package.browser is not None:
         env_vars["PLAYWRIGHT_BROWSERS_PATH"] = str(home.browsers_dir)
     if not package.requirements.gpu:

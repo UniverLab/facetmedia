@@ -119,18 +119,19 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
     envless = {
         package.name
         for package in registry.packages.values()
-        if package.engine_type in {"node", "host-app"}
+        if package.engine_type in {"node", "host-app", "binary"}
     }
     if envless:
-        # A node package's files come from its npm tarballs and a host-app
-        # package has no environment at all, so neither needs the package
-        # directory's pyproject.toml/uv.lock.
+        # A node package's files come from its npm tarballs, a host-app
+        # package has no environment at all, and a binary package's come from
+        # its release archive, so none needs the package directory's
+        # pyproject.toml/uv.lock.
         problems = [problem for problem in problems if problem.file.split("/")[1] not in envless]
     viewers: set[str] = set()
     for package in registry.packages.values():
         base = f"packages/{package.name}"
         entry_file = package.directory / package.entry
-        if package.engine_type != "node":
+        if package.engine_type not in {"node", "binary"}:
             if not entry_file.is_file():
                 problems.append(Problem(f"{base}/{package.entry}", "", "missing"))
             elif package.engine_type != "host-app":

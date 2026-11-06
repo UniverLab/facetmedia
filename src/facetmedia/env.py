@@ -25,21 +25,33 @@ import urllib.parse
 import urllib.request
 import zipfile
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from pathlib import Path
-from typing import IO, Any, Final
+from typing import Any, Final
 
 import uv
 
-from facetmedia import __version__, shared
 from facetmedia import config as config_module
 from facetmedia import doctor as doctor_module
+from facetmedia import env_binary, shared
 from facetmedia.contract import FacetError
+from facetmedia.env_binary import binary_dir, binary_present, binary_problem
+from facetmedia.env_download import (
+    CHUNK_BYTES,
+    TIMEOUT_S,
+    USER_AGENT,
+    _download_with_retries,
+    _opened,
+    _part_path,
+    _stream_to_part,
+)
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import Browser, Model, Node, NodePackage, Package, Server
 
 __all__ = [
+    "binary_dir",
+    "binary_present",
+    "binary_problem",
     "browser_dir",
     "browser_present",
     "client_env_present",
@@ -59,12 +71,6 @@ __all__ = [
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
 COMPLETE: Final[str] = ".complete"
-CHUNK_BYTES: Final[int] = 1024 * 1024
-TIMEOUT_S: Final[float] = 60.0
-USER_AGENT: Final[str] = f"facetmedia/{__version__}"
-#: Backoff between the three download attempts.
-BACKOFF_S: Final[tuple[float, ...]] = (2.0, 8.0)
-ATTEMPTS: Final[int] = len(BACKOFF_S) + 1
 UV_TAIL_LINES: Final[int] = 40
 HF_API: Final[str] = "https://huggingface.co"
 #: The official Playwright CDN the ``[browser]`` archives come from.
@@ -90,9 +96,13 @@ def client_env_present(package: Package, home: Home) -> bool:
     verified runtime and package extractions under the facet home.  A
     ``host-app`` package has no environment either: it is usable exactly when
     its host application resolves and meets the manifest's minimum version.
+    A ``binary`` package's client side is its verified zip extraction.
     """
     if package.host_app is not None:
         return config_module.host_app_installed(package.host_app, home)
+    binary = env_binary.engine_present(package, home)
+    if binary is not None:
+        return binary
     if package.node is not None:
         return node_present(package, home)
     return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
@@ -120,6 +130,8 @@ def pull(
         return _pull_host_app(package, home, env_dir, started)
     if package.node is not None:
         return _pull_node(package, home, env_dir, started, verify_models)
+    if package.binary is not None:
+        return env_binary.pull_report(package, home, env_dir, started, verify_models)
     if package.browser is not None:
         _fetch_browser(package.browser, home)
     up_to_date = _is_current(package, env_dir)
@@ -227,6 +239,8 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
             + ("" if node_package_present(spec, home) else " to download")
             for spec in package.node.packages
         ]
+    elif package.binary is not None:
+        lines = env_binary.plan_lines(package, home)
     else:
         lines = [f"python {package.python}", f"environment {env_dir}"]
     total = 0
@@ -530,55 +544,6 @@ def _sibling_expectation(sibling: Mapping[str, Any]) -> tuple[str, int | None]:
     return (sha if isinstance(sha, str) else "", size if isinstance(size, int) else None)
 
 
-def _download_with_retries(part: Path, action: Callable[[], tuple[str, int]]) -> tuple[str, int]:
-    """Three attempts with 2 s / 8 s backoff; a failed attempt leaves no part.
-
-    ``urllib.error.URLError`` and ``HTTPError`` are ``OSError`` subclasses, so
-    the network failures to retry are exactly ``OSError``.
-    """
-    last: OSError | None = None
-    for attempt in range(ATTEMPTS):
-        try:
-            return action()
-        except OSError as exc:
-            last = exc
-            part.unlink(missing_ok=True)
-            if attempt < ATTEMPTS - 1:
-                time.sleep(BACKOFF_S[attempt])
-    raise FacetError(
-        "download_failed",
-        f"download failed after {ATTEMPTS} attempts: {last}",
-        details={"error": str(last)},
-    ) from last
-
-
-def _stream_to_part(url: str, part: Path) -> tuple[str, int]:
-    """Stream ``url`` into ``part`` while hashing; returns (sha256, bytes)."""
-    digest = hashlib.sha256()
-    size = 0
-    with _opened(url) as source, part.open("wb") as sink:
-        while chunk := source.read(CHUNK_BYTES):
-            digest.update(chunk)
-            size += len(chunk)
-            sink.write(chunk)
-    return digest.hexdigest(), size
-
-
-@contextmanager
-def _opened(url: str) -> Iterator[IO[bytes]]:
-    """Open ``url`` for reading: ``file://`` is a path relative to the cwd."""
-    if url.startswith("file://"):
-        path = Path(urllib.parse.unquote(url.removeprefix("file://")))
-        if not path.is_absolute():
-            path = Path.cwd() / path
-        with path.open("rb") as handle:
-            yield handle
-        return
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-        yield response
-
-
 # --- The shared browser: one verified extraction per channel and revision.
 
 
@@ -643,10 +608,6 @@ def _extract_browser(archive: Path, staging: Path) -> None:
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-
-
-def _part_path(home: Home, model_id: str) -> Path:
-    return home.tmp_dir / f"{model_id}.{secrets.token_hex(4)}.part"
 
 
 # --- The server: one pinned checkout and its venv per package and version.

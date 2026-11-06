@@ -79,6 +79,7 @@ class Home:
             self._root / "python",
             self._root / "runtimes" / "node",
             self._root / "node_pkgs",
+            self._root / "bin",
             self._root / "cache" / "uv",
             self._root / "logs",
             self._root / "tmp",
@@ -131,6 +132,11 @@ class Home:
     def node_pkgs_dir(self) -> Path:
         return self._root / "node_pkgs"
 
+    @property
+    def bin_dir(self) -> Path:
+        """``<home>/bin``: the managed binaries' extractions."""
+        return self._root / "bin"
+
     def node_runtime_dir(self, version: str) -> Path:
         """``<home>/runtimes/node/<version>``: one verified Node extraction."""
         return self.runtimes_dir / "node" / version
@@ -173,6 +179,7 @@ def same_filesystem_check(home: Home) -> None:
         home.servers_dir,
         home.runtimes_dir,
         home.node_pkgs_dir,
+        home.bin_dir,
         home.uv_cache_dir,
         home.tmp_dir,
     ):

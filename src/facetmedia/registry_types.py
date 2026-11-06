@@ -172,6 +172,18 @@ class HostApp:
 
 
 @dataclass(frozen=True)
+class Binary:
+    """The managed executable a ``binary`` package declares in ``[engine.binary]``."""
+
+    name: str
+    version: str
+    url: str
+    sha256: str
+    bin: str
+    version_arg: str = "--version"
+
+
+@dataclass(frozen=True)
 class Capability:
     """One thing a package can make: ``<package>.<name>``."""
 
@@ -217,6 +229,7 @@ class Package:
     server: Server | None = None
     node: Node | None = None
     host_app: HostApp | None = None
+    binary: Binary | None = None
 
     @property
     def dir(self) -> Path:

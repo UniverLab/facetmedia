@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from facetmedia import __version__, update
+from facetmedia import __version__, env_download, update
 from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
 from facetmedia import runner as runner_module
@@ -450,19 +450,19 @@ def test_download_retries_with_backoff_then_gives_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sleeps: list[float] = []
-    monkeypatch.setattr(env_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(env_download.time, "sleep", sleeps.append)
     part = tmp_path / "fixture.part"
     attempts = {"n": 0}
 
     def flaky() -> tuple[str, int]:
         attempts["n"] += 1
-        if attempts["n"] < env_module.ATTEMPTS:
+        if attempts["n"] < env_download.ATTEMPTS:
             part.write_text("partial", encoding="utf-8")
             raise OSError("connection reset")
         part.write_text("done", encoding="utf-8")
         return "ok", 4
 
-    assert env_module._download_with_retries(part, flaky) == ("ok", 4)
+    assert env_download._download_with_retries(part, flaky) == ("ok", 4)
     assert sleeps == [2.0, 8.0]
 
     def always_fails() -> tuple[str, int]:
@@ -470,7 +470,7 @@ def test_download_retries_with_backoff_then_gives_up(
 
     sleeps.clear()
     with pytest.raises(FacetError) as excinfo:
-        env_module._download_with_retries(part, always_fails)
+        env_download._download_with_retries(part, always_fails)
     assert excinfo.value.code == "download_failed"
     assert sleeps == [2.0, 8.0]
     assert not part.exists()

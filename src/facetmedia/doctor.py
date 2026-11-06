@@ -611,8 +611,8 @@ def package_doctor(
     """
     from facetmedia import env as env_module  # noqa: PLC0415
 
-    if package.host_app is not None:
-        return doctor_host.app_doctor(package, home)
+    if (engine := doctor_host.engine_package_doctor(package, home)) is not None:
+        return engine
     if not env_module.client_env_present(package, home):
         return [_doctor_skip(package, home)], None
     node_entry = doctor_node.doctor_entry(package, home)
