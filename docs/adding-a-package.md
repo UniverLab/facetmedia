@@ -237,6 +237,54 @@ is missing or unverified with the fix `facet pull <package>`; like
 `installed`, `models` and `shared_modules`, that check never gates the pull
 that fixes it.
 
+## Server engine
+
+Some tools cannot be pip-installed: they are cloned at a pinned commit, built
+in place, and serve a local API. A package like that keeps its thin client as
+the ordinary `python-env` engine with `transport = "cli"` and adds a
+`[engine.server]` table:
+
+```toml
+[engine]
+type = "python-env"                   # the only engine that carries a server
+python = "3.12"
+
+[engine.server]
+repo = "https://github.com/example/tool"   # https only
+rev = "<40 lowercase hex>"                 # the exact commit
+requirements = "requirements.txt"          # the tool's own file, in the checkout
+launch = ["python", "main.py", "--port", "{{port}}"]
+health_url = "http://127.0.0.1:{{port}}/health"   # 200 means ready
+timeout_s = 120                            # startup wait; optional, defaults to 120
+```
+
+There is no `type = "server"` engine: the runner stays a thin `cli` client
+that talks to the server facet started for it, and `facet registry validate`
+rejects `[engine.server]` on any engine or transport but `python-env` + `cli`,
+a non-https `repo`, a `rev` that is not 40 lowercase hex characters, a
+`requirements` that is missing or leaves the checkout, a `launch` argv without
+`{{port}}`, and a `health_url` without a scheme.
+
+`facet pull` first builds the client environment exactly as for any other
+package, then clones the repo once per home at
+`<home>/servers/<package>/<version>/<shortrev>/` — a shallow, branchless fetch
+of exactly `rev`, skipped when that directory already holds a verified
+checkout. The server venv is created with `uv venv --python <engine.python>`
+and the tool's requirements are installed into it with `uv pip install -r`,
+untouched by facet. A `.complete` marker holding the rev and the requirements
+fingerprint is written last, so an interrupted pull is redone by the next one.
+`installed` means both the client environment and the server checkout are
+complete; `facet remove` and `facet clean` free the checkout tree like an
+environment.
+
+A server is per run, never a daemon: `facet run` probes `health_url`, and when
+nothing answers it starts `launch` with the checkout as cwd, the server venv
+first on `PATH` and `PORT` set to the port facet picked, waits for a 200 up to
+`timeout_s`, runs the client with `FACET_SERVER_URL` set to the healthy URL,
+and always kills the server's whole process group afterwards. A launch that
+never turns healthy fails `runner_failed` with its last output lines. The
+client reads `FACET_SERVER_URL`; it never starts, stops or holds the tool.
+
 ## Capabilities and their inputs
 
 Each capability is `[capabilities.<name>]`, its id is

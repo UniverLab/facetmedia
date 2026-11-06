@@ -27,7 +27,7 @@ The two verbs that look similar answer two different questions:
 | `facet preview` | show an asset to a person or to an agent | none |
 | `facet license` | accept and list model licences | `accept` exclusive; `list` none |
 | `facet remove` | remove an installed tool | exclusive |
-| `facet clean` | remove unused environments and caches | exclusive |
+| `facet clean` | remove unused environments, server checkouts and caches | exclusive |
 | `facet registry` | validate a registry checkout | none |
 
 Verbs that lock accept `--no-wait` (fail at once with `lock_busy`, exit 6)
@@ -96,6 +96,10 @@ and extracts it into the shared browser directory
 same channel and revision shares. The runner's environment carries
 `PLAYWRIGHT_BROWSERS_PATH` pointing at `~/.facet/browsers`, so the
 package's own `playwright` finds the browser without downloading it.
+
+A package that declares `[engine.server]` also gets its pinned checkout at
+`~/.facet/servers/<package>/<version>/<shortrev>/` with its own venv, and
+`installed` then means both the client environment and that checkout.
 
 Nothing is written or downloaded before the doctor's readiness checks
 (compatibility, platform, RAM, disk, GPU, host libraries — plus the
@@ -387,9 +391,9 @@ typed confirmation does not match — nothing is recorded).
 
 ## `facet remove`
 
-Removes every environment of one package. The models stay — downloading
-them again is the expensive part; `--models` deletes them too, but only
-those no other installed package lists.
+Removes every environment and server checkout of one package. The models
+stay — downloading them again is the expensive part; `--models` deletes
+them too, but only those no other installed package lists.
 
 Flags: `--models`.
 
@@ -422,7 +426,8 @@ would free 280264681 bytes
 ```
 
 It removes stale environment versions, environments of packages the
-snapshot no longer has, unlisted models, old snapshots, tmp scratch, kept
+snapshot no longer has, server checkouts that are stale, unfinished or of a
+gone package, unlisted models, old snapshots, tmp scratch, kept
 leftover directories of failed runs, logs older than 30 days, and prunes
 uv's cache. Environments in the active snapshot are kept. Lock:
 exclusive.

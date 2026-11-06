@@ -34,9 +34,20 @@ from facetmedia import __version__, shared
 from facetmedia import doctor as doctor_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
-from facetmedia.registry_types import Browser, Model, Package
+from facetmedia.registry_types import Browser, Model, Package, Server
 
-__all__ = ["browser_dir", "browser_present", "is_installed", "model_present", "pull"]
+__all__ = [
+    "browser_dir",
+    "browser_present",
+    "client_env_present",
+    "is_installed",
+    "model_present",
+    "pull",
+    "server_dir",
+    "server_present",
+    "server_root",
+    "server_venv",
+]
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
@@ -59,13 +70,19 @@ RUNNER_SDK: Final[Path] = Path(__file__).with_name("runner_sdk.py")
 SDK_MODULE: Final[str] = "facet_runner_sdk.py"
 
 
+def client_env_present(package: Package, home: Home) -> bool:
+    """Whether the thin client environment is complete, the server aside."""
+    return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
+
+
 def is_installed(package: Package, home: Home) -> bool:
-    """Whether ``package``'s environment is complete for its current lock.
+    """Whether ``package``'s environment and server checkout are complete.
 
     ``facet run`` asks this before pulling: an environment whose ``.complete``
-    marker holds this package's ``uv.lock`` hash needs no network.
+    marker holds this package's ``uv.lock`` hash needs no network, and a
+    server package additionally needs its verified checkout.
     """
-    return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
+    return client_env_present(package, home) and server_present(package, home)
 
 
 def pull(
@@ -79,8 +96,10 @@ def pull(
     if package.browser is not None:
         _fetch_browser(package.browser, home)
     up_to_date = _is_current(package, env_dir)
+    server_ready = server_present(package, home)
     if not up_to_date:
         _rebuild(package, home, env_dir)
+    _fetch_server(package, home)
     records, downloaded = _fetch_models(package, home, verify_models)
     if not up_to_date:
         atomic_write_text(env_dir / COMPLETE, package.lock_sha256, home.tmp_dir)
@@ -91,7 +110,7 @@ def pull(
         "version": package.version,
         "env": str(env_dir),
         "python": package.python,
-        "already_installed": up_to_date,
+        "already_installed": up_to_date and server_ready,
         "downloaded_bytes": downloaded,
         "seconds": round(time.monotonic() - started, 3),
         "models": records,
@@ -542,3 +561,127 @@ def _extract_browser(archive: Path, staging: Path) -> None:
 
 def _part_path(home: Home, model_id: str) -> Path:
     return home.tmp_dir / f"{model_id}.{secrets.token_hex(4)}.part"
+
+
+# --- The server: one pinned checkout and its venv per package and version.
+
+#: How long one git command may take; a large tool is cloned once per version.
+GIT_TIMEOUT_S: Final[float] = 1800.0
+#: The commit's short name in the checkout path.
+SHORT_REV: Final[int] = 12
+GIT_TAIL_LINES: Final[int] = 40
+
+
+def server_root(package: Package, home: Home) -> Path:
+    """``<home>/servers/<package>/<version>``: every checkout of one version."""
+    return home.servers_dir / package.name / package.version
+
+
+def server_dir(package: Package, home: Home) -> Path:
+    """The checkout itself: ``<home>/servers/<package>/<version>/<shortrev>``."""
+    server = package.server
+    assert server is not None
+    return server_root(package, home) / server.rev[:SHORT_REV]
+
+
+def server_venv(package: Package, home: Home) -> Path:
+    """The venv the server's launch argv finds on ``PATH``."""
+    return server_dir(package, home) / "venv"
+
+
+def server_present(package: Package, home: Home) -> bool:
+    """Whether a verified checkout holds this repo, rev and requirements file.
+
+    A package without ``[engine.server]`` is always present: there is
+    nothing to fetch.  The marker is written last, after the venv holds the
+    tool's requirements, so a crash mid-pull is redone by the next pull.
+    """
+    server = package.server
+    if server is None:
+        return True
+    target = server_dir(package, home)
+    try:
+        marker = (target / COMPLETE).read_text(encoding="utf-8")
+        digest = _sha256(target / server.requirements)
+    except OSError:
+        return False
+    return marker.strip() == _server_fingerprint(server, digest)
+
+
+def _server_fingerprint(server: Server, requirements_sha256: str) -> str:
+    """The pinned rev plus the bytes of the tool's own requirements file."""
+    return f"{server.rev}\n{requirements_sha256}"
+
+
+def _fetch_server(package: Package, home: Home) -> None:
+    """Clone, build and mark the declared server, unless its marker verifies."""
+    server = package.server
+    if server is None or server_present(package, home):
+        return
+    root = server_root(package, home)
+    if root.exists():
+        shutil.rmtree(root)
+    target = server_dir(package, home)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _git_checkout(target, server, uv_env(home))
+        _server_build(home, target, package, server)
+    except BaseException:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+    digest = _sha256(target / server.requirements)
+    atomic_write_text(target / COMPLETE, _server_fingerprint(server, digest), home.tmp_dir)
+
+
+def _git_checkout(target: Path, server: Server, env_vars: dict[str, str]) -> None:
+    """A branchless shallow fetch of exactly ``rev``, then a detached checkout."""
+    target.mkdir(parents=True)
+    _git(target, ["init", "--quiet"], env_vars)
+    _git(target, ["remote", "add", "origin", server.repo], env_vars)
+    _git(target, ["fetch", "--quiet", "--depth", "1", "origin", server.rev], env_vars)
+    _git(target, ["checkout", "--quiet", "--detach", "FETCH_HEAD"], env_vars)
+
+
+def _git(cwd: Path, argv: list[str], env_vars: dict[str, str]) -> None:
+    """Run one git command; a non-zero exit is ``download_failed`` with its tail."""
+    command = ["git", *argv]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env_vars,
+            timeout=GIT_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise FacetError("download_failed", f"git {argv[0]}: {exc}") from exc
+    if result.returncode != 0:
+        output = (result.stderr or result.stdout).splitlines()[-GIT_TAIL_LINES:]
+        raise FacetError(
+            "download_failed",
+            f"git {argv[0]} failed with exit code {result.returncode}",
+            details={"exit": result.returncode, "output": "\n".join(output)},
+        )
+
+
+def _server_build(home: Home, target: Path, package: Package, server: Server) -> None:
+    """Create the venv with the manifest's pinned python and install requirements."""
+    uv_bin = uv.find_uv_bin()
+    _stream_output(
+        [uv_bin, "venv", "--python", package.python, str(target / "venv")],
+        uv_env(home),
+    )
+    _stream_output(
+        [
+            uv_bin,
+            "pip",
+            "install",
+            "--python",
+            str(target / "venv" / "bin" / "python"),
+            "-r",
+            str(target / server.requirements),
+        ],
+        uv_env(home),
+    )

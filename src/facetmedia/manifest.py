@@ -16,6 +16,7 @@ from typing import Any, Final
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from facetmedia.manifest_server import read_server
 from facetmedia.registry_types import (
     CAPABILITY_KINDS,
     DEFAULT_INVOCATION_TEMPLATE,
@@ -31,6 +32,7 @@ from facetmedia.registry_types import (
     Problem,
     Registry,
     Requirements,
+    Server,
 )
 
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
@@ -135,7 +137,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
 )
 _BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "sha256"})
 _BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
-_ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python"})
+_ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python", "server"})
 _TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
 _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
     {"gpu", "ram_gb", "disk_gb", "exclusive", "platforms", "host_libs", "host_hint"}
@@ -360,8 +362,8 @@ class RegistryLoader:
         tool_name = self.string(data, "tool_name", file, "", required=True)
         description = self.string(data, "description", file, "", required=True)
         facet = self.facet(data, file)
-        engine_type, python = self.engine(data, file)
         transport_type, entry, template = self.transport(data, file)
+        engine_type, python, server = self.engine(data, file, transport_type)
         requirements = self.requirements(data, file)
         licenses = self.licenses(data.get("licenses"), file)
         models = self.models(data.get("models"), file)
@@ -402,6 +404,7 @@ class RegistryLoader:
             capabilities=capabilities,
             uses=uses,
             browser=browser,
+            server=server,
         )
 
     def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
@@ -487,10 +490,12 @@ class RegistryLoader:
             return None
         return value
 
-    def engine(self, data: Mapping[str, Any], file: str) -> tuple[str, str]:
+    def engine(
+        self, data: Mapping[str, Any], file: str, transport_type: str
+    ) -> tuple[str, str, Server | None]:
         table = self.table(data, "engine", file, "", required=True)
         if table is None:
-            return "", ""
+            return "", "", None
         self.unknown(table, _ENGINE_KEYS, file, "engine.")
         engine_type = self.string(table, "type", file, "engine.", required=True)
         if engine_type is not None and engine_type != "python-env":
@@ -498,7 +503,8 @@ class RegistryLoader:
         python = self.string(table, "python", file, "engine.", required=True)
         if python and not _PYTHON_RE.fullmatch(python):
             self.add(file, "engine.python", "value")
-        return engine_type or "", python or ""
+        server = read_server(self, table, file, engine_type or "", transport_type)
+        return engine_type or "", python or "", server
 
     def transport(self, data: Mapping[str, Any], file: str) -> tuple[str, str, str]:
         table = self.table(data, "transport", file, "", required=True)

@@ -131,6 +131,18 @@ class Browser:
 
 
 @dataclass(frozen=True)
+class Server:
+    """The repo-based tool a package declares in ``[engine.server]``."""
+
+    repo: str
+    rev: str
+    requirements: str
+    launch: tuple[str, ...]
+    health_url: str
+    timeout_s: int = 120
+
+
+@dataclass(frozen=True)
 class Capability:
     """One thing a package can make: ``<package>.<name>``."""
 
@@ -173,6 +185,7 @@ class Package:
     capabilities: tuple[Capability, ...] = ()
     uses: tuple[str, ...] = ()
     browser: Browser | None = None
+    server: Server | None = None
 
     @property
     def dir(self) -> Path:

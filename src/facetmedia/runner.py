@@ -20,10 +20,12 @@ import logging
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from collections import deque
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -54,6 +56,15 @@ logger = logging.getLogger("facetmedia")
 
 REQUEST_NAME: Final[str] = ".facet-request"
 RESULT_NAME: Final[str] = ".facet-result.json"
+#: What a server package's client runner reads to reach the tool facet started.
+SERVER_URL_ENV: Final[str] = "FACET_SERVER_URL"
+#: The variable a launched server reads the port facet picked from.
+SERVER_PORT_ENV: Final[str] = "PORT"
+#: The manifest's port token; the same spelling ``[engine.server]`` declares.
+PORT_TOKEN: Final[str] = "{{port}}"
+HEALTH_TIMEOUT_S: Final[float] = 1.0
+SERVER_POLL_S: Final[float] = 0.2
+HEALTHY_STATUS: Final[tuple[int, int]] = (200, 300)
 #: How many lines of runner output are kept for a failure report.
 TAIL_LINES: Final[int] = 40
 #: Grace between SIGTERM and SIGKILL when a runner must die.
@@ -76,6 +87,7 @@ class Invocation:
     temp_dir: Path
     run_id: str
     timeout_s: float | None = None
+    start_server: bool = True
 
 
 @dataclass(frozen=True)
@@ -195,32 +207,160 @@ def call(inv: Invocation, verb: str, request: Mapping[str, object]) -> Outcome:
     argv = build_argv(inv.package, inv.env_dir, verb, input_path, result_path)
     logger.info("runner %s: %s", verb, " ".join(argv))
     tail: deque[str] = deque(maxlen=TAIL_LINES)
-    # The signal trap is installed before the process starts, so a signal that
-    # arrives the instant the runner appears is still ours to clean up.
-    with _trapped():
-        try:
-            process = subprocess.Popen(
-                argv,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=runner_env(inv.home, inv.package),
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise _failure(inv, tail, f"cannot start the runner: {exc}") from exc
-        assert process.stdout is not None
-        reader = threading.Thread(target=_stream, args=(process.stdout, tail), daemon=True)
-        reader.start()
-        try:
-            returncode = _wait(inv, process, verb, tail)
-        finally:
-            reader.join(timeout=KILL_GRACE_S)
+    # The signal trap is installed before the server and the runner start, so a
+    # signal that arrives the instant either appears is still ours to clean up.
+    with _trapped(), _server_session(inv) as server_url:
+        returncode = _run_client(inv, verb, argv, tail, server_url)
     if returncode != 0:
         raise _failure(inv, tail, f"runner {verb} failed with exit code {returncode}")
     return Outcome(_read_result(result_path, inv, tail), "".join(tail))
+
+
+def _run_client(
+    inv: Invocation,
+    verb: str,
+    argv: Sequence[str],
+    tail: deque[str],
+    server_url: str | None,
+) -> int:
+    """Start the thin client in its own process group and wait for it."""
+    env_vars = runner_env(inv.home, inv.package)
+    if server_url is not None:
+        env_vars[SERVER_URL_ENV] = server_url
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env_vars,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise _failure(inv, tail, f"cannot start the runner: {exc}") from exc
+    assert process.stdout is not None
+    reader = threading.Thread(target=_stream, args=(process.stdout, tail), daemon=True)
+    reader.start()
+    try:
+        return _wait(inv, process, verb, tail)
+    finally:
+        reader.join(timeout=KILL_GRACE_S)
+
+
+# --- the server: started for one verb, killed before the call returns.
+
+
+@contextmanager
+def _server_session(inv: Invocation) -> Iterator[str | None]:
+    """Yield the server's base URL, starting and stopping it around the call."""
+    server = inv.package.server
+    if server is None:
+        yield None
+        return
+    port = _free_port()
+    url = _substitute(server.health_url, ((PORT_TOKEN, str(port)),))
+    if _healthy(url):
+        yield url
+        return
+    if not inv.start_server:
+        yield None
+        return
+    process, _tail = _launch_server(inv, port, url)
+    try:
+        yield url
+    finally:
+        _kill_group(process)
+
+
+def _free_port() -> int:
+    """A port the kernel has just called free on the loopback interface."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _healthy(url: str) -> bool:
+    """True when ``url`` answers 2xx within the short health timeout."""
+    try:
+        with urllib.request.urlopen(url, timeout=HEALTH_TIMEOUT_S) as response:
+            status: int = response.status
+            return HEALTHY_STATUS[0] <= status < HEALTHY_STATUS[1]
+    except (OSError, ValueError):
+        return False
+
+
+def _launch_server(
+    inv: Invocation, port: int, url: str
+) -> tuple[subprocess.Popen[str], deque[str]]:
+    """Start the launch argv in its own group and wait for the health endpoint."""
+    from facetmedia import env as env_module  # noqa: PLC0415
+
+    server = inv.package.server
+    assert server is not None
+    argv = [_substitute(token, ((PORT_TOKEN, str(port)),)) for token in server.launch]
+    checkout = env_module.server_dir(inv.package, inv.home)
+    env_vars = _server_env(inv, port)
+    logger.info("server: %s (cwd %s)", " ".join(argv), checkout)
+    tail: deque[str] = deque(maxlen=TAIL_LINES)
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=str(checkout),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env_vars,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise _failure(inv, tail, f"cannot start the server: {exc}") from exc
+    assert process.stdout is not None
+    reader = threading.Thread(target=_stream, args=(process.stdout, tail), daemon=True)
+    reader.start()
+    try:
+        healthy = _await_healthy(process, url, server.timeout_s)
+    except BaseException:
+        # A signal during startup must still leave no server process behind.
+        _kill_group(process)
+        reader.join(timeout=KILL_GRACE_S)
+        raise
+    if healthy:
+        return process, tail
+    _kill_group(process)
+    reader.join(timeout=KILL_GRACE_S)
+    raise _failure(
+        inv,
+        tail,
+        f"the server did not become healthy at {url} within {server.timeout_s} s",
+    )
+
+
+def _server_env(inv: Invocation, port: int) -> dict[str, str]:
+    """The launch environment: the server venv first on ``PATH``, ``PORT`` set."""
+    from facetmedia import env as env_module  # noqa: PLC0415
+
+    env_vars = runner_env(inv.home, inv.package)
+    venv_bin = str(env_module.server_venv(inv.package, inv.home) / "bin")
+    env_vars["PATH"] = venv_bin + os.pathsep + env_vars.get("PATH", "")
+    env_vars[SERVER_PORT_ENV] = str(port)
+    env_vars.pop(SERVER_URL_ENV, None)
+    return env_vars
+
+
+def _await_healthy(process: subprocess.Popen[str], url: str, timeout_s: float) -> bool:
+    """Poll the health endpoint until it answers or the launch dies or times out."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        if _healthy(url):
+            return True
+        time.sleep(SERVER_POLL_S)
+    return _healthy(url)
 
 
 def parse_run_result(

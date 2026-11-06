@@ -53,6 +53,7 @@ LEFTOVERS: Final[str] = "leftovers.json"
 UV_PRUNE_TIMEOUT_S: Final[float] = 600.0
 #: Why an item is garbage; one fixed string per family, part of the contract.
 INCOMPLETE_ENV: Final[str] = "incomplete-env"
+INCOMPLETE_SERVER: Final[str] = "incomplete-server"
 STALE_VERSION: Final[str] = "stale-version"
 ORPHAN_PACKAGE: Final[str] = "orphan-package"
 ORPHAN_MODEL: Final[str] = "orphan-model"
@@ -186,6 +187,11 @@ def rm_package(
         removed.append(str(version_dir))
         _delete(version_dir)
     _rmdir_if_empty(home.envs_dir / name)
+    servers = home.servers_dir / name
+    if servers.exists():
+        freed += dir_bytes(servers)
+        removed.append(str(servers))
+        _delete(servers)
     if with_models and registry is not None:
         package = registry.package(name)
         if package is not None:
@@ -230,18 +236,23 @@ def _installed_model_dirnames(home: Home, registry: Registry, exclude: str) -> s
 
 
 def orphans(home: Home, registry: Registry) -> list[GcItem]:
-    """Environments and models no installed package references: what ``clean`` frees.
+    """Environments, servers and models nothing references: what ``clean`` frees.
 
-    Only these two families, so ``facet doctor`` can report the disk an
-    orphaned install is holding without listing logs or scratch as a problem.
+    Only these families, so ``facet doctor`` can report the disk an orphaned
+    install is holding without listing logs or scratch as a problem.
     """
-    return [*_env_items(home, registry), *_model_items(home, registry)]
+    return [
+        *_env_items(home, registry),
+        *_server_items(home, registry),
+        *_model_items(home, registry),
+    ]
 
 
 def gc_sweep(home: Home, registry: Registry, dry_run: bool = False) -> dict[str, object]:
     """List — and, unless ``dry_run``, delete — everything nothing uses any more."""
     items = [
         *_env_items(home, registry),
+        *_server_items(home, registry),
         *_model_items(home, registry),
         *_snapshot_items(home),
         *_tmp_items(home),
@@ -307,6 +318,29 @@ def _env_reason(package: Package | None, version_dir: Path) -> str | None:
         return STALE_VERSION
     if not (version_dir / env_module.COMPLETE).is_file():
         return INCOMPLETE_ENV
+    return None
+
+
+def _server_items(home: Home, registry: Registry) -> list[GcItem]:
+    """Server checkouts that are stale, unfinished, or of a gone package."""
+    items: list[GcItem] = []
+    for package_dir in _children(home.servers_dir):
+        package = registry.package(package_dir.name)
+        for version_dir in _children(package_dir):
+            reason = _server_reason(home, package, version_dir)
+            if reason is not None:
+                items.append(GcItem(version_dir, dir_bytes(version_dir), reason))
+    return items
+
+
+def _server_reason(home: Home, package: Package | None, version_dir: Path) -> str | None:
+    """Why one ``servers/<package>/<version>`` directory is garbage, or ``None``."""
+    if package is None or package.server is None:
+        return ORPHAN_PACKAGE
+    if version_dir.name != package.version:
+        return STALE_VERSION
+    if not env_module.server_present(package, home):
+        return INCOMPLETE_SERVER
     return None
 
 
