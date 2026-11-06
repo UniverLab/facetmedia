@@ -13,6 +13,7 @@ from typing import Any, NoReturn, TypeVar
 from facetmedia import (
     __version__,
     check,
+    config,
     contract,
     doctor,
     env,
@@ -52,6 +53,12 @@ _VERBS: tuple[tuple[str, str], ...] = (
 _LICENSE_VERBS: tuple[tuple[str, str], ...] = (
     ("accept", "accept the license of a tool"),
     ("list", "list the licenses of installed tools"),
+)
+
+_CONFIG_VERBS: tuple[tuple[str, str], ...] = (
+    ("set", "store a host application's path"),
+    ("get", "print one host application config value"),
+    ("list", "list the host application config keys"),
 )
 
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
@@ -114,6 +121,32 @@ def _handle_license_list(args: argparse.Namespace) -> int:
 _LICENSE_HANDLERS: dict[str, Handler] = {
     "accept": _handle_license_accept,
     "list": _handle_license_list,
+}
+
+
+def _handle_config_set(args: argparse.Namespace) -> int:
+    """Store one host application path; stdout carries only the JSON envelope."""
+    data = config.set_value(Home.from_env(), load_active_registry(), args.key, args.value)
+    contract.emit(contract.ok(data), True)
+    return 0
+
+
+def _handle_config_get(args: argparse.Namespace) -> int:
+    data = config.get_value(Home.from_env(), load_active_registry(), args.key)
+    contract.emit(contract.ok(data), True)
+    return 0
+
+
+def _handle_config_list(args: argparse.Namespace) -> int:
+    data = config.list_values(Home.from_env(), load_active_registry())
+    contract.emit(contract.ok(data), True)
+    return 0
+
+
+_CONFIG_HANDLERS: dict[str, Handler] = {
+    "set": _handle_config_set,
+    "get": _handle_config_get,
+    "list": _handle_config_list,
 }
 
 
@@ -607,6 +640,12 @@ def _add_license_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
     )
 
 
+def _add_config_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
+    parsers["set"].add_argument("key", help="dotted host application key, e.g. blender.path")
+    parsers["set"].add_argument("value", help="the host application binary's path")
+    parsers["get"].add_argument("key", help="dotted host application key, e.g. blender.path")
+
+
 def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("package", help="registry package to install")
     parser.add_argument(
@@ -760,6 +799,14 @@ def build_parser() -> FacetParser:
         handlers=_LICENSE_HANDLERS,
     )
     _add_license_flags(license_parsers)
+    config_parsers = _add_group(
+        subparsers,
+        "config",
+        "set, get and list host application paths",
+        _CONFIG_VERBS,
+        handlers=_CONFIG_HANDLERS,
+    )
+    _add_config_flags(config_parsers)
     _add_registry_group(subparsers)
     return parser
 

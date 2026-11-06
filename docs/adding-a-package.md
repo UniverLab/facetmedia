@@ -85,8 +85,8 @@ than 100 MB of models), `gpu`.
 
 ```toml
 [engine]
-type = "python-env"   # or "node"; see Node engine below
-python = "3.12"       # required for python-env, forbidden for node
+type = "python-env"   # or "node" / "host-app"; see the engine sections below
+python = "3.12"       # required for python-env, forbidden for node and host-app
 
 [transport]
 type = "cli"          # the only transport in v0.1
@@ -339,6 +339,82 @@ The runner environment additionally exports `FACET_NODE` (the managed
 `:`-joined) for scripts the entry spawns. `facet doctor` reports a missing
 or unverified extraction with the fix `facet pull <package>`; a verified
 runtime the host cannot execute is a `machine_cannot`, not a pull problem.
+
+## Host-app engine
+
+Blender and FreeCAD cannot be isolated: they are host applications driven
+by a script. A package like that declares `type = "host-app"` and names the
+application, the minimum version it needs, and where a person's
+configuration stores the binary's path:
+
+```toml
+[engine]
+type = "host-app"
+
+[engine.host_app]
+app = "blender"          # blender | freecad, the only values
+min_version = "4.0"      # dotted numeric: X.Y or X.Y.Z
+config_key = "blender.path"   # default: <app>.path
+env = "BLENDER_EXE"      # default: BLENDER_EXE for blender, FREECAD_EXE for freecad
+```
+
+`engine.python` is required for `python-env` and forbidden here, exactly as
+for `node`: a host-app package has no python environment. `facet registry
+validate` rejects any other `app`, a non-numeric `min_version`, a
+`config_key` that is not dotted, and an `env` that is not an environment
+variable name. A two-component minimum such as `4.0` or `1.1` is accepted
+and compares as `4.0.0` / `1.1.0`.
+
+A host application is **never installed**. The binary is located in this
+order:
+
+1. the config key's value in `<home>/config.toml`, written by
+   `facet config set blender.path /path/to/blender`;
+2. the `env` variable, the lab's existing convention;
+3. `PATH` (`blender`; for FreeCAD, `freecadcmd` then `freecad`).
+
+`facet pull` downloads nothing and builds no environment: it resolves the
+binary, probes `<binary> --version`, and compares the first dotted version
+it prints against `min_version`. `is_installed` is true exactly when the
+resolution and the version check pass. A missing application fails
+`machine_cannot` with every location it tried, and a too-old one names the
+found version, the minimum, and where it found the binary:
+
+```text
+blender 4.0+ not found (config blender.path, env BLENDER_EXE, PATH all empty); fix: facet config set blender.path /path/to/blender
+blender 3.1 found, needs 4.0+ (config blender.path); fix: facet config set blender.path /path/to/blender
+```
+
+`facet doctor` reports the same failure with the
+`facet config set <config_key> /path/to/<app>` fix. It is not pull-fixable:
+no pull changes it, so `pull` and `run` refuse through the doctor gate.
+
+The template uses `{{app}}` for the resolved host binary and `{{entry}}` for
+the package's script; `{{python}}` does not apply. The runner injects the
+application's failure semantics itself and appends the template's remaining
+arguments after them:
+
+```toml
+[transport]
+type = "cli"
+entry = "render.py"
+invocation_template = "{{app}} {{entry}} --input {{input}} --result {{result}}"
+```
+
+- `blender` runs
+  `<binary> -b --factory-startup --python-exit-code 1 --python <entry> ...`.
+  The exit-code flag precedes the script flag on purpose: Blender handles
+  both in command-line order, and a later flag registers too late to turn a
+  script that raises into a failing run.
+- `freecad` runs `<binary> <bundled freecad_run.py> --pass <entry> ...`,
+  where the bundled wrapper (port of the lab's `freecad_run.py`) executes
+  the script with `runpy` and exits with its code, because `freecadcmd`
+  exits 0 and prints nothing when a script raises.
+
+A failing script therefore fails the run; it is never silent. When the
+resolved binary is a Windows `.exe` under WSL, path arguments — the script,
+the wrapper, `{{input}}`, `{{result}}` and any remaining argument containing
+`/` — cross through `wslpath -w`, as the lab's scripts do.
 
 ## Capabilities and their inputs
 

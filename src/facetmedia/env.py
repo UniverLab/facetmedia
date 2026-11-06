@@ -33,6 +33,7 @@ from typing import IO, Any, Final
 import uv
 
 from facetmedia import __version__, shared
+from facetmedia import config as config_module
 from facetmedia import doctor as doctor_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
@@ -86,8 +87,12 @@ def client_env_present(package: Package, home: Home) -> bool:
     """Whether the thin client side is complete, the server aside.
 
     A ``node`` package has no python environment: its client side is the
-    verified runtime and package extractions under the facet home.
+    verified runtime and package extractions under the facet home.  A
+    ``host-app`` package has no environment either: it is usable exactly when
+    its host application resolves and meets the manifest's minimum version.
     """
+    if package.host_app is not None:
+        return config_module.host_app_installed(package.host_app, home)
     if package.node is not None:
         return node_present(package, home)
     return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
@@ -111,6 +116,8 @@ def pull(
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
+    if package.host_app is not None:
+        return _pull_host_app(package, home, env_dir, started)
     if package.node is not None:
         return _pull_node(package, home, env_dir, started, verify_models)
     if package.browser is not None:
@@ -159,6 +166,33 @@ def _pull_node(
     }
 
 
+def _pull_host_app(
+    package: Package, home: Home, env_dir: Path, started: float
+) -> dict[str, object]:
+    """The ``host-app`` engine's pull: locate and verify, never install.
+
+    Nothing is downloaded and no environment is built; a direct call re-checks
+    what the preflight gate already reported.
+    """
+    app = package.host_app
+    assert app is not None
+    problem = config_module.host_app_problem(app, home)
+    if problem is not None:
+        raise FacetError(
+            "machine_cannot", problem.message, hint=problem.fix, details=problem.details
+        )
+    return {
+        "package": package.name,
+        "version": package.version,
+        "env": str(env_dir),
+        "python": "",
+        "already_installed": True,
+        "downloaded_bytes": 0,
+        "seconds": round(time.monotonic() - started, 3),
+        "models": [],
+    }
+
+
 # --- FR2 preflight: nothing is written or downloaded before all of this passes.
 
 
@@ -184,7 +218,9 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
     Every line goes to stderr and to the run log, so a ``facet run`` that
     pulls first records what it was about to download.
     """
-    if package.node is not None:
+    if package.host_app is not None:
+        lines = [f"host application {package.host_app.app}"]
+    elif package.node is not None:
         lines = [f"node {package.node.runtime}"]
         lines += [
             f"node package {spec.name} {spec.version}"

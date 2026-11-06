@@ -16,6 +16,7 @@ from typing import Any, Final
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from facetmedia.manifest_host import read_host_app
 from facetmedia.manifest_node import read_node
 from facetmedia.manifest_server import read_server
 from facetmedia.registry_types import (
@@ -27,6 +28,7 @@ from facetmedia.registry_types import (
     Browser,
     Capability,
     Field,
+    HostApp,
     License,
     Model,
     Node,
@@ -139,7 +141,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
 )
 _BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "sha256"})
 _BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
-_ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python", "node", "server"})
+_ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python", "node", "server", "host_app"})
 _TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
 _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
     {"gpu", "ram_gb", "disk_gb", "exclusive", "platforms", "host_libs", "host_hint"}
@@ -365,7 +367,7 @@ class RegistryLoader:
         description = self.string(data, "description", file, "", required=True)
         facet = self.facet(data, file)
         transport_type, entry, template = self.transport(data, file)
-        engine_type, python, node, server = self.engine(data, file, transport_type)
+        engine_type, python, node, server, host_app = self.engine(data, file, transport_type)
         requirements = self.requirements(data, file)
         licenses = self.licenses(data.get("licenses"), file)
         models = self.models(data.get("models"), file)
@@ -408,6 +410,7 @@ class RegistryLoader:
             browser=browser,
             server=server,
             node=node,
+            host_app=host_app,
         )
 
     def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
@@ -495,22 +498,27 @@ class RegistryLoader:
 
     def engine(
         self, data: Mapping[str, Any], file: str, transport_type: str
-    ) -> tuple[str, str, Node | None, Server | None]:
+    ) -> tuple[str, str, Node | None, Server | None, HostApp | None]:
         table = self.table(data, "engine", file, "", required=True)
         if table is None:
-            return "", "", None, None
+            return "", "", None, None, None
         self.unknown(table, _ENGINE_KEYS, file, "engine.")
         engine_type = self.string(table, "type", file, "engine.", required=True)
-        if engine_type is not None and engine_type not in {"python-env", "node"}:
+        if engine_type is not None and engine_type not in {"python-env", "node", "host-app"}:
             self.add(file, "engine.type", "value")
         python = self.engine_python(table, file, engine_type)
         node = read_node(self, table, file, engine_type or "", transport_type)
         server = read_server(self, table, file, engine_type or "", transport_type)
-        return engine_type or "", python, node, server
+        host_app = read_host_app(self, table, file, engine_type or "", transport_type)
+        return engine_type or "", python, node, server, host_app
 
     def engine_python(self, table: Mapping[str, Any], file: str, engine_type: str | None) -> str:
-        """``engine.python``: required for ``python-env``, forbidden for ``node``."""
-        if engine_type == "node":
+        """``engine.python``: required for ``python-env``, forbidden for the rest.
+
+        Neither ``node`` nor ``host-app`` builds a python environment, so both
+        reject a set value and report no interpreter.
+        """
+        if engine_type in {"node", "host-app"}:
             if table.get("python") is not None:
                 self.add(file, "engine.python", "value")
             return ""

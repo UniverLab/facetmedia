@@ -31,7 +31,7 @@ from typing import Any, Final
 
 import uv
 
-from facetmedia import __version__, doctor_node, licenses, lock, prune, runner, shared
+from facetmedia import __version__, doctor_host, doctor_node, licenses, lock, prune, runner, shared
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.home import Home, require_posix
 from facetmedia.probes import (
@@ -354,7 +354,7 @@ def _host_libs(package: Package) -> Check:
 def _installed(package: Package, home: Home) -> Check:
     from facetmedia import env as env_module  # noqa: PLC0415
 
-    node_check = doctor_node.installed_check(package, home)
+    node_check = doctor_host.engine_installed_check(package, home)
     if node_check is not None:
         return node_check
     env_dir = home.env_dir(package.name, package.version)
@@ -611,6 +611,8 @@ def package_doctor(
     """
     from facetmedia import env as env_module  # noqa: PLC0415
 
+    if package.host_app is not None:
+        return doctor_host.app_doctor(package, home)
     if not env_module.client_env_present(package, home):
         return [_doctor_skip(package, home)], None
     node_entry = doctor_node.doctor_entry(package, home)

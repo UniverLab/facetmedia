@@ -21,6 +21,7 @@ The two verbs that look similar answer two different questions:
 | `facet list` | list installed and available tools | none |
 | `facet describe` | show a capability's full contract | none |
 | `facet skill` | print the skill for facet or one package | none |
+| `facet config` | store where a host application lives | none |
 | `facet doctor` | check facet, the tool chain and this machine | shared |
 | `facet check` | re-verify an asset against its record | per manifest |
 | `facet run` | turn a piece into verified assets with records | per manifest |
@@ -211,6 +212,34 @@ Skills are never installed into any agent directory; they live in the
 registry snapshot and change with `facet update`. Lock: none.
 
 Exit codes: `0`; `2` an unknown package, capability or reference.
+
+## `facet config`
+
+Stores where a host application lives. facet never installs Blender or
+FreeCAD: a host-app package names a dotted key (`blender.path`) and
+`<home>/config.toml` holds the binary's path. The known keys are exactly
+the `config_key` values the active registry's host-app packages declare, so
+an unknown key is `invalid_input` with the known keys in `details.known`.
+The file is written atomically, and stdout carries only the JSON envelope.
+
+- `facet config set <key> <value>` — store one path.
+- `facet config get <key>` — one value, plus whether the file carries it.
+- `facet config list` — every known key, its application and its value.
+
+Resolution tries the config key, then the package's environment variable
+(`BLENDER_EXE` / `FREECAD_EXE`), then `PATH`.
+
+```console
+$ facet config set blender.path "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe" --json
+{"contract": 1, "data": {"key": "blender.path", "path": "/home/me/.facet/config.toml", "value": "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"}, "facet": "0.1.0b1", "ok": true}
+$ facet config list --json
+{"contract": 1, "data": {"keys": [{"app": "blender", "key": "blender.path", "set": true, "value": "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"}], "path": "/home/me/.facet/config.toml"}, "facet": "0.1.0b1", "ok": true}
+```
+
+Lock: none.
+
+Exit codes: `0`; `2` an unknown key, an empty value, or a config file that
+is not valid TOML.
 
 ## `facet doctor`
 

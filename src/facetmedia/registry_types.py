@@ -162,6 +162,16 @@ class Node:
 
 
 @dataclass(frozen=True)
+class HostApp:
+    """The host application a ``host-app`` package drives, from ``[engine.host_app]``."""
+
+    app: str
+    min_version: str
+    config_key: str
+    env: str
+
+
+@dataclass(frozen=True)
 class Capability:
     """One thing a package can make: ``<package>.<name>``."""
 
@@ -206,6 +216,7 @@ class Package:
     browser: Browser | None = None
     server: Server | None = None
     node: Node | None = None
+    host_app: HostApp | None = None
 
     @property
     def dir(self) -> Path:
