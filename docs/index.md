@@ -69,6 +69,7 @@ FACET_HOME=/data/facet`. The directory is created on first use:
 
 ```
 ~/.facet/
+├── bin/                 # managed binary extractions, one per package version
 ├── browsers/            # shared Chromium builds, one per channel-revision
 ├── cache/uv/            # uv's cache (UV_CACHE_DIR)
 ├── envs/                # one environment per package version
