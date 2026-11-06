@@ -30,6 +30,7 @@ packages, the first run, and how an agent starts with `facet skill`.
 | `facet list` | list installed and available tools |
 | `facet describe` | show a capability's inputs, verification and licences |
 | `facet skill` | print the skill for facet or one package |
+| `facet config` | store where a host application lives |
 | `facet doctor` | check facet, the tool chain and this machine's readiness |
 | `facet check` | re-verify an asset against its record |
 | `facet run` | turn a piece file into verified assets with records |
