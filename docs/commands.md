@@ -220,7 +220,10 @@ every installed package), a package name, or a capability id. The readiness
 list ends with `shared_modules`, which reports a stale `facet_lib` copy
 with the fix `facet pull <package>`; just before it, `browser` reports a
 declared Chromium extraction that is missing or unverified, with the same
-fix. Neither gates a run by itself.
+fix. A package that declares `[engine.server]` reports a missing or
+unverified checkout under `installed`, also with the fix `facet pull
+<package>`; the server is probed, never started. None of these gates a run
+by itself.
 
 ```console
 $ facet doctor --quick
@@ -233,7 +236,7 @@ facet:
   ✓ lock: free
   ✓ registry: 3decd7089bfbc7196d08851df7221c4ccf76d635: at the pinned commit, validates
   ✓ disk: free 635.44 GB at /tmp/opencode/facet-docs
-  ✓ orphans: no orphaned environments or models
+  ✓ orphans: no orphaned environments, servers or models
   ✓ gpu: none
 ascii (installed):
   ✓ compatible: requires_facet >=0.1.0b1,<0.2 satisfied by facet 0.1.0b1, protocol 1
@@ -312,6 +315,11 @@ Flags: `--out DIR` (default: the piece's directory), `--no-verify`,
 `--no-pull` (fail `not_installed` instead of pulling), `--timeout
 SECONDS` (kill the runner's process group), `--ephemeral` (install for
 this run, remove the environment after).
+
+For a package that declares `[engine.server]`, the run probes the tool's
+health endpoint and, when nothing answers, starts it on a free port, points
+the client at it with `FACET_SERVER_URL`, and stops its whole process group
+when the run ends — a server lives for one run, never as a daemon.
 
 ```console
 $ facet run ffmpeg.normalize normalize.toml
