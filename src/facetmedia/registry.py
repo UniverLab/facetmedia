@@ -116,14 +116,22 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
     ]
     if registry is None:
         return problems
+    node_names = {
+        package.name for package in registry.packages.values() if package.engine_type == "node"
+    }
+    if node_names:
+        # A node package has no python environment: its files come from the
+        # declared npm tarballs, not from pyproject.toml/uv.lock in the repo.
+        problems = [problem for problem in problems if problem.file.split("/")[1] not in node_names]
     viewers: set[str] = set()
     for package in registry.packages.values():
         base = f"packages/{package.name}"
         entry_file = package.directory / package.entry
-        if not entry_file.is_file():
-            problems.append(Problem(f"{base}/{package.entry}", "", "missing"))
-        else:
-            problems.extend(_verb_problems(f"{base}/{package.entry}", entry_file))
+        if package.engine_type != "node":
+            if not entry_file.is_file():
+                problems.append(Problem(f"{base}/{package.entry}", "", "missing"))
+            else:
+                problems.extend(_verb_problems(f"{base}/{package.entry}", entry_file))
         problems.extend(
             validate_skill(
                 package.directory,

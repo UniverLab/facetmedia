@@ -991,7 +991,9 @@ def test_browser_check_is_absent_from_can_run_checks() -> None:
     """What a pull fixes never gates the pull that fixes it."""
     assert "browser" in doctor_module.CHECK_ORDER
     assert "browser" not in doctor_module.CAN_RUN_CHECKS
-    assert list(doctor_module.CHECK_ORDER)[-2:] == ["browser", "shared_modules"]
+    assert "node" in doctor_module.CHECK_ORDER
+    assert "node" not in doctor_module.CAN_RUN_CHECKS
+    assert list(doctor_module.CHECK_ORDER)[-3:] == ["browser", "node", "shared_modules"]
 
 
 def test_browser_check_fails_before_pull_and_passes_after(

@@ -31,7 +31,7 @@ from typing import Any, Final
 
 import uv
 
-from facetmedia import __version__, licenses, lock, prune, runner, shared
+from facetmedia import __version__, doctor_node, licenses, lock, prune, runner, shared
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.home import Home, require_posix
 from facetmedia.probes import (
@@ -92,6 +92,7 @@ CHECK_ORDER: Final[tuple[str, ...]] = (
     "licenses",
     "models",
     "browser",
+    "node",
     "shared_modules",
 )
 
@@ -229,6 +230,7 @@ def machine_checks(
         "licenses": _licenses(package),
         "models": _models(package, home),
         "browser": _browser(package, home),
+        "node": doctor_node.readiness(package, home),
         "shared_modules": Check(
             *shared.check(package, home.env_dir(package.name, package.version))
         ),
@@ -352,6 +354,9 @@ def _host_libs(package: Package) -> Check:
 def _installed(package: Package, home: Home) -> Check:
     from facetmedia import env as env_module  # noqa: PLC0415
 
+    node_check = doctor_node.installed_check(package, home)
+    if node_check is not None:
+        return node_check
     env_dir = home.env_dir(package.name, package.version)
     if env_module.is_installed(package, home):
         return Check(True, f"installed at {env_dir}")
@@ -608,6 +613,9 @@ def package_doctor(
 
     if not env_module.client_env_present(package, home):
         return [_doctor_skip(package, home)], None
+    node_entry = doctor_node.doctor_entry(package, home)
+    if node_entry is not None:
+        return [node_entry], None
     if package.browser is not None and not env_module.browser_present(package.browser, home):
         return [_browser_doctor_check(package, home)], None
     if not env_module.server_present(package, home):
@@ -910,6 +918,7 @@ def _package_section(
         needs_pull=readiness["installed"]["ok"] is not True
         or readiness["models"]["ok"] is not True
         or readiness["browser"]["ok"] is not True
+        or readiness["node"]["ok"] is not True
         or readiness["shared_modules"]["ok"] is not True,
     )
 

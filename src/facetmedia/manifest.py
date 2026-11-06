@@ -16,6 +16,7 @@ from typing import Any, Final
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from facetmedia.manifest_node import read_node
 from facetmedia.manifest_server import read_server
 from facetmedia.registry_types import (
     CAPABILITY_KINDS,
@@ -28,6 +29,7 @@ from facetmedia.registry_types import (
     Field,
     License,
     Model,
+    Node,
     Package,
     Problem,
     Registry,
@@ -137,7 +139,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
 )
 _BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "sha256"})
 _BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
-_ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python", "server"})
+_ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python", "node", "server"})
 _TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
 _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
     {"gpu", "ram_gb", "disk_gb", "exclusive", "platforms", "host_libs", "host_hint"}
@@ -363,7 +365,7 @@ class RegistryLoader:
         description = self.string(data, "description", file, "", required=True)
         facet = self.facet(data, file)
         transport_type, entry, template = self.transport(data, file)
-        engine_type, python, server = self.engine(data, file, transport_type)
+        engine_type, python, node, server = self.engine(data, file, transport_type)
         requirements = self.requirements(data, file)
         licenses = self.licenses(data.get("licenses"), file)
         models = self.models(data.get("models"), file)
@@ -405,6 +407,7 @@ class RegistryLoader:
             uses=uses,
             browser=browser,
             server=server,
+            node=node,
         )
 
     def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
@@ -492,19 +495,29 @@ class RegistryLoader:
 
     def engine(
         self, data: Mapping[str, Any], file: str, transport_type: str
-    ) -> tuple[str, str, Server | None]:
+    ) -> tuple[str, str, Node | None, Server | None]:
         table = self.table(data, "engine", file, "", required=True)
         if table is None:
-            return "", "", None
+            return "", "", None, None
         self.unknown(table, _ENGINE_KEYS, file, "engine.")
         engine_type = self.string(table, "type", file, "engine.", required=True)
-        if engine_type is not None and engine_type != "python-env":
+        if engine_type is not None and engine_type not in {"python-env", "node"}:
             self.add(file, "engine.type", "value")
+        python = self.engine_python(table, file, engine_type)
+        node = read_node(self, table, file, engine_type or "", transport_type)
+        server = read_server(self, table, file, engine_type or "", transport_type)
+        return engine_type or "", python, node, server
+
+    def engine_python(self, table: Mapping[str, Any], file: str, engine_type: str | None) -> str:
+        """``engine.python``: required for ``python-env``, forbidden for ``node``."""
+        if engine_type == "node":
+            if table.get("python") is not None:
+                self.add(file, "engine.python", "value")
+            return ""
         python = self.string(table, "python", file, "engine.", required=True)
         if python and not _PYTHON_RE.fullmatch(python):
             self.add(file, "engine.python", "value")
-        server = read_server(self, table, file, engine_type or "", transport_type)
-        return engine_type or "", python or "", server
+        return python or ""
 
     def transport(self, data: Mapping[str, Any], file: str) -> tuple[str, str, str]:
         table = self.table(data, "transport", file, "", required=True)

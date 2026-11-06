@@ -863,9 +863,11 @@ def test_runner_timeout_kills_the_group_and_exits_9(
 # --- the runner protocol's unit tests (no subprocess, no network).
 
 
-def test_build_argv_substitutes_the_default_template() -> None:
+def test_build_argv_substitutes_the_default_template(tmp_path: Path) -> None:
     package = load_registry(FIXTURES).packages["echo"]
-    argv = runner.build_argv(package, Path("/env"), "run", Path("/tmp/in"), Path("/tmp/out"))
+    argv = runner.build_argv(
+        package, Home(tmp_path), Path("/env"), "run", Path("/tmp/in"), Path("/tmp/out")
+    )
     assert argv == [
         "/env/venv/bin/python",
         "-I",

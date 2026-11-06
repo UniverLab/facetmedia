@@ -143,6 +143,25 @@ class Server:
 
 
 @dataclass(frozen=True)
+class NodePackage:
+    """One pinned npm tarball a ``node`` engine package declares."""
+
+    name: str
+    version: str
+    tarball: str
+    integrity: str
+
+
+@dataclass(frozen=True)
+class Node:
+    """The facet-managed Node runtime and packages of ``[engine.node]``."""
+
+    runtime: str
+    runtime_sha256: str
+    packages: tuple[NodePackage, ...]
+
+
+@dataclass(frozen=True)
 class Capability:
     """One thing a package can make: ``<package>.<name>``."""
 
@@ -186,6 +205,7 @@ class Package:
     uses: tuple[str, ...] = ()
     browser: Browser | None = None
     server: Server | None = None
+    node: Node | None = None
 
     @property
     def dir(self) -> Path:

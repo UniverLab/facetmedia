@@ -10,6 +10,7 @@ pull: there is no repair command.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -18,6 +19,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.parse
 import urllib.request
@@ -34,7 +36,7 @@ from facetmedia import __version__, shared
 from facetmedia import doctor as doctor_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
-from facetmedia.registry_types import Browser, Model, Package, Server
+from facetmedia.registry_types import Browser, Model, Node, NodePackage, Package, Server
 
 __all__ = [
     "browser_dir",
@@ -42,6 +44,10 @@ __all__ = [
     "client_env_present",
     "is_installed",
     "model_present",
+    "node_package_present",
+    "node_present",
+    "node_problem",
+    "node_runtime_present",
     "pull",
     "server_dir",
     "server_present",
@@ -64,6 +70,12 @@ HF_API: Final[str] = "https://huggingface.co"
 PLAYWRIGHT_CDN: Final[str] = "https://cdn.playwright.dev/dbazure/download/playwright/builds"
 #: The marker a verified browser extraction carries: the archive's sha256.
 BROWSER_MARKER: Final[str] = ".facet-verified"
+#: The official Node.js distribution root the ``node`` engine downloads from.
+NODE_DIST: Final[str] = "https://nodejs.org/dist"
+#: The marker a verified node extraction carries: the declared hash.
+NODE_MARKER: Final[str] = ".facet-verified"
+#: How long the ``node --version`` probe a verified runtime gets may take.
+NODE_PROBE_TIMEOUT_S: Final[float] = 10.0
 SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.md"})
 #: feat(run) ships the runner SDK; until then there is nothing to copy.
 RUNNER_SDK: Final[Path] = Path(__file__).with_name("runner_sdk.py")
@@ -71,7 +83,13 @@ SDK_MODULE: Final[str] = "facet_runner_sdk.py"
 
 
 def client_env_present(package: Package, home: Home) -> bool:
-    """Whether the thin client environment is complete, the server aside."""
+    """Whether the thin client side is complete, the server aside.
+
+    A ``node`` package has no python environment: its client side is the
+    verified runtime and package extractions under the facet home.
+    """
+    if package.node is not None:
+        return node_present(package, home)
     return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
 
 
@@ -93,6 +111,8 @@ def pull(
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
+    if package.node is not None:
+        return _pull_node(package, home, env_dir, started, verify_models)
     if package.browser is not None:
         _fetch_browser(package.browser, home)
     up_to_date = _is_current(package, env_dir)
@@ -111,6 +131,28 @@ def pull(
         "env": str(env_dir),
         "python": package.python,
         "already_installed": up_to_date and server_ready,
+        "downloaded_bytes": downloaded,
+        "seconds": round(time.monotonic() - started, 3),
+        "models": records,
+    }
+
+
+def _pull_node(
+    package: Package, home: Home, env_dir: Path, started: float, verify_models: bool
+) -> dict[str, object]:
+    """The ``node`` engine's pull: verified extractions, no python environment."""
+    node = package.node
+    assert node is not None
+    up_to_date = node_present(package, home)
+    downloaded = _fetch_node(node, home)
+    records, model_bytes = _fetch_models(package, home, verify_models)
+    downloaded += model_bytes
+    return {
+        "package": package.name,
+        "version": package.version,
+        "env": str(env_dir),
+        "python": package.python,
+        "already_installed": up_to_date,
         "downloaded_bytes": downloaded,
         "seconds": round(time.monotonic() - started, 3),
         "models": records,
@@ -142,7 +184,15 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
     Every line goes to stderr and to the run log, so a ``facet run`` that
     pulls first records what it was about to download.
     """
-    lines = [f"python {package.python}", f"environment {env_dir}"]
+    if package.node is not None:
+        lines = [f"node {package.node.runtime}"]
+        lines += [
+            f"node package {spec.name} {spec.version}"
+            + ("" if node_package_present(spec, home) else " to download")
+            for spec in package.node.packages
+        ]
+    else:
+        lines = [f"python {package.python}", f"environment {env_dir}"]
     total = 0
     for model in package.models:
         present = model_present(model, home, verify)
@@ -685,3 +735,192 @@ def _server_build(home: Home, target: Path, package: Package, server: Server) ->
         ],
         uv_env(home),
     )
+
+
+# --- The node engine: one verified runtime and npm tarballs per home.
+
+
+def node_runtime_present(node: Node, home: Home) -> bool:
+    """Whether the runtime extraction exists and its marker holds the sha256."""
+    try:
+        marker = (home.node_runtime_dir(node.runtime) / NODE_MARKER).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return marker.strip() == node.runtime_sha256
+
+
+def node_package_present(spec: NodePackage, home: Home) -> bool:
+    """Whether the package extraction exists and its marker holds the integrity."""
+    try:
+        marker = (home.node_pkg_dir(spec.name, spec.version) / NODE_MARKER).read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        return False
+    return marker.strip() == spec.integrity
+
+
+def node_present(package: Package, home: Home) -> bool:
+    """Whether the runtime and every declared package extraction verify."""
+    node = package.node
+    if node is None:
+        return False
+    return node_runtime_present(node, home) and all(
+        node_package_present(spec, home) for spec in node.packages
+    )
+
+
+def node_problem(package: Package, home: Home) -> str | None:
+    """Why the node engine is not usable, or ``None`` when it is.
+
+    A missing or unverified extraction is pull-fixable; a verified runtime
+    whose binary cannot run on this host is not — no pull changes that.
+    """
+    node = package.node
+    if node is None:
+        return None
+    runtime_dir = home.node_runtime_dir(node.runtime)
+    if not node_runtime_present(node, home):
+        return f"{runtime_dir}: the extraction is not verified"
+    for spec in node.packages:
+        target = home.node_pkg_dir(spec.name, spec.version)
+        if not node_package_present(spec, home):
+            return f"{target}: the extraction is not verified"
+    if not _node_runs(home, node):
+        return f"{runtime_dir / 'bin' / 'node'}: the managed node binary cannot run on this host"
+    return None
+
+
+def _node_runs(home: Home, node: Node) -> bool:
+    """Whether ``bin/node --version`` exits zero; the linux-x64 probe."""
+    binary = home.node_runtime_dir(node.runtime) / "bin" / "node"
+    try:
+        result = subprocess.run(
+            [str(binary), "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=NODE_PROBE_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _fetch_node(node: Node, home: Home) -> int:
+    """Download and extract what is missing; returns the bytes fetched."""
+    downloaded = 0
+    if not node_runtime_present(node, home):
+        downloaded += _fetch_runtime(node, home)
+    for spec in node.packages:
+        if not node_package_present(spec, home):
+            downloaded += _fetch_package(spec, home)
+    return downloaded
+
+
+def _fetch_runtime(node: Node, home: Home) -> int:
+    """The official linux-x64 tarball, sha256-verified, extracted once."""
+    url = f"{NODE_DIST}/v{node.runtime}/node-v{node.runtime}-linux-x64.tar.gz"
+    part = _part_path(home, f"node-{node.runtime}")
+    digest, size = _download_with_retries(part, lambda: _stream_to_part(url, part))
+    if digest != node.runtime_sha256:
+        part.unlink(missing_ok=True)
+        raise FacetError(
+            "download_failed",
+            f"node {node.runtime}: sha256 mismatch: expected {node.runtime_sha256}, got {digest}",
+            details={
+                "runtime": node.runtime,
+                "expected": node.runtime_sha256,
+                "actual": digest,
+            },
+        )
+    target = home.node_runtime_dir(node.runtime)
+    _install_tarball(part, target, node.runtime_sha256, home, f"node-{node.runtime}")
+    return size
+
+
+def _fetch_package(spec: NodePackage, home: Home) -> int:
+    """One npm tarball, integrity-verified, extracted once per name+version."""
+    algo, _sep, expected = spec.integrity.partition("-")
+    # The part and staging paths are flat files: a scoped name's "/" cannot
+    # appear in them, so it is folded to "-" (the extraction path keeps it).
+    label = f"{spec.name.replace('/', '-')}-{spec.version}"
+    part = _part_path(home, label)
+    digest, size = _download_with_retries(
+        part, lambda: _stream_with_digest(part, spec.tarball, algo)
+    )
+    if digest != expected:
+        part.unlink(missing_ok=True)
+        raise FacetError(
+            "download_failed",
+            f"{spec.name}@{spec.version}: integrity mismatch: "
+            f"expected {spec.integrity}, got {algo}-{digest}",
+            details={
+                "package": spec.name,
+                "version": spec.version,
+                "expected": spec.integrity,
+                "actual": f"{algo}-{digest}",
+            },
+        )
+    target = home.node_pkg_dir(spec.name, spec.version)
+    _install_tarball(part, target, spec.integrity, home, label)
+    return size
+
+
+def _stream_with_digest(part: Path, url: str, algo: str) -> tuple[str, int]:
+    """Stream ``url`` into ``part`` while hashing with ``algo``.
+
+    Returns the digest base64-encoded — the spelling npm's ``integrity``
+    field uses — plus the byte count.
+    """
+    digest = hashlib.new(algo)
+    size = 0
+    with _opened(url) as source, part.open("wb") as sink:
+        while chunk := source.read(CHUNK_BYTES):
+            digest.update(chunk)
+            size += len(chunk)
+            sink.write(chunk)
+    return base64.b64encode(digest.digest()).decode("ascii"), size
+
+
+def _install_tarball(archive: Path, target: Path, marker: str, home: Home, label: str) -> None:
+    """Extract a verified tarball into ``target``; the marker lands last.
+
+    The archive's single top-level directory becomes the extraction root —
+    ``node-v<ver>-linux-x64/`` for the runtime, ``package/`` for npm — so
+    ``<target>/bin/node`` and ``<target>/<entry>`` resolve as documented.
+    """
+    staging = home.tmp_dir / f"{label}.{secrets.token_hex(4)}"
+    try:
+        payload = _extract_tarball(archive, staging)
+    finally:
+        archive.unlink(missing_ok=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_dir():
+        shutil.rmtree(target)
+    elif target.exists():
+        target.unlink()
+    if payload == staging:
+        os.replace(staging, target)
+    else:
+        os.replace(payload, target)
+        shutil.rmtree(staging, ignore_errors=True)
+    atomic_write_text(target / NODE_MARKER, marker, home.tmp_dir)
+
+
+def _extract_tarball(archive: Path, staging: Path) -> Path:
+    """Unpack ``archive`` into ``staging``; returns the payload directory."""
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        with tarfile.open(archive, "r:gz") as bundle:
+            if hasattr(tarfile, "data_filter"):
+                bundle.extractall(staging, filter="data")
+            else:
+                bundle.extractall(staging)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    entries = list(staging.iterdir())
+    if len(entries) == 1 and entries[0].is_dir():
+        return entries[0]
+    return staging

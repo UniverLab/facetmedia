@@ -85,8 +85,8 @@ than 100 MB of models), `gpu`.
 
 ```toml
 [engine]
-type = "python-env"   # the only engine in v0.1
-python = "3.12"
+type = "python-env"   # or "node"; see Node engine below
+python = "3.12"       # required for python-env, forbidden for node
 
 [transport]
 type = "cli"          # the only transport in v0.1
@@ -284,6 +284,61 @@ first on `PATH` and `PORT` set to the port facet picked, waits for a 200 up to
 and always kills the server's whole process group afterwards. A launch that
 never turns healthy fails `runner_failed` with its last output lines. The
 client reads `FACET_SERVER_URL`; it never starts, stops or holds the tool.
+
+## Node engine
+
+Some tools are Node CLIs, not Python packages. A package like that declares
+`type = "node"` and pins both the runtime and every npm tarball it needs:
+
+```toml
+[engine]
+type = "node"
+
+[engine.node]
+runtime = "22.21.0"                   # exact Node version
+runtime_sha256 = "<64 lowercase hex>" # of nodejs.org's linux-x64 tarball
+
+[[engine.node.packages]]
+name = "@scope/tool"                  # the npm name
+version = "1.2.3"                     # semver
+tarball = "https://registry.npmjs.org/@scope/tool/-/tool-1.2.3.tgz"
+integrity = "sha512-<base64>"         # the tarball's SRI hash
+```
+
+The FIRST `[[engine.node.packages]]` entry is the entry package: `{{entry}}`
+resolves inside its extraction. `engine.python` is required for
+`python-env` and forbidden here. `facet registry validate` rejects a
+non-semver runtime or package version, a malformed `runtime_sha256`, an
+`integrity` that is not a valid SRI hash, and a `tarball` whose host is not
+`registry.npmjs.org`.
+
+`facet pull` downloads `node-v<runtime>-linux-x64.tar.gz` from nodejs.org
+and each package tarball from registry.npmjs.org — the same three attempts
+and backoff as models — verifies the runtime's sha256 and each tarball's
+integrity, and extracts under the facet home: the runtime at
+`<home>/runtimes/node/<version>/` (its `bin/node` is the binary facet
+runs) and each package at `<home>/node_pkgs/<name>/<version>/` with the
+tarball's `package/` contents at the root. Each extraction carries a
+`.facet-verified` marker written last; a verified extraction is never
+re-downloaded. There is no npm and no npx anywhere: nothing is installed
+outside the facet home, no script runs at install time, and once pulled the
+package runs with no network at all.
+
+Every node package writes its template with `{{node}}`, which resolves to
+the managed binary, mirroring `{{python}}`:
+
+```toml
+[transport]
+type = "cli"
+entry = "cli.js"          # relative to the entry package directory
+invocation_template = "{{node}} {{entry}} {{verb}} --input {{input}} --result {{result}}"
+```
+
+The runner environment additionally exports `FACET_NODE` (the managed
+`bin/node`) and `FACET_NODE_PATH` (the declared package directories,
+`:`-joined) for scripts the entry spawns. `facet doctor` reports a missing
+or unverified extraction with the fix `facet pull <package>`; a verified
+runtime the host cannot execute is a `machine_cannot`, not a pull problem.
 
 ## Capabilities and their inputs
 

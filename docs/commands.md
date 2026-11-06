@@ -101,6 +101,11 @@ A package that declares `[engine.server]` also gets its pinned checkout at
 `~/.facet/servers/<package>/<version>/<shortrev>/` with its own venv, and
 `installed` then means both the client environment and that checkout.
 
+A package that declares `[engine.node]` instead installs a pinned Node
+runtime under `~/.facet/runtimes/node/<version>/` and its npm package
+tarballs under `~/.facet/node_pkgs/<name>/<version>/`, each verified by
+hash, with no Python environment built.
+
 Nothing is written or downloaded before the doctor's readiness checks
 (compatibility, platform, RAM, disk, GPU, host libraries — plus the
 package's own `doctor` verb at quick depth when it is already installed)

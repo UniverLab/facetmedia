@@ -77,6 +77,8 @@ class Home:
             self._root / "browsers",
             self._root / "servers",
             self._root / "python",
+            self._root / "runtimes" / "node",
+            self._root / "node_pkgs",
             self._root / "cache" / "uv",
             self._root / "logs",
             self._root / "tmp",
@@ -122,6 +124,22 @@ class Home:
         return self._root / "python"
 
     @property
+    def runtimes_dir(self) -> Path:
+        return self._root / "runtimes"
+
+    @property
+    def node_pkgs_dir(self) -> Path:
+        return self._root / "node_pkgs"
+
+    def node_runtime_dir(self, version: str) -> Path:
+        """``<home>/runtimes/node/<version>``: one verified Node extraction."""
+        return self.runtimes_dir / "node" / version
+
+    def node_pkg_dir(self, name: str, version: str) -> Path:
+        """``<home>/node_pkgs/<name>/<version>``: one verified npm tarball."""
+        return self.node_pkgs_dir / name / version
+
+    @property
     def uv_cache_dir(self) -> Path:
         return self._root / "cache" / "uv"
 
@@ -153,6 +171,8 @@ def same_filesystem_check(home: Home) -> None:
         home.models_dir,
         home.browsers_dir,
         home.servers_dir,
+        home.runtimes_dir,
+        home.node_pkgs_dir,
         home.uv_cache_dir,
         home.tmp_dir,
     ):

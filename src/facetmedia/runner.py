@@ -125,20 +125,46 @@ class VerifyResult:
 
 def build_argv(
     package: Package,
+    home: Home,
     env_dir: Path,
     verb: str,
     input_path: Path,
     result_path: Path,
 ) -> list[str]:
     """The runner command: the manifest template with its tokens substituted."""
+    node, entry = _entry_points(package, home, env_dir)
     replacements = (
+        ("{{node}}", node),
         ("{{python}}", str(env_dir / "venv" / "bin" / "python")),
-        ("{{entry}}", str(env_dir / "package" / package.entry)),
+        ("{{entry}}", entry),
         ("{{verb}}", verb),
         ("{{input}}", str(input_path)),
         ("{{result}}", str(result_path)),
     )
     return [_substitute(token, replacements) for token in shlex.split(package.invocation_template)]
+
+
+def _entry_points(package: Package, home: Home, env_dir: Path) -> tuple[str, str]:
+    """``({{node}}, {{entry}})``: the managed binary and the entry's real path.
+
+    A ``node`` package's entry lives inside the first declared npm package's
+    extraction; every other package's entry is ``<env>/package/<entry>``.
+    """
+    if package.node is None:
+        return "", str(env_dir / "package" / package.entry)
+    node_bin, entry_dir = _node_paths(package, home)
+    return str(node_bin), str(entry_dir / package.entry)
+
+
+def _node_paths(package: Package, home: Home) -> tuple[Path, Path]:
+    """``(bin/node, entry package dir)`` under the facet home for ``package``."""
+    node = package.node
+    assert node is not None
+    first = node.packages[0]
+    return (
+        home.node_runtime_dir(node.runtime) / "bin" / "node",
+        home.node_pkg_dir(first.name, first.version),
+    )
 
 
 def _substitute(token: str, replacements: Sequence[tuple[str, str]]) -> str:
@@ -183,6 +209,12 @@ def runner_env(home: Home, package: Package) -> dict[str, str]:
     """The runner's environment: uv's, plus the models dir and the GPU flag."""
     env_vars = uv_env(home)
     env_vars["FACET_MODELS"] = str(home.models_dir / "direct")
+    if package.node is not None:
+        node_bin, _entry_dir = _node_paths(package, home)
+        env_vars["FACET_NODE"] = str(node_bin)
+        env_vars["FACET_NODE_PATH"] = os.pathsep.join(
+            str(home.node_pkg_dir(spec.name, spec.version)) for spec in package.node.packages
+        )
     if package.browser is not None:
         env_vars["PLAYWRIGHT_BROWSERS_PATH"] = str(home.browsers_dir)
     if not package.requirements.gpu:
@@ -204,7 +236,7 @@ def call(inv: Invocation, verb: str, request: Mapping[str, object]) -> Outcome:
     # run and verify share the temp dir: a result an earlier verb left behind
     # must never be read as this verb's answer to "did you write a result".
     result_path.unlink(missing_ok=True)
-    argv = build_argv(inv.package, inv.env_dir, verb, input_path, result_path)
+    argv = build_argv(inv.package, inv.home, inv.env_dir, verb, input_path, result_path)
     logger.info("runner %s: %s", verb, " ".join(argv))
     tail: deque[str] = deque(maxlen=TAIL_LINES)
     # The signal trap is installed before the server and the runner start, so a
