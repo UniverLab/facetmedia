@@ -19,7 +19,6 @@ package doctor, through :func:`requirement_errors`.
 
 from __future__ import annotations
 
-import ctypes
 import fcntl
 import json
 import os
@@ -35,6 +34,14 @@ import uv
 from facetmedia import __version__, licenses, lock, prune, runner, shared
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.home import Home, require_posix
+from facetmedia.probes import (
+    NO_HOST_LIBS_HINT,
+    gpu_info,
+    host_lib_error,
+    mem_available_gb,
+    mem_total_gb,
+    tree_bytes,
+)
 from facetmedia.registry import (
     Model,
     Package,
@@ -65,8 +72,6 @@ __all__ = [
 ]
 
 GB: Final[int] = 1024**3
-NO_HOST_LIBS_HINT: Final[str] = "facet never installs host libraries"
-NVIDIA_SMI_TIMEOUT_S: Final[float] = 2.0
 #: The package doctor's budget per depth; a timeout is a failed check.  The
 #: quick budget is 10 s because cold imports of OCP, onnxruntime and
 #: CTranslate2 take several seconds on a CPU machine.
@@ -86,11 +91,13 @@ CHECK_ORDER: Final[tuple[str, ...]] = (
     "installed",
     "licenses",
     "models",
+    "browser",
     "shared_modules",
 )
 
-#: The checks ``can_run`` needs: everything but ``installed``, ``models`` and
-#: ``shared_modules``, which a pull (which ``run`` does by itself) fixes.
+#: The checks ``can_run`` needs: everything but ``installed``, ``models``,
+#: ``browser`` and ``shared_modules``, which a pull (which ``run`` does by
+#: itself) fixes.
 CAN_RUN_CHECKS: Final[tuple[str, ...]] = (
     "compatible",
     "platform",
@@ -221,6 +228,7 @@ def machine_checks(
         "installed": _installed(package, home),
         "licenses": _licenses(package),
         "models": _models(package, home),
+        "browser": _browser(package, home),
         "shared_modules": Check(
             *shared.check(package, home.env_dir(package.name, package.version))
         ),
@@ -390,84 +398,16 @@ def _models(package: Package, home: Home) -> Check:
     return Check(True, "the package has no models")
 
 
-# --- the shared machine probes (env.py imports these; never copy them).
+def _browser(package: Package, home: Home) -> Check:
+    from facetmedia import env as env_module  # noqa: PLC0415
 
-
-def mem_total_gb() -> float | None:
-    """Total RAM from ``/proc/meminfo`` in GB, or ``None`` when unreadable."""
-    return _meminfo_gb("MemTotal")
-
-
-def mem_available_gb() -> float | None:
-    """Available RAM from ``/proc/meminfo`` in GB, or ``None`` when unknown."""
-    return _meminfo_gb("MemAvailable")
-
-
-def _meminfo_gb(key: str) -> float | None:
-    try:
-        text = Path("/proc/meminfo").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    for line in text.splitlines():
-        name, _, rest = line.partition(":")
-        if name != key:
-            continue
-        try:
-            return int(rest.split()[0]) / (1024 * 1024)
-        except (IndexError, ValueError):
-            return None
-    return None
-
-
-def tree_bytes(path: Path) -> int:
-    """Bytes used by the files under ``path``; 0 when it does not exist."""
-    if not path.exists():
-        return 0
-    total = 0
-    for entry in path.rglob("*"):
-        try:
-            if entry.is_file():
-                total += entry.stat().st_size
-        except OSError:
-            continue
-    return total
-
-
-def gpu_info() -> str | None:
-    """One line per GPU from ``nvidia-smi``, or ``None`` when there is none."""
-    try:
-        completed = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.total,memory.used",
-                "--format=csv,noheader",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=NVIDIA_SMI_TIMEOUT_S,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if completed.returncode != 0:
-        return None
-    text = completed.stdout.strip()
-    return text or None
-
-
-def host_lib_error(package: Package) -> FacetError | None:
-    """The first soname that does not load, or ``None`` when all load."""
-    for soname in package.requirements.host_libs:
-        try:
-            ctypes.CDLL(soname)
-        except OSError as exc:
-            return FacetError(
-                "machine_cannot",
-                f"cannot load {soname}: {exc}; {NO_HOST_LIBS_HINT}",
-                hint=package.requirements.host_hint or None,
-                details={"soname": soname},
-            )
-    return None
+    browser = package.browser
+    if browser is None:
+        return Check(True, "no browser declared")
+    target = env_module.browser_dir(browser, home)
+    if env_module.browser_present(browser, home):
+        return Check(True, f"{browser.channel}-{browser.revision} verified at {target}")
+    return Check(False, f"{target}: the extraction is not verified", f"facet pull {package.name}")
 
 
 # --- the facet section: facet itself, its state, and this machine.
@@ -665,12 +605,28 @@ def package_doctor(
 
     if not env_module.is_installed(package, home):
         return [_doctor_skip(package, home)], None
+    if package.browser is not None and not env_module.browser_present(package.browser, home):
+        return [_browser_doctor_check(package, home)], None
     temp_dir = home.tmp_dir / f".facet-doctor-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
     try:
         return _doctor_call(package, home, run_id, depth, capability, temp_dir)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _browser_doctor_check(package: Package, home: Home) -> dict[str, object]:
+    """The doctor entry for a declared browser whose extraction is not verified."""
+    from facetmedia import env as env_module  # noqa: PLC0415
+
+    assert package.browser is not None
+    target = env_module.browser_dir(package.browser, home)
+    return {
+        "name": "browser",
+        "ok": False,
+        "detail": f"{target}: the extraction is not verified",
+        "fix": f"facet pull {package.name}",
+    }
 
 
 def _doctor_skip(package: Package, home: Home) -> dict[str, object]:
@@ -780,7 +736,12 @@ def _doctor_entries(value: Any) -> list[dict[str, object]]:
 def _doctor_errors(
     package: Package, checks: list[dict[str, object]], failure: FacetError | None
 ) -> list[FacetError]:
-    """The doctor as gate failures: the classified failure, or each failed check."""
+    """The doctor as gate failures: the classified failure, or each failed check.
+
+    A check whose fix is ``facet pull <package>`` never gates: the pull it
+    names is the very thing the gate runs before, so refusing here would
+    refuse the fix (the browser check works the same way).
+    """
     if failure is not None:
         return [failure]
     errors: list[FacetError] = []
@@ -788,6 +749,8 @@ def _doctor_errors(
         if entry["ok"] is True:
             continue
         fix = entry.get("fix")
+        if fix == f"facet pull {package.name}":
+            continue
         errors.append(
             FacetError(
                 "machine_cannot",
@@ -924,6 +887,7 @@ def _package_section(
         doctor_failure=doctor_failure,
         needs_pull=readiness["installed"]["ok"] is not True
         or readiness["models"]["ok"] is not True
+        or readiness["browser"]["ok"] is not True
         or readiness["shared_modules"]["ok"] is not True,
     )
 

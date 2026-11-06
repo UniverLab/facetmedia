@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -320,3 +321,56 @@ def test_validate_rejects_a_runner_that_still_registers_probe(tmp_path: Path) ->
     found = _problems(tmp_path)
     assert ("packages/missing/runner.py", "runner.verb", "rename probe to doctor") in found
     assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+# --- the optional ``[browser]`` table: one shared, verified Chromium build.
+
+BROWSER_SHA256 = "a" * 64
+
+
+def _echo_with_browser(tmp_path: Path, browser_toml: str) -> set[tuple[str, str, str]]:
+    """The fixture registry with ``[browser]`` appended to echo's manifest."""
+    root = tmp_path / "registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    manifest = root / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + browser_toml,
+        encoding="utf-8",
+    )
+    return _problems(root)
+
+
+def test_validate_accepts_a_declared_browser(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert found == set()
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == 0
+
+
+def test_validate_rejects_an_unknown_browser_channel(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "firefox"\nrevision = "1248"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.channel", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_browser_without_a_revision(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.revision", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_malformed_browser_sha256(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        '\n[browser]\nchannel = "chromium"\nrevision = "1248"\nsha256 = "not-a-sha"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.sha256", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID

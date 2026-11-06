@@ -171,6 +171,8 @@ def runner_env(home: Home, package: Package) -> dict[str, str]:
     """The runner's environment: uv's, plus the models dir and the GPU flag."""
     env_vars = uv_env(home)
     env_vars["FACET_MODELS"] = str(home.models_dir / "direct")
+    if package.browser is not None:
+        env_vars["PLAYWRIGHT_BROWSERS_PATH"] = str(home.browsers_dir)
     if not package.requirements.gpu:
         env_vars["CUDA_VISIBLE_DEVICES"] = ""
     return env_vars

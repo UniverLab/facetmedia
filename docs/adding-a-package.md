@@ -201,6 +201,42 @@ makes the environment stale, so the next `facet pull` rebuilds it and
 rewrites both markers. `facet doctor` reports a stale copy with the fix
 `facet pull <package>`; that fix never gates a pull or a run.
 
+## Browser artifact
+
+A package that renders — presentation slides, the video facet's render
+path — needs a real Chromium, and v0.1 has no browser engine of its own.
+The package declares the build it needs in an optional top-level
+`[browser]` table of its `package.toml`:
+
+```toml
+[browser]
+channel = "chromium"                  # the only channel in v0.1
+revision = "1248"                     # a Playwright-compatible build revision
+sha256 = "<64 lowercase hex>"         # of the official Playwright CDN archive
+```
+
+`facet registry validate` rejects an unknown channel, a missing `revision`,
+and a `sha256` that is not 64 lowercase hex characters.
+
+`facet pull` downloads `chromium-linux.zip` for the declared revision from
+the official Playwright CDN, with the same three attempts and backoff as
+model downloads, verifies the archive's sha256, and extracts it once at
+`<home>/browsers/chromium-<revision>/` — Playwright's own
+`<name>-<revision>` layout, the same one `~/.cache/ms-playwright` uses,
+never a nested `<channel>/<revision>` directory. An extraction whose
+`.facet-verified` marker does not hold the declared sha256 is fetched again;
+a verified one is never re-downloaded.
+
+The browser is shared: one extraction per channel and revision under
+`<home>/browsers`, never per package and never inside an environment —
+environments are rebuilt, the browser is not. The runner environment gets
+`PLAYWRIGHT_BROWSERS_PATH` pointing at `<home>/browsers`, so the package's
+own `playwright` pip dependency finds the browser without downloading
+anything itself. `facet doctor` reports a declared browser whose extraction
+is missing or unverified with the fix `facet pull <package>`; like
+`installed`, `models` and `shared_modules`, that check never gates the pull
+that fixes it.
+
 ## Capabilities and their inputs
 
 Each capability is `[capabilities.<name>]`, its id is

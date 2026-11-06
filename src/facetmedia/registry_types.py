@@ -122,6 +122,15 @@ class Model:
 
 
 @dataclass(frozen=True)
+class Browser:
+    """The shared browser build a package declares in ``[browser]``."""
+
+    channel: str
+    revision: str
+    sha256: str
+
+
+@dataclass(frozen=True)
 class Capability:
     """One thing a package can make: ``<package>.<name>``."""
 
@@ -163,6 +172,7 @@ class Package:
     models: tuple[Model, ...] = ()
     capabilities: tuple[Capability, ...] = ()
     uses: tuple[str, ...] = ()
+    browser: Browser | None = None
 
     @property
     def dir(self) -> Path:

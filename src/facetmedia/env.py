@@ -21,6 +21,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -33,9 +34,9 @@ from facetmedia import __version__, shared
 from facetmedia import doctor as doctor_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
-from facetmedia.registry_types import Model, Package
+from facetmedia.registry_types import Browser, Model, Package
 
-__all__ = ["is_installed", "model_present", "pull"]
+__all__ = ["browser_dir", "browser_present", "is_installed", "model_present", "pull"]
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
@@ -48,6 +49,10 @@ BACKOFF_S: Final[tuple[float, ...]] = (2.0, 8.0)
 ATTEMPTS: Final[int] = len(BACKOFF_S) + 1
 UV_TAIL_LINES: Final[int] = 40
 HF_API: Final[str] = "https://huggingface.co"
+#: The official Playwright CDN the ``[browser]`` archives come from.
+PLAYWRIGHT_CDN: Final[str] = "https://cdn.playwright.dev/dbazure/download/playwright/builds"
+#: The marker a verified browser extraction carries: the archive's sha256.
+BROWSER_MARKER: Final[str] = ".facet-verified"
 SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.md"})
 #: feat(run) ships the runner SDK; until then there is nothing to copy.
 RUNNER_SDK: Final[Path] = Path(__file__).with_name("runner_sdk.py")
@@ -71,6 +76,8 @@ def pull(
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
+    if package.browser is not None:
+        _fetch_browser(package.browser, home)
     up_to_date = _is_current(package, env_dir)
     if not up_to_date:
         _rebuild(package, home, env_dir)
@@ -465,6 +472,72 @@ def _opened(url: str) -> Iterator[IO[bytes]]:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
         yield response
+
+
+# --- The shared browser: one verified extraction per channel and revision.
+
+
+def browser_dir(browser: Browser, home: Home) -> Path:
+    """``<home>/browsers/<channel>-<revision>``, Playwright's own layout."""
+    return home.browsers_dir / f"{browser.channel}-{browser.revision}"
+
+
+def browser_present(browser: Browser, home: Home) -> bool:
+    """Whether the extraction exists and its marker holds the declared sha256."""
+    try:
+        marker = (browser_dir(browser, home) / BROWSER_MARKER).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return marker.strip() == browser.sha256
+
+
+def _fetch_browser(browser: Browser, home: Home) -> None:
+    """Download, verify and extract the declared browser, once per home.
+
+    The archive lands at Playwright's ``<name>-<revision>`` layout under
+    ``<home>/browsers``, so the package's own ``playwright`` finds it through
+    ``PLAYWRIGHT_BROWSERS_PATH`` without downloading anything itself.
+    """
+    if browser_present(browser, home):
+        return
+    url = f"{PLAYWRIGHT_CDN}/{browser.channel}/{browser.revision}/chromium-linux.zip"
+    part = _part_path(home, f"{browser.channel}-{browser.revision}")
+    digest, _size = _download_with_retries(part, lambda: _stream_to_part(url, part))
+    if digest != browser.sha256:
+        part.unlink(missing_ok=True)
+        raise FacetError(
+            "download_failed",
+            f"{browser.channel}-{browser.revision}: sha256 mismatch: "
+            f"expected {browser.sha256}, got {digest}",
+            details={
+                "browser": f"{browser.channel}-{browser.revision}",
+                "expected": browser.sha256,
+                "actual": digest,
+            },
+        )
+    staging = home.tmp_dir / f"{browser.channel}-{browser.revision}.{secrets.token_hex(4)}"
+    try:
+        _extract_browser(part, staging)
+    finally:
+        part.unlink(missing_ok=True)
+    target = browser_dir(browser, home)
+    if target.is_dir():
+        shutil.rmtree(target)
+    elif target.exists():
+        target.unlink()
+    os.replace(staging, target)
+    atomic_write_text(target / BROWSER_MARKER, browser.sha256, home.tmp_dir)
+
+
+def _extract_browser(archive: Path, staging: Path) -> None:
+    """Unpack the verified archive into ``staging``; a failure leaves nothing."""
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(staging)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
 
 def _part_path(home: Home, model_id: str) -> Path:

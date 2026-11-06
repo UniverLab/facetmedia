@@ -22,6 +22,7 @@ from facetmedia.registry_types import (
     FACETS,
     FIELD_TYPES,
     MISSING,
+    Browser,
     Capability,
     Field,
     License,
@@ -129,8 +130,11 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "models",
         "capabilities",
         "uses",
+        "browser",
     }
 )
+_BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "sha256"})
+_BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
 _ENGINE_KEYS: Final[frozenset[str]] = frozenset({"type", "python"})
 _TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
 _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
@@ -364,6 +368,7 @@ class RegistryLoader:
         capabilities = self.capabilities(data.get("capabilities"), name, file)
         dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
         uses = self.uses(data.get("uses"), file, dependencies)
+        browser = self.browser(data, file)
         if len(self.problems) != before:
             return None
         if (
@@ -396,6 +401,7 @@ class RegistryLoader:
             models=models,
             capabilities=capabilities,
             uses=uses,
+            browser=browser,
         )
 
     def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
@@ -427,6 +433,28 @@ class RegistryLoader:
                 continue
             found.append(name)
         return tuple(found)
+
+    def browser(self, data: Mapping[str, Any], file: str) -> Browser | None:
+        """The optional ``[browser]`` table: one shared Chromium build."""
+        before = len(self.problems)
+        table = self.table(data, "browser", file, "", required=False)
+        if table is None:
+            return None
+        self.unknown(table, _BROWSER_KEYS, file, "browser.")
+        channel = self.string(table, "channel", file, "browser.", required=True)
+        if channel is not None and channel not in _BROWSER_CHANNELS:
+            self.add(file, "browser.channel", "value")
+        revision = self.string(table, "revision", file, "browser.", required=True)
+        sha256 = self.string(table, "sha256", file, "browser.", required=True)
+        if sha256 and not _SHA256_RE.fullmatch(sha256):
+            self.add(file, "browser.sha256", "value")
+        if len(self.problems) != before:
+            return None
+        return Browser(
+            channel=channel or "",
+            revision=revision or "",
+            sha256=sha256 or "",
+        )
 
     def manifest_version(self, data: Mapping[str, Any], file: str) -> str | None:
         version = self.string(data, "version", file, "", required=True)

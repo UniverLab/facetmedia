@@ -74,6 +74,7 @@ class Home:
             self._root / "envs",
             self._root / "models" / "direct",
             self._root / "models" / "hf",
+            self._root / "browsers",
             self._root / "python",
             self._root / "cache" / "uv",
             self._root / "logs",
@@ -108,6 +109,10 @@ class Home:
         return self._root / "models" / "hf"
 
     @property
+    def browsers_dir(self) -> Path:
+        return self._root / "browsers"
+
+    @property
     def python_dir(self) -> Path:
         return self._root / "python"
 
@@ -139,7 +144,7 @@ class Home:
 def same_filesystem_check(home: Home) -> None:
     """Verify the home's working directories share one filesystem."""
     anchor = os.stat(home.envs_dir).st_dev
-    for directory in (home.models_dir, home.uv_cache_dir, home.tmp_dir):
+    for directory in (home.models_dir, home.browsers_dir, home.uv_cache_dir, home.tmp_dir):
         if os.stat(directory).st_dev != anchor:
             raise FacetError(
                 "machine_cannot",
