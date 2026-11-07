@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from facetmedia import doctor as doctor_module
+from facetmedia import runner as runner_module
 from facetmedia.cli import main
 from facetmedia.home import Home
 from facetmedia.registry import load_registry, validate_registry
@@ -318,6 +319,19 @@ def test_doctor_reports_backend_owned_without_a_hash_check(
     assert checks["models"]["ok"] is True
     assert "backend-owned: backend-gated" in str(checks["models"]["detail"])
     assert checks["models"]["fix"] == ""
+    assert checks["licenses"]["ok"] is False
+    assert "backend-gated (CC-BY-NC-4.0): not accepted" in str(checks["licenses"]["detail"])
+
+
+def test_runner_model_paths_excludes_backend_owned(
+    backend_home: tuple[Path, Path],
+) -> None:
+    home, registry = backend_home
+    package = load_registry(registry).packages["echo"]
+    paths = runner_module.model_paths(package, Home(home))
+    assert "backend-gated" not in paths
+    assert "dl-gated" in paths
+    assert "plain-weights" in paths
 
 
 def test_license_accept_and_list_cover_backend_owned_ids(
