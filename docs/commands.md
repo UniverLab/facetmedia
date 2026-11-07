@@ -263,7 +263,10 @@ declared Chromium extraction that is missing or unverified, with the same
 fix. A package that declares `[engine.server]` reports a missing or
 unverified checkout under `installed`, also with the fix `facet pull
 <package>`; the server is probed, never started. None of these gates a run
-by itself.
+by itself. A backend-owned model (`backend = true`, served by the backend,
+never fetched) needs no download: the `models` check stays ok and notes
+`backend-owned: <id>`, while a missing acceptance still fails the
+`licenses` check with `license_not_accepted` (exit 4).
 
 ```console
 $ facet doctor --quick
