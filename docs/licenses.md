@@ -44,6 +44,31 @@ Accepting again replaces the earlier record for that model. A licence
 change asks again: a record matches only while its `spdx` equals the
 manifest's current `spdx`.
 
+## Backend-owned models
+
+A model with `backend = true` in the manifest is served by the backend:
+facet never fetches it and never hash-checks it. `pull` skips it and says
+so on stderr:
+
+```text
+model omnivoice-v1 backend-owned, skipped
+```
+
+Its terms still apply. `accept` and `list` treat a backend-owned id
+exactly like a downloadable one, and `run` requires acceptance for the
+pieces that select it (see below) — a missing record fails with
+`license_not_accepted` (exit 4) and the `facet license accept <model>`
+command, even though there is nothing to download.
+
+## Which models a run requires
+
+`facet run` gates per piece, after the piece inputs are read. When the
+capability declares a `model` input, the piece's value names the manifest
+model id the run requires — exact id equality, nothing fuzzier — and only
+that model needs acceptance. A piece selecting an ungated model runs with
+no acceptance recorded. A capability without a `model` input keeps the
+package-wide gate: every gated model of the package needs acceptance.
+
 ## What the record keeps
 
 ```json

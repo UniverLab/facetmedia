@@ -18,6 +18,7 @@ from packaging.version import InvalidVersion, Version
 
 from facetmedia.manifest_binary import read_binary
 from facetmedia.manifest_host import read_host_app
+from facetmedia.manifest_model import read_models
 from facetmedia.manifest_node import read_node
 from facetmedia.manifest_server import read_server
 from facetmedia.registry_types import (
@@ -32,7 +33,6 @@ from facetmedia.registry_types import (
     Field,
     HostApp,
     License,
-    Model,
     Node,
     Package,
     Problem,
@@ -42,9 +42,7 @@ from facetmedia.registry_types import (
 )
 
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
-_MODEL_ID_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}\Z")
-_REVISION_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}\Z")
 _PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(\.\d+)?\Z")
 _USES_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]*\Z")
 _REQUIRES_RE: Final[re.Pattern[str]] = re.compile(r"^Requires:[ \t]*(.*)$", re.MULTILINE)
@@ -152,21 +150,6 @@ _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
     {"gpu", "ram_gb", "disk_gb", "exclusive", "platforms", "host_libs", "host_hint"}
 )
 _LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
-_MODEL_KEYS: Final[frozenset[str]] = frozenset(
-    {
-        "id",
-        "spdx",
-        "commercial_use",
-        "requires_acceptance",
-        "terms_url",
-        "url",
-        "sha256",
-        "bytes",
-        "path",
-        "hf_repo",
-        "revision",
-    }
-)
 _CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
     {"summary", "kind", "inputs", "verify", "preview"}
 )
@@ -377,7 +360,7 @@ class RegistryLoader:
         )
         requirements = self.requirements(data, file)
         licenses = self.licenses(data.get("licenses"), file)
-        models = self.models(data.get("models"), file)
+        models = read_models(self, data.get("models"), file)
         capabilities = self.capabilities(data.get("capabilities"), name, file)
         dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
         uses = self.uses(data.get("uses"), file, dependencies)
@@ -587,88 +570,6 @@ class RegistryLoader:
             if subject is not None and spdx is not None:
                 licenses.append(License(subject, spdx))
         return tuple(licenses)
-
-    def models(self, raw: object, file: str) -> tuple[Model, ...]:
-        if raw is None:
-            return ()
-        if not isinstance(raw, list):
-            self.add(file, "models", "type")
-            return ()
-        models: list[Model] = []
-        for position, item in enumerate(raw):
-            prefix = f"models[{position}]."
-            if not isinstance(item, dict):
-                self.add(file, f"{prefix}id", "type")
-                continue
-            model = self.model(item, file, prefix)
-            if model is not None:
-                models.append(model)
-        return tuple(models)
-
-    def model(self, item: Mapping[str, Any], file: str, prefix: str) -> Model | None:
-        before = len(self.problems)
-        self.unknown(item, _MODEL_KEYS, file, prefix)
-        model_id = self.string(item, "id", file, prefix, required=True)
-        if model_id is not None:
-            if not _MODEL_ID_RE.fullmatch(model_id):
-                self.add(file, f"{prefix}id", "value")
-            elif model_id in self.model_ids:
-                self.add(file, f"{prefix}id", "duplicate")
-            else:
-                self.model_ids[model_id] = file
-        spdx = self.string(item, "spdx", file, prefix, required=True)
-        commercial = self.boolean(item, "commercial_use", file, prefix, default=False)
-        acceptance = self.boolean(item, "requires_acceptance", file, prefix, default=False)
-        terms_url = self.string(item, "terms_url", file, prefix, required=False) or ""
-        size = self.integer(item, "bytes", file, prefix, required=True)
-        if size is not None and size <= 0:
-            self.add(file, f"{prefix}bytes", "value")
-        direct, hf = self.model_source(item, file, prefix)
-        if len(self.problems) != before:
-            return None
-        if model_id is None or spdx is None or size is None:
-            return None
-        return Model(
-            id=model_id,
-            spdx=spdx,
-            commercial_use=commercial,
-            requires_acceptance=acceptance,
-            bytes=size,
-            terms_url=terms_url,
-            **direct,
-            **hf,
-        )
-
-    def model_source(
-        self, item: Mapping[str, Any], file: str, prefix: str
-    ) -> tuple[dict[str, str], dict[str, str]]:
-        has_url = item.get("url") is not None
-        has_hf = item.get("hf_repo") is not None
-        if has_url == has_hf:
-            self.add(file, f"{prefix}url", "required" if not has_url else "value")
-            return {}, {}
-        if has_hf:
-            return {}, self.hf_source(item, file, prefix)
-        return self.url_source(item, file, prefix), {}
-
-    def url_source(self, item: Mapping[str, Any], file: str, prefix: str) -> dict[str, str]:
-        url = self.string(item, "url", file, prefix, required=True) or ""
-        if url and not url.startswith(("https://", "file://")):
-            self.add(file, f"{prefix}url", "value")
-        sha256 = self.string(item, "sha256", file, prefix, required=True) or ""
-        if sha256 and not _SHA256_RE.fullmatch(sha256):
-            self.add(file, f"{prefix}sha256", "value")
-        path = self.string(item, "path", file, prefix, required=True) or ""
-        if path and (Path(path).is_absolute() or ".." in Path(path).parts):
-            self.add(file, f"{prefix}path", "value")
-        return {"url": url, "sha256": sha256, "path": path}
-
-    def hf_source(self, item: Mapping[str, Any], file: str, prefix: str) -> dict[str, str]:
-        repo = self.string(item, "hf_repo", file, prefix, required=True) or ""
-        revision = self.string(item, "revision", file, prefix, required=True) or ""
-        if revision and not _REVISION_RE.fullmatch(revision):
-            self.add(file, f"{prefix}revision", "value")
-        return {"hf_repo": repo, "revision": revision}
 
     def capabilities(self, raw: object, package: str, file: str) -> tuple[Capability, ...]:
         if raw is None:

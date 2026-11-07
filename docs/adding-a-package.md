@@ -153,6 +153,24 @@ download, models need no acceptance when `requires_acceptance = false`,
 and a model needing acceptance fails every gate with the exact
 `facet license accept <id>` command (see [licenses.md](licenses.md)).
 
+A model the backend serves instead of facet fetching declares no source at
+all — `backend = true` with no `url`, `sha256`, `path`, `hf_repo`,
+`revision` or `bytes` (naming any of them is a manifest error):
+
+```toml
+[[models]]
+id = "omnivoice-v1"
+spdx = "CC-BY-NC-4.0"
+commercial_use = false          # default false
+requires_acceptance = true      # true for NC models or models with terms
+terms_url = "https://example.com/omnivoice-terms"
+backend = true                  # served by the backend: never fetched, never hash-checked
+```
+
+`pull` skips a backend-owned model entirely and reports it as
+`backend-owned`; `run` still requires acceptance for the pieces that select
+it (see [licenses.md](licenses.md)).
+
 ## Shared modules
 
 Packages run in separate environments, so a helper they both need is kept

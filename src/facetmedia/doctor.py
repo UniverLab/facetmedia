@@ -27,12 +27,13 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 import uv
 
-from facetmedia import __version__, doctor_host, doctor_node, licenses, lock, prune, runner, shared
+from facetmedia import __version__, doctor_host, doctor_node, licenses, lock, prune, shared
 from facetmedia.contract import EXIT_CODES, FacetError
+from facetmedia.doctor_package import package_doctor
 from facetmedia.home import Home, require_posix
 from facetmedia.probes import (
     NO_HOST_LIBS_HINT,
@@ -51,6 +52,7 @@ from facetmedia.registry import (
     snapshot_commit,
     validate_registry,
 )
+from facetmedia.registry_types import is_backend
 
 __all__ = [
     "GB",
@@ -398,12 +400,25 @@ def _license_detail(wanted: list[Model], missing: set[str]) -> str:
 def _models(package: Package, home: Home) -> Check:
     from facetmedia import env as env_module  # noqa: PLC0415
 
-    missing = [model.id for model in package.models if not env_module.model_present(model, home)]
+    missing = [
+        model.id
+        for model in package.models
+        if not is_backend(model) and not env_module.model_present(model, home)
+    ]
     if missing:
         return Check(False, f"missing: {', '.join(missing)}", f"facet pull {package.name}")
     if package.models:
-        return Check(True, f"{len(package.models)} model(s) present")
+        return Check(True, _models_detail(package))
     return Check(True, "the package has no models")
+
+
+def _models_detail(package: Package) -> str:
+    """``N model(s) present`` plus one ``backend-owned: <id>`` per owned model."""
+    detail = f"{len(package.models)} model(s) present"
+    owned = [f"backend-owned: {model.id}" for model in package.models if is_backend(model)]
+    if owned:
+        detail += f"; {', '.join(owned)}"
+    return detail
 
 
 def _browser(package: Package, home: Home) -> Check:
@@ -594,175 +609,6 @@ def _registry_path(home: Home) -> Path | None:
 
 def _registry_fix() -> str:
     return "fix the FACET_REGISTRY checkout" if override_dir() is not None else "run facet update"
-
-
-# --- the package doctor: the package's own doctor verb, one depth deep.
-
-
-def package_doctor(
-    package: Package, home: Home, run_id: str, depth: str, capability: str
-) -> tuple[list[dict[str, object]], FacetError | None]:
-    """One package's ``doctor`` verb: its checks plus a failure to classify.
-
-    An uninstalled environment is skipped with an ``ok`` check.  A timeout is
-    a failed check of class ``machine_cannot``; a crash or a broken protocol
-    is ``runner_failed``.  The temporary directory is always removed: a
-    doctor leaves nothing behind.
-    """
-    from facetmedia import env as env_module  # noqa: PLC0415
-
-    if (engine := doctor_host.engine_package_doctor(package, home)) is not None:
-        return engine
-    if not env_module.client_env_present(package, home):
-        return [_doctor_skip(package, home)], None
-    node_entry = doctor_node.doctor_entry(package, home)
-    if node_entry is not None:
-        return [node_entry], None
-    if package.browser is not None and not env_module.browser_present(package.browser, home):
-        return [_browser_doctor_check(package, home)], None
-    if not env_module.server_present(package, home):
-        return [_server_doctor_check(package, home)], None
-    temp_dir = home.tmp_dir / f".facet-doctor-{run_id}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        return _doctor_call(package, home, run_id, depth, capability, temp_dir)
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def _browser_doctor_check(package: Package, home: Home) -> dict[str, object]:
-    """The doctor entry for a declared browser whose extraction is not verified."""
-    from facetmedia import env as env_module  # noqa: PLC0415
-
-    assert package.browser is not None
-    target = env_module.browser_dir(package.browser, home)
-    return {
-        "name": "browser",
-        "ok": False,
-        "detail": f"{target}: the extraction is not verified",
-        "fix": f"facet pull {package.name}",
-    }
-
-
-def _server_doctor_check(package: Package, home: Home) -> dict[str, object]:
-    """The doctor entry for a declared server whose checkout is not verified.
-
-    The server is probed, never started: a doctor reports, the pull repairs.
-    """
-    from facetmedia import env as env_module  # noqa: PLC0415
-
-    target = env_module.server_dir(package, home)
-    return {
-        "name": "server",
-        "ok": False,
-        "detail": f"{target}: the checkout is not verified",
-        "fix": f"facet pull {package.name}",
-    }
-
-
-def _doctor_skip(package: Package, home: Home) -> dict[str, object]:
-    env_dir = home.env_dir(package.name, package.version)
-    return {
-        "name": "doctor",
-        "ok": True,
-        "detail": f"skipped: {package.name} {package.version} is not installed at {env_dir}",
-        "fix": "",
-    }
-
-
-def _doctor_call(
-    package: Package, home: Home, run_id: str, depth: str, capability: str, temp_dir: Path
-) -> tuple[list[dict[str, object]], FacetError | None]:
-    timeout_s = DOCTOR_TIMEOUTS.get(depth, QUICK_TIMEOUT_S)
-    try:
-        invocation = runner.Invocation(
-            package,
-            home,
-            home.env_dir(package.name, package.version),
-            temp_dir,
-            run_id,
-            timeout_s,
-            depth != "quick",
-        )
-        request = runner.make_request(
-            "doctor", capability, {}, temp_dir, Path.cwd(), runner.model_paths(package, home)
-        )
-        request["depth"] = depth
-        outcome = runner.call(invocation, "doctor", request)
-        return _doctor_result(package, outcome.result, temp_dir)
-    except FacetError as exc:
-        return [_failed_doctor_check(package, exc)], _classify_doctor_error(package, exc, timeout_s)
-
-
-def _failed_doctor_check(package: Package, error: FacetError) -> dict[str, object]:
-    return {
-        "name": "doctor",
-        "ok": False,
-        "detail": f"{package.name} doctor: {error.message}",
-        "fix": "",
-    }
-
-
-def _classify_doctor_error(package: Package, error: FacetError, timeout_s: float) -> FacetError:
-    """A timeout is ``machine_cannot``; a crash or bad protocol stays as it is."""
-    timed_out = error.code == "runner_failed" and error.message.startswith(
-        "the runner did not finish within"
-    )
-    if timed_out:
-        return FacetError(
-            "machine_cannot",
-            f"{package.name} doctor: {error.message}",
-            details={"package": package.name, "doctor_timeout": True, "timeout_s": timeout_s},
-        )
-    return error
-
-
-def _doctor_result(
-    package: Package, result: Any, temp_dir: Path
-) -> tuple[list[dict[str, object]], FacetError | None]:
-    entries = _doctor_entries(result.get("checks") if isinstance(result, dict) else None)
-    if entries:
-        return entries, None
-    if isinstance(result, dict) and result.get("ok") is False:
-        detail = str(result.get("detail") or "this package has no doctor")
-        entry = {
-            "name": "doctor",
-            "ok": False,
-            "detail": detail,
-            "fix": str(result.get("fix") or ""),
-        }
-        error = FacetError(
-            "machine_cannot", f"{package.name}: {detail}", details={"package": package.name}
-        )
-        return [entry], error
-    raise FacetError(
-        "runner_failed",
-        f"{package.name}: the doctor result has no checks",
-        details={"package": package.name, "temp": str(temp_dir)},
-    )
-
-
-def _doctor_entries(value: Any) -> list[dict[str, object]]:
-    """The runner's checks, or ``[]`` when the list is missing or malformed."""
-    if not isinstance(value, list) or not value:
-        return []
-    entries: list[dict[str, object]] = []
-    for item in value:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-            return []
-        if type(item.get("ok")) is not bool:
-            return []
-        detail = item.get("detail")
-        fix = item.get("fix")
-        entries.append(
-            {
-                "name": item["name"],
-                "ok": item["ok"],
-                "detail": detail if isinstance(detail, str) else "",
-                "fix": fix if isinstance(fix, str) else "",
-            }
-        )
-    return entries
 
 
 def _doctor_errors(

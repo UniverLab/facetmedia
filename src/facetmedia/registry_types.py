@@ -100,7 +100,12 @@ class License:
 
 @dataclass(frozen=True)
 class Model:
-    """One downloadable model, direct URL or Hugging Face repository."""
+    """One model: downloadable (direct URL or Hugging Face) or backend-owned.
+
+    A backend-owned model (``backend=True``) is declared without a
+    downloadable source: the backend serves it, so facet never fetches or
+    hash-checks it, but its terms still gate the pieces that select it.
+    """
 
     id: str
     spdx: str
@@ -113,6 +118,7 @@ class Model:
     path: str = ""
     hf_repo: str = ""
     revision: str = ""
+    backend: bool = False
 
     @property
     def source(self) -> str:
@@ -270,6 +276,11 @@ class Package:
                 "protocol": self.protocol,
             },
         )
+
+
+def is_backend(model: Model) -> bool:
+    """Whether ``model`` is backend-owned: declared without a source, never fetched."""
+    return model.backend
 
 
 def weight(package: Package) -> str:

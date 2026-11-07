@@ -77,8 +77,8 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     ephemeral = _ephemeral(args, package, home)
     pulled, downloaded = _ensure_installed(args, package, run_id)
     try:
-        accepted = tuple(licenses.require(package.models))
         inputs = _piece_inputs(capability, piece, piece_dir)
+        accepted = tuple(licenses.require(_required_models(package, capability, inputs)))
         out_dir = Path(args.out) if args.out else piece_dir
         paths = _input_paths(capability, inputs)
         piece_path = None if args.piece == "-" else Path(os.path.abspath(args.piece))
@@ -210,10 +210,14 @@ def _require_machine(package: Package, run_id: str) -> list[str]:
 
     A quick doctor that merely timed out does not block the run: each such
     warning goes to stderr and the run log, and the run carries on with it.
+    Licence acceptance is not a machine-readiness question: the run gates it
+    per piece after the inputs are read (see ``_required_models``), so the
+    package-wide licence error is left out here.
     """
     errors, warnings = doctor.requirement_errors(
         package, Home.from_env(), run_id, timeout_warns=True
     )
+    errors = [error for error in errors if error.code != "license_not_accepted"]
     for warning in warnings:
         print(warning, file=sys.stderr)
         logger.info("%s", warning)
@@ -252,6 +256,21 @@ def _piece_inputs(
             details={"capability": capability.id},
         )
     return schema.validate(capability, raw, piece_dir)
+
+
+def _required_models(
+    package: Package, capability: Capability, inputs: Mapping[str, Any]
+) -> list[Model]:
+    """The gated models this piece selects: exact id equality on a ``model`` input.
+
+    A capability without a ``model`` input keeps the package-wide gate; a
+    ``model`` value naming no manifest model requires nothing.
+    """
+    if capability.input("model") is None:
+        return list(package.models)
+    value = inputs.get("model")
+    model = next((item for item in package.models if item.id == value), None)
+    return [model] if model is not None else []
 
 
 def _input_paths(capability: Capability, values: Mapping[str, Any]) -> tuple[Path, ...]:

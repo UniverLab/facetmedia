@@ -37,6 +37,7 @@ from facetmedia import config, env_binary
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, uv_env
 from facetmedia.registry import PROTOCOL_VERSION, Package
+from facetmedia.registry_types import is_backend
 
 __all__ = [
     "REQUEST_NAME",
@@ -289,9 +290,14 @@ def _substitute(token: str, replacements: Sequence[tuple[str, str]]) -> str:
 
 
 def model_paths(package: Package, home: Home) -> dict[str, Path]:
-    """``{model id: absolute path under models/direct}`` for the request."""
+    """``{model id: absolute path under models/direct}`` for the request.
+
+    Backend-owned models have no local file and are left out.
+    """
     paths: dict[str, Path] = {}
     for model in package.models:
+        if is_backend(model):
+            continue
         leaf = model.path if model.url else model.id
         paths[model.id] = home.models_dir / "direct" / leaf
     return paths

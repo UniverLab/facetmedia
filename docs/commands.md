@@ -114,7 +114,10 @@ Nothing is written or downloaded before the doctor's readiness checks
 (compatibility, platform, RAM, disk, GPU, host libraries — plus the
 package's own `doctor` verb at quick depth when it is already installed)
 and the licence check pass; a model needing acceptance fails with the
-exact `facet license accept <model>` command instead. An interrupted pull
+exact `facet license accept <model>` command instead. A backend-owned
+model (`backend = true`, served by the backend, never fetched) needs no
+download and is reported as `backend-owned`, but its terms still gate the
+run. An interrupted pull
 is repaired by the next pull; `.complete` written last marks "installed".
 Lock: exclusive.
 
@@ -390,8 +393,10 @@ or shared per the manifest.
 
 Exit codes: `0` every asset passed; `3` an asset was made but failed its
 check; `2` bad arguments, an invalid piece, an unknown capability, or an
-asset that would overwrite a path input of the same run; `4` a model needs
-acceptance; `5` the machine gate refuses; `7` `--no-pull` on an
+asset that would overwrite a path input of the same run; `4` a model the
+piece selects needs acceptance — only the gated models the piece actually
+selects are required (see [licenses.md](licenses.md)); `5` the machine
+gate refuses; `7` `--no-pull` on an
 uninstalled package; `9` the runner crashed or broke the protocol.
 
 ## `facet preview`

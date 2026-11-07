@@ -46,7 +46,15 @@ from facetmedia.env_download import (
     _stream_to_part,
 )
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
-from facetmedia.registry_types import Browser, Model, Node, NodePackage, Package, Server
+from facetmedia.registry_types import (
+    Browser,
+    Model,
+    Node,
+    NodePackage,
+    Package,
+    Server,
+    is_backend,
+)
 
 __all__ = [
     "binary_dir",
@@ -245,6 +253,9 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
         lines = [f"python {package.python}", f"environment {env_dir}"]
     total = 0
     for model in package.models:
+        if is_backend(model):
+            lines.append(f"model {model.id} backend-owned, skipped")
+            continue
         present = model_present(model, home, verify)
         if present:
             state = "already present"
@@ -380,6 +391,9 @@ def _fetch_models(
     records: list[dict[str, object]] = []
     downloaded = 0
     for model in package.models:
+        if is_backend(model):
+            records.append(_model_record(model, "backend-owned"))
+            continue
         if model_present(model, home, verify):
             records.append(_model_record(model, "present"))
             continue
@@ -404,7 +418,10 @@ def model_present(model: Model, home: Home, verify: bool = False) -> bool:
     """Whether ``model`` is already under ``<home>/models/direct``.
 
     ``verify`` recomputes hashes; without it only the byte count is checked.
+    A backend-owned model is never fetched, so it is always present.
     """
+    if is_backend(model):
+        return True
     if model.url:
         return _file_ok(home.models_dir / "direct" / model.path, model, verify)
     return _hf_present(model, home, verify)
