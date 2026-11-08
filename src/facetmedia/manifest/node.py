@@ -2,7 +2,7 @@
 
 ``facetmedia.manifest`` keeps the package grammar; the node grammar lives
 here so the manifest module stays inside the lab's per-file size cap, the
-same split ``facetmedia.manifest_server`` makes for ``[engine.server]``.
+same split ``facetmedia.manifest.server`` makes for ``[engine.server]``.
 The loader passed in is :class:`facetmedia.manifest.RegistryLoader`, which
 collects every problem instead of stopping at the first one.
 """

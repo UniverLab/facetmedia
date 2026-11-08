@@ -16,11 +16,11 @@ from typing import Any, Final
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-from facetmedia.manifest_binary import read_binary
-from facetmedia.manifest_host import read_host_app
-from facetmedia.manifest_model import read_models
-from facetmedia.manifest_node import read_node
-from facetmedia.manifest_server import read_server
+from facetmedia.manifest.binary import read_binary
+from facetmedia.manifest.host import read_host_app
+from facetmedia.manifest.model import read_models
+from facetmedia.manifest.node import read_node
+from facetmedia.manifest.server import read_server
 from facetmedia.registry_types import (
     CAPABILITY_KINDS,
     DEFAULT_INVOCATION_TEMPLATE,
