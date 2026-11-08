@@ -105,8 +105,13 @@ A package that declares `[engine.server]` also gets its pinned checkout at
 A package that declares `[engine.node]` instead installs a pinned Node
 runtime under `~/.facet/runtimes/node/<version>/` and its npm package
 tarballs under `~/.facet/node_pkgs/<name>/<version>/`, each verified by
-hash, with no Python environment built. A package that declares
-`[engine.binary]` downloads its pinned zip once into
+hash, with no Python environment built. It also stages the package
+directory at `~/.facet/envs/<package>/<version>/package/` — the whole
+directory, so the entry's helper files come with it — and writes
+`.complete` last, holding the sha256 of the entry file's bytes;
+`already installed` also means that staged copy is current, and a pull
+whose marker no longer matches restages the tree from scratch. A package
+that declares `[engine.binary]` downloads its pinned zip once into
 `~/.facet/bin/<name>/<version>/`, verified by sha256, with the executable
 bit set on the declared `bin`.
 
@@ -262,8 +267,12 @@ with the fix `facet pull <package>`; just before it, `browser` reports a
 declared Chromium extraction that is missing or unverified, with the same
 fix. A package that declares `[engine.server]` reports a missing or
 unverified checkout under `installed`, also with the fix `facet pull
-<package>`; the server is probed, never started. None of these gates a run
-by itself. A backend-owned model (`backend = true`, served by the backend,
+<package>`; the server is probed, never started. A package that declares
+`[engine.node]` reports a missing or unverified extraction, or a staged
+runner that is not current, under `installed` with the same fix; a
+verified runtime the host cannot execute is not pull-fixable. None of
+these gates a run by itself. A backend-owned model (`backend = true`,
+served by the backend,
 never fetched) needs no download: the `models` check stays ok and notes
 `backend-owned: <id>`, while a missing acceptance still fails the
 `licenses` check with `license_not_accepted` (exit 4).
