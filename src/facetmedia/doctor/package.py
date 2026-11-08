@@ -13,8 +13,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from facetmedia import doctor_host, doctor_node, runner
+from facetmedia import runner
 from facetmedia.contract import FacetError
+from facetmedia.doctor import host as doctor_host
+from facetmedia.doctor import node as doctor_node
 from facetmedia.home import Home
 from facetmedia.registry_types import Package
 

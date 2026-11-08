@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from facetmedia import config, doctor_binary, doctor_node
+from facetmedia import config
 from facetmedia.contract import FacetError
+from facetmedia.doctor import binary as doctor_binary
+from facetmedia.doctor import node as doctor_node
 from facetmedia.home import Home
 from facetmedia.registry_types import Package
 

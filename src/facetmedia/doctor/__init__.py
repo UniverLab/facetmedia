@@ -31,9 +31,11 @@ from typing import Final
 
 import uv
 
-from facetmedia import __version__, doctor_host, doctor_node, licenses, lock, prune, shared
+from facetmedia import __version__, licenses, lock, prune, shared
 from facetmedia.contract import EXIT_CODES, FacetError
-from facetmedia.doctor_package import package_doctor
+from facetmedia.doctor import host as doctor_host
+from facetmedia.doctor import node as doctor_node
+from facetmedia.doctor.package import package_doctor
 from facetmedia.home import Home, require_posix
 from facetmedia.probes import (
     NO_HOST_LIBS_HINT,
