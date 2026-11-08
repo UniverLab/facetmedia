@@ -33,10 +33,11 @@ import uv
 
 from facetmedia import config as config_module
 from facetmedia import doctor as doctor_module
-from facetmedia import env_binary, shared
+from facetmedia import shared
 from facetmedia.contract import FacetError
-from facetmedia.env_binary import binary_dir, binary_present, binary_problem
-from facetmedia.env_download import (
+from facetmedia.env import binary as env_binary
+from facetmedia.env.binary import binary_dir, binary_present, binary_problem
+from facetmedia.env.download import (
     CHUNK_BYTES,
     TIMEOUT_S,
     USER_AGENT,
@@ -93,7 +94,8 @@ NODE_MARKER: Final[str] = ".facet-verified"
 NODE_PROBE_TIMEOUT_S: Final[float] = 10.0
 SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.md"})
 #: feat(run) ships the runner SDK; until then there is nothing to copy.
-RUNNER_SDK: Final[Path] = Path(__file__).with_name("runner_sdk.py")
+#: ``runner_sdk.py`` stays at the package root, one level above ``env``.
+RUNNER_SDK: Final[Path] = Path(__file__).parent.parent / "runner_sdk.py"
 SDK_MODULE: Final[str] = "facet_runner_sdk.py"
 
 

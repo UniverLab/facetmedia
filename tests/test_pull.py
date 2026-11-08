@@ -23,13 +23,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from facetmedia import __version__, env_download, update
+from facetmedia import __version__, update
 from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
 from facetmedia import runner as runner_module
 from facetmedia import shared as shared_module
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
+from facetmedia.env import download as env_download
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
 from tests.registry_server import COMMIT, OTHER_COMMIT, FakeGitHub

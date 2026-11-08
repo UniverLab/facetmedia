@@ -96,6 +96,8 @@ celerybeat.pid
 .env
 .venv
 env/
+# facetmedia's env package is source, not a virtualenv
+!src/facetmedia/env/
 venv/
 ENV/
 env.bak/

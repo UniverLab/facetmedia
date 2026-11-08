@@ -28,8 +28,8 @@ import pytest
 
 from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
-from facetmedia import env_binary
 from facetmedia.cli import main
+from facetmedia.env import binary as env_binary
 from facetmedia.home import Home
 from facetmedia.registry import load_registry, validate_registry
 from facetmedia.registry_types import Binary, Package

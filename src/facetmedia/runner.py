@@ -33,8 +33,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Final
 
-from facetmedia import config, env_binary
+from facetmedia import config
 from facetmedia.contract import FacetError
+from facetmedia.env import binary as env_binary
 from facetmedia.home import Home, log_file, uv_env
 from facetmedia.registry import PROTOCOL_VERSION, Package
 from facetmedia.registry_types import is_backend

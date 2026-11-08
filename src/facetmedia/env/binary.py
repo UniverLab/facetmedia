@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Final
 
 from facetmedia.contract import FacetError
-from facetmedia.env_download import (
+from facetmedia.env.download import (
     _download_with_retries,
     _part_path,
     _stream_to_part,

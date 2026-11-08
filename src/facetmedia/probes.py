@@ -2,7 +2,7 @@
 
 ``facetmedia.doctor`` re-exports these names so its callers and tests keep
 working; the implementations live here because ``doctor.py`` sits at the
-file-size cap.  ``env.py`` imports them through ``doctor`` — never copy them.
+file-size cap.  ``facetmedia.env`` imports them through ``doctor`` — never copy them.
 """
 
 from __future__ import annotations

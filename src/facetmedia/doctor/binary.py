@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from facetmedia import env_binary
+from facetmedia.env import binary as env_binary
 from facetmedia.home import Home
 from facetmedia.registry_types import Package
 
