@@ -46,6 +46,7 @@ from facetmedia.env.download import (
     _part_path,
     _stream_to_part,
 )
+from facetmedia.env.node import node_staged_current, stage_node
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import (
     Browser,
@@ -70,6 +71,7 @@ __all__ = [
     "node_present",
     "node_problem",
     "node_runtime_present",
+    "node_staged_current",
     "pull",
     "server_dir",
     "server_present",
@@ -114,7 +116,7 @@ def client_env_present(package: Package, home: Home) -> bool:
     if binary is not None:
         return binary
     if package.node is not None:
-        return node_present(package, home)
+        return node_present(package, home) and node_staged_current(package, home)
     return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
 
 
@@ -169,11 +171,13 @@ def pull(
 def _pull_node(
     package: Package, home: Home, env_dir: Path, started: float, verify_models: bool
 ) -> dict[str, object]:
-    """The ``node`` engine's pull: verified extractions, no python environment."""
+    """The ``node`` engine's pull: verified extractions, then a staged entry."""
     node = package.node
     assert node is not None
-    up_to_date = node_present(package, home)
+    up_to_date = node_present(package, home) and node_staged_current(package, home)
     downloaded = _fetch_node(node, home)
+    if not node_staged_current(package, home):
+        stage_node(package, home, env_dir)
     records, model_bytes = _fetch_models(package, home, verify_models)
     downloaded += model_bytes
     return {
@@ -802,6 +806,9 @@ def node_problem(package: Package, home: Home) -> str | None:
         target = home.node_pkg_dir(spec.name, spec.version)
         if not node_package_present(spec, home):
             return f"{target}: the extraction is not verified"
+    if not node_staged_current(package, home):
+        staged = home.env_dir(package.name, package.version) / "package" / package.entry
+        return f"{staged}: the staged runner is not current"
     if not _node_runs(home, node):
         return f"{runtime_dir / 'bin' / 'node'}: the managed node binary cannot run on this host"
     return None

@@ -24,6 +24,7 @@ packages/<name>/package.toml      # the manifest
 packages/<name>/pyproject.toml    # the environment's dependencies
 packages/<name>/uv.lock           # the pinned lock, authoritative
 packages/<name>/runner.py         # the package runner
+packages/<name>/runner.js         # a node package's entry, staged with it
 packages/<name>/skill/SKILL.md    # the package skill
 lib/<name>.py                     # shared modules packages may declare
 viewers/<viewer>/index.html       # person-facing viewers
@@ -90,7 +91,7 @@ python = "3.12"       # required for python-env, forbidden for node, host-app an
 
 [transport]
 type = "cli"          # the only transport in v0.1
-entry = "runner.py"   # relative to the package directory, no ".."
+entry = "runner.py"   # relative to the package directory for every engine but binary, no ".."
 ```
 
 `invocation_template` may be omitted; the default is
@@ -359,12 +360,15 @@ tarball = "https://registry.npmjs.org/@scope/tool/-/tool-1.2.3.tgz"
 integrity = "sha512-<base64>"         # the tarball's SRI hash
 ```
 
-The FIRST `[[engine.node.packages]]` entry is the entry package: `{{entry}}`
-resolves inside its extraction. `engine.python` is required for
+The FIRST `[[engine.node.packages]]` entry is not the entry script: it is
+the first package whose extracted tool CLIs the staged script spawns or
+requires, and every declared package is exported on `FACET_NODE_PATH` in
+declaration order. The entry script itself lives in the package directory,
+exactly like a Python runner. `engine.python` is required for
 `python-env` and forbidden here. `facet registry validate` rejects a
 non-semver runtime or package version, a malformed `runtime_sha256`, an
-`integrity` that is not a valid SRI hash, and a `tarball` whose host is not
-`registry.npmjs.org`.
+`integrity` that is not a valid SRI hash, a `tarball` whose host is not
+`registry.npmjs.org`, and a node package whose entry file is missing.
 
 `facet pull` downloads `node-v<runtime>-linux-x64.tar.gz` from nodejs.org
 and each package tarball from registry.npmjs.org — the same three attempts
@@ -378,21 +382,30 @@ re-downloaded. There is no npm and no npx anywhere: nothing is installed
 outside the facet home, no script runs at install time, and once pulled the
 package runs with no network at all.
 
+The pull also stages the package directory at
+`<home>/envs/<package>/<version>/package/` — the whole directory, so
+helper files the entry requires relatively come with it. `<env>/.complete`
+holds the **sha256 of the source entry file's bytes**, written last; a
+later pull restages the whole tree from scratch when that marker no longer
+matches, so an edited entry is picked up and an interrupted copy is redone.
+The staged copy is never merged into.
+
 Every node package writes its template with `{{node}}`, which resolves to
 the managed binary, mirroring `{{python}}`:
 
 ```toml
 [transport]
 type = "cli"
-entry = "cli.js"          # relative to the entry package directory
+entry = "runner.js"       # relative to the package directory, staged with it
 invocation_template = "{{node}} {{entry}} {{verb}} --input {{input}} --result {{result}}"
 ```
 
 The runner environment additionally exports `FACET_NODE` (the managed
 `bin/node`) and `FACET_NODE_PATH` (the declared package directories,
 `:`-joined) for scripts the entry spawns. `facet doctor` reports a missing
-or unverified extraction with the fix `facet pull <package>`; a verified
-runtime the host cannot execute is a `machine_cannot`, not a pull problem.
+or unverified extraction, or a staged runner that is not current, with the
+fix `facet pull <package>`; a verified runtime the host cannot execute is a
+`machine_cannot`, not a pull problem.
 
 ## Binary engine
 

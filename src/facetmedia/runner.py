@@ -264,13 +264,13 @@ def _wslpath(value: str) -> str:
 def _entry_points(package: Package, home: Home, env_dir: Path) -> tuple[str, str]:
     """``({{node}}, {{entry}})``: the managed binary and the entry's real path.
 
-    A ``node`` package's entry lives inside the first declared npm package's
-    extraction; every other package's entry is ``<env>/package/<entry>``.
+    Every engine's entry is ``<env>/package/<entry>``, staged by the pull.
     """
+    entry = str(env_dir / "package" / package.entry)
     if package.node is None:
-        return "", str(env_dir / "package" / package.entry)
-    node_bin, entry_dir = _node_paths(package, home)
-    return str(node_bin), str(entry_dir / package.entry)
+        return "", entry
+    node_bin, _entry_dir = _node_paths(package, home)
+    return str(node_bin), entry
 
 
 def _node_paths(package: Package, home: Home) -> tuple[Path, Path]:

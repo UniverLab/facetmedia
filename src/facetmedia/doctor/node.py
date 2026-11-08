@@ -28,8 +28,12 @@ def readiness(package: Package, home: Home) -> Check:
     problem = env_module.node_problem(package, home)
     if problem is None:
         return Check(True, f"node {node.runtime} verified and runnable")
-    # Verified extractions that cannot run are machine_cannot, not pull-fixable.
-    fix = "" if env_module.node_present(package, home) else f"facet pull {package.name}"
+    # A stale staged runner is pull-fixable; verified extractions that cannot
+    # run are machine_cannot.
+    current = env_module.node_present(package, home) and env_module.node_staged_current(
+        package, home
+    )
+    fix = "" if current else f"facet pull {package.name}"
     return Check(False, problem, fix)
 
 
@@ -41,8 +45,14 @@ def installed_check(package: Package, home: Home) -> Check | None:
     if package.node is None:
         return None
     if env_module.node_present(package, home):
-        detail = f"node {package.node.runtime} verified under {home.runtimes_dir}"
-        return Check(True, detail)
+        if env_module.node_staged_current(package, home):
+            detail = f"node {package.node.runtime} verified under {home.runtimes_dir}"
+            return Check(True, detail)
+        return Check(
+            False,
+            "the staged runner is not current",
+            f"facet pull {package.name}",
+        )
     return Check(
         False,
         "the node runtime or a package extraction is not verified",
@@ -54,13 +64,17 @@ def doctor_entry(package: Package, home: Home) -> dict[str, object] | None:
     """The package-doctor entry for a node engine that is present but unusable.
 
     Only the cannot-run case reaches a non-``None`` result — a missing
-    extraction already fails ``client_env_present`` — so the fix is never
-    ``facet pull`` in practice and the gate classifies it ``machine_cannot``.
+    extraction or a stale staged runner already fails
+    ``client_env_present`` — so the fix is never ``facet pull`` in practice
+    and the gate classifies it ``machine_cannot``.
     """
     from facetmedia import env as env_module  # noqa: PLC0415
 
     problem = env_module.node_problem(package, home)
     if problem is None:
         return None
-    fix = "" if env_module.node_present(package, home) else f"facet pull {package.name}"
+    current = env_module.node_present(package, home) and env_module.node_staged_current(
+        package, home
+    )
+    fix = "" if current else f"facet pull {package.name}"
     return {"name": "node", "ok": False, "detail": problem, "fix": fix}

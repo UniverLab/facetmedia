@@ -349,6 +349,7 @@ def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
     (package_dir / "package.toml").write_text(
         _manifest(runtime_sha256, integrity), encoding="utf-8"
     )
+    (package_dir / "cli.js").write_text(JS_ENTRY, encoding="utf-8")
     skill_dir = package_dir / "skill"
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text(SKILL, encoding="utf-8")
@@ -493,6 +494,12 @@ def test_validate_rejects_a_node_table_on_a_python_env_package(world: World) -> 
     ) in _problems(world)
 
 
+def test_validate_rejects_a_node_package_without_its_entry(world: World) -> None:
+    (world.registry / "packages" / "nodepkg" / "cli.js").unlink()
+
+    assert ("packages/nodepkg/cli.js", "", "missing") in _problems(world)
+
+
 # --- pull: verified extractions, skipped when present, rebuilt when gone.
 
 
@@ -516,8 +523,11 @@ def test_pull_downloads_verifies_and_then_skips(
     assert (package_dir / "facet-npm").is_file()
     marker = (package_dir / env_module.NODE_MARKER).read_text(encoding="utf-8")
     assert marker.strip() == world.integrity
-    # No python environment is built for a node package.
-    assert not (home.env_dir("nodepkg", "0.1.0") / ".complete").exists()
+    # The pull stages the entry and writes the source entry's sha256 marker.
+    staged = home.env_dir("nodepkg", "0.1.0") / "package" / "cli.js"
+    assert staged.is_file()
+    marker = (home.env_dir("nodepkg", "0.1.0") / env_module.COMPLETE).read_text(encoding="utf-8")
+    assert marker.strip() == hashlib.sha256(JS_ENTRY.encode("utf-8")).hexdigest()
     assert env_module.is_installed(package, home) is True
 
     hits = len(world.server.hits)
@@ -527,6 +537,44 @@ def test_pull_downloads_verifies_and_then_skips(
     assert second["already_installed"] is True
     assert second["downloaded_bytes"] == 0
     assert len(world.server.hits) == hits
+
+
+def test_pull_stages_the_entry_with_its_sha_marker(
+    world: World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = Home.from_env()
+
+    code, _envelope = _pull(capsys, "pull", "nodepkg")
+
+    assert code == 0
+    env_dir = home.env_dir("nodepkg", "0.1.0")
+    assert (env_dir / "package" / "cli.js").read_text(encoding="utf-8") == JS_ENTRY
+    # The whole package directory is staged, not just the entry.
+    assert (env_dir / "package" / "skill" / "SKILL.md").is_file()
+    marker = (env_dir / env_module.COMPLETE).read_text(encoding="utf-8")
+    expected = hashlib.sha256(JS_ENTRY.encode("utf-8")).hexdigest()
+    assert marker.strip() == expected
+
+
+def test_pull_restages_the_entry_when_the_entry_changes(
+    world: World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = Home.from_env()
+    assert _pull(capsys, "pull", "nodepkg")[0] == 0
+    source = world.registry / "packages" / "nodepkg" / "cli.js"
+    edited = JS_ENTRY + "// edited in the package directory\n"
+    source.write_text(edited, encoding="utf-8")
+
+    code, envelope = _pull(capsys, "pull", "nodepkg")
+
+    assert code == 0
+    data = _data(envelope)
+    assert data["already_installed"] is False
+    assert data["downloaded_bytes"] == 0
+    env_dir = home.env_dir("nodepkg", "0.1.0")
+    assert (env_dir / "package" / "cli.js").read_text(encoding="utf-8") == edited
+    marker = (env_dir / env_module.COMPLETE).read_text(encoding="utf-8")
+    assert marker.strip() == hashlib.sha256(edited.encode("utf-8")).hexdigest()
 
 
 def test_pull_rebuilds_after_an_extraction_is_removed(
@@ -585,7 +633,7 @@ def test_run_uses_the_managed_node_and_entry_package(
 
     home = Home.from_env()
     node_bin = home.node_runtime_dir(NODE_RUNTIME) / "bin" / "node"
-    entry = home.node_pkg_dir(NPM_NAME, NPM_VERSION) / "cli.js"
+    entry = home.env_dir("nodepkg", "0.1.0") / "package" / "cli.js"
     payload = json.loads((out / "node-out.txt").read_text(encoding="utf-8"))
     assert payload["text"] == "hi"
     seen = payload["seen"]
@@ -609,6 +657,29 @@ def test_doctor_reports_a_missing_extraction_with_the_pull_fix(world: World) -> 
     assert checks["installed"]["fix"] == "facet pull nodepkg"
     assert checks["node"]["ok"] is False
     assert checks["node"]["fix"] == "facet pull nodepkg"
+
+
+def test_doctor_reports_a_stale_staged_runner(
+    world: World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _pull(capsys, "pull", "nodepkg")[0] == 0
+    home = Home.from_env()
+    package = _nodepkg(world)
+    source = world.registry / "packages" / "nodepkg" / "cli.js"
+    source.write_text(JS_ENTRY + "// edited after the pull\n", encoding="utf-8")
+
+    checks, failures = doctor_module.machine_checks(package, home)
+
+    assert failures == []
+    assert checks["installed"]["ok"] is False
+    assert checks["installed"]["fix"] == "facet pull nodepkg"
+    assert "the staged runner is not current" in str(checks["installed"]["detail"])
+    assert checks["node"]["ok"] is False
+    assert checks["node"]["fix"] == "facet pull nodepkg"
+    assert "the staged runner is not current" in str(checks["node"]["detail"])
+
+    _checks, _failures, doctor_errors = doctor_module.run_check(package, home, "", "run-stale")
+    assert doctor_errors == []
 
 
 def test_doctor_reports_machine_cannot_when_the_binary_cannot_run(

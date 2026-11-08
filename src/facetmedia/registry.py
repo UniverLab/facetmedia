@@ -122,21 +122,22 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
         if package.engine_type in {"node", "host-app", "binary"}
     }
     if envless:
-        # A node package's files come from its npm tarballs, a host-app
-        # package has no environment at all, and a binary package's come from
-        # its release archive, so none needs the package directory's
+        # A node package has no python environment, a host-app package has no
+        # environment at all, and a binary package's files come from its
+        # release archive, so none needs the package directory's
         # pyproject.toml/uv.lock.
         problems = [problem for problem in problems if problem.file.split("/")[1] not in envless]
     viewers: set[str] = set()
     for package in registry.packages.values():
         base = f"packages/{package.name}"
         entry_file = package.directory / package.entry
-        if package.engine_type not in {"node", "binary"}:
+        if package.engine_type != "binary":
             if not entry_file.is_file():
                 problems.append(Problem(f"{base}/{package.entry}", "", "missing"))
-            elif package.engine_type != "host-app":
+            elif package.engine_type not in {"host-app", "node"}:
                 # A host-app script runs inside Blender or FreeCAD, not
-                # against the runner SDK, so the verb decorators never apply.
+                # against the runner SDK, so the verb decorators never apply;
+                # a node entry is JavaScript, not a Python static parse.
                 problems.extend(_verb_problems(f"{base}/{package.entry}", entry_file))
         problems.extend(
             validate_skill(
