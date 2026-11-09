@@ -286,7 +286,12 @@ unverified checkout under `installed`, also with the fix `facet pull
 `[engine.node]` reports a missing or unverified extraction, or a staged
 runner that is not current, under `installed` with the same fix; a
 verified runtime the host cannot execute is not pull-fixable. None of
-these gates a run by itself. A backend-owned model (`backend = true`,
+these gates a run by itself. The `gpu` check asks `nvidia-smi`: the binary
+on `PATH`, or, on WSL2, the driver's own `/usr/lib/wsl/lib/nvidia-smi`
+when `PATH` misses it, so a host whose driver keeps the binary off `PATH`
+still reports the GPU's name, total and used VRAM instead of `none`, and a
+package that requires a GPU no longer refuses for want of one it has. A
+backend-owned model (`backend = true`,
 served by the backend,
 never fetched) needs no download: the `models` check stays ok and notes
 `backend-owned: <id>`, while a missing acceptance still fails the
