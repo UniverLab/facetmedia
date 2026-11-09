@@ -225,6 +225,17 @@ Both capabilities write the `text` kind and are checked by `verify`.
 Skills are never installed into any agent directory; they live in the
 registry snapshot and change with `facet update`. Lock: none.
 
+When no registry can be loaded, `facet skill` still prints the core skill
+plus a `## Packages in this registry` section with one line of advice, and
+exits `0`:
+
+- A snapshot that fails validation prints a diagnosis naming the commit and
+  the problem, states that re-running update with the same ref fails
+  identically, and points at a different `--ref` or `$FACET_REGISTRY_REF`.
+- Any other load error (a download failure, an empty home on first use, a
+  corrupt state) prints `Run \`facet update\` (will try ref '<ref>'), then
+  \`facet skill\` again.`, naming the default ref it will try.
+
 Exit codes: `0`; `2` an unknown package, capability or reference.
 
 ## `facet config`
