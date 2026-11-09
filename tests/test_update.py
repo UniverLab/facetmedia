@@ -81,6 +81,17 @@ def _broken_registry(tmp_path: Path) -> Path:
     return root
 
 
+def _indexless_registry(tmp_path: Path) -> Path:
+    """A checkout with no ``index.toml``, the PRUEBA 2 shape."""
+    root = tmp_path / "indexless-registry"
+    (root / "packages" / "echo").mkdir(parents=True)
+    shutil.copyfile(
+        FIXTURE_ROOT / "packages" / "echo" / "package.toml",
+        root / "packages" / "echo" / "package.toml",
+    )
+    return root
+
+
 def _bumped_registry(tmp_path: Path) -> Path:
     """The fixture registry with echo's manifest version raised."""
     root = tmp_path / "bumped-registry"
@@ -381,14 +392,16 @@ def test_cli_update_holds_the_exclusive_lock(
 ) -> None:
     real = update.update_registry
 
-    def _while_locked(home: Home, ref: str | None = None) -> dict[str, object]:
+    def _while_locked(
+        home: Home, ref: str | None = None, *, ref_source: str | None = None
+    ) -> dict[str, object]:
         with (  # a second descriptor on the same lock file must be refused
             pytest.raises(FacetError) as blocked,
             lock.hold("exclusive", "probe", wait=False, timeout_s=0.0),
         ):
             pass
         assert blocked.value.code == "lock_busy", "facet update ran without the lock"
-        return real(home, ref)
+        return real(home, ref, ref_source=ref_source)
 
     monkeypatch.setattr(update, "update_registry", _while_locked)
 
@@ -436,6 +449,68 @@ def test_cli_update_failure_is_download_failed(
     assert envelope["ok"] is False
     assert envelope["error"]["code"] == "download_failed"
     assert envelope["error"]["hint"] == "run facet update when online"
+
+
+def test_explicit_ref_failure_hint_names_the_ref_and_origin(
+    fake_github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_github.archive = build_archive(_indexless_registry(tmp_path))
+
+    assert main(["update", "--ref", "main", "--json"]) == EXIT_DOWNLOAD_FAILED
+
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["error"]["code"] == "download_failed"
+    hint = envelope["error"]["hint"]
+    assert isinstance(hint, str) and hint
+    assert "ref main" in hint
+    assert "explicit --ref" in hint
+    assert "index.toml" in hint
+
+
+def test_default_env_ref_failure_hint_names_the_environment_origin(
+    fake_github: FakeGitHub,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY_REF", "feature/v0.1")
+    fake_github.archive = build_archive(_indexless_registry(tmp_path))
+
+    assert main(["update", "--json"]) == EXIT_DOWNLOAD_FAILED
+
+    envelope = json.loads(capsys.readouterr().out)
+    hint = envelope["error"]["hint"]
+    assert isinstance(hint, str) and hint
+    assert "ref feature/v0.1" in hint
+    assert "default from $FACET_REGISTRY_REF" in hint
+
+
+def test_default_builtin_ref_failure_hint_names_the_builtin_origin(
+    fake_github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_github.archive = build_archive(_indexless_registry(tmp_path))
+
+    assert main(["update", "--json"]) == EXIT_DOWNLOAD_FAILED
+
+    envelope = json.loads(capsys.readouterr().out)
+    hint = envelope["error"]["hint"]
+    assert isinstance(hint, str) and hint
+    assert "ref main" in hint
+    assert "builtin main default" in hint
+
+
+def test_untracked_ref_source_gets_an_unknown_origin_hint(
+    fake_github: FakeGitHub, tmp_path: Path
+) -> None:
+    fake_github.archive = build_archive(_indexless_registry(tmp_path))
+
+    with pytest.raises(FacetError) as exc:
+        update.update_registry(Home.from_env(), "main")
+
+    assert exc.value.code == "download_failed"
+    assert exc.value.hint is not None
+    assert "origin unknown" in exc.value.hint
+    assert "explicit" not in exc.value.hint
 
 
 def test_requests_carry_the_user_agent(fake_github: FakeGitHub) -> None:

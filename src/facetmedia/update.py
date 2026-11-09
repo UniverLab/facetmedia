@@ -57,6 +57,13 @@ ARCHIVE_SUFFIX: Final[str] = ".tar.gz"
 HINT: Final[str] = "run facet update when online"
 #: GitHub's status for a quota that is already spent (429 has no Remaining header).
 RATE_LIMITED_STATUS: Final[int] = 429
+#: Where the ref `facet update` resolved came from, as the caller observed it.
+REF_ORIGINS: Final[dict[str, str]] = {
+    "explicit": "explicit --ref",
+    "default:env": "default from $FACET_REGISTRY_REF",
+    "default:builtin": "builtin main default",
+}
+UNKNOWN_ORIGIN: Final[str] = "origin unknown"
 
 
 def default_ref() -> str:
@@ -114,7 +121,14 @@ def extract_snapshot(archive: Path, dest: Path) -> Path:
         ) from exc
 
 
-def install_snapshot(home: Home, commit: str, archive: Path) -> Path:
+def install_snapshot(
+    home: Home,
+    commit: str,
+    archive: Path,
+    *,
+    ref: str | None = None,
+    ref_source: str | None = None,
+) -> Path:
     """Install ``archive`` as ``<home>/registry/<commit>/``, validated.
 
     The archive is unpacked in ``<home>/tmp``; its top directory is renamed to
@@ -131,7 +145,7 @@ def install_snapshot(home: Home, commit: str, archive: Path) -> Path:
         os.replace(top, partial)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    _validate(partial, commit)
+    _validate(partial, commit, ref, ref_source)
     (partial / COMPLETE).write_text(f"{commit}\n", encoding="utf-8")
     final = home.registry_dir(commit)
     _discard(final)
@@ -139,8 +153,14 @@ def install_snapshot(home: Home, commit: str, archive: Path) -> Path:
     return final
 
 
-def update_registry(home: Home, ref: str | None = None) -> dict[str, object]:
+def update_registry(
+    home: Home, ref: str | None = None, *, ref_source: str | None = None
+) -> dict[str, object]:
     """Pin ``ref``, install its snapshot when needed, and record it in state.
+
+    ``ref_source`` is where the caller got ``ref`` from (``explicit``,
+    ``default:env``, ``default:builtin``), so a validation failure can name it
+    instead of guessing.  Callers that do not track it pass nothing.
 
     The state file is written last, so a download or validation failure leaves
     the previous snapshot in use.
@@ -154,7 +174,7 @@ def update_registry(home: Home, ref: str | None = None) -> dict[str, object]:
     if not (snapshot / COMPLETE).is_file():
         archive = download_archive(home, commit)
         try:
-            install_snapshot(home, commit, archive)
+            install_snapshot(home, commit, archive, ref=pinned, ref_source=ref_source)
         finally:
             archive.unlink(missing_ok=True)
     packages = _package_records(home, snapshot, previous)
@@ -330,7 +350,7 @@ def _discard(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _validate(partial: Path, commit: str) -> None:
+def _validate(partial: Path, commit: str, ref: str | None, ref_source: str | None) -> None:
     """Reject a snapshot whose manifests do not load, leaving nothing."""
     try:
         load_registry(partial)
@@ -339,8 +359,19 @@ def _validate(partial: Path, commit: str) -> None:
         raise FacetError(
             "download_failed",
             f"registry snapshot {commit} does not validate: {exc.message}",
+            hint=_validation_hint(ref, ref_source, exc.message),
             details={"commit": commit},
         ) from exc
+
+
+def _validation_hint(ref: str | None, ref_source: str | None, problem: str) -> str:
+    """Name the attempted ref, where it came from, and what to try instead."""
+    origin = REF_ORIGINS.get(ref_source or "", UNKNOWN_ORIGIN)
+    target = f"ref {ref}" if ref else "the default ref"
+    return (
+        f"registry {target} ({origin}) does not validate: {problem}; "
+        "try --ref or $FACET_REGISTRY_REF with a ref that validates"
+    )
 
 
 def _previous_commit(state_file: Path) -> str | None:

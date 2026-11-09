@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import traceback
 from collections.abc import Callable
@@ -152,8 +153,9 @@ _CONFIG_HANDLERS: dict[str, Handler] = {
 
 def _handle_update(args: argparse.Namespace) -> int:
     ref = args.ref or update.default_ref()
+    ref_source = _ref_source(args)
     with lock.hold("exclusive", "facet update", *_lock_params(args)):
-        data = update.update_registry(Home.from_env(), ref)
+        data = update.update_registry(Home.from_env(), ref, ref_source=ref_source)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         print(f"registry {data['commit']} (ref {data['ref']})")
@@ -161,6 +163,15 @@ def _handle_update(args: argparse.Namespace) -> int:
             suffix = " changed" if package["changed"] else ""
             print(f"  {package['name']} {package['version']}{suffix}")
     return 0
+
+
+def _ref_source(args: argparse.Namespace) -> str:
+    """Where the ref came from, so a failure can name it instead of guessing."""
+    if args.ref is not None:
+        return "explicit"
+    if os.environ.get("FACET_REGISTRY_REF"):
+        return "default:env"
+    return "default:builtin"
 
 
 def _packages(data: dict[str, object]) -> list[dict[str, object]]:

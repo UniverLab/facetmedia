@@ -66,7 +66,10 @@ Lock: exclusive (`update` is the writer the other heavy verbs wait for).
 Exit codes: `0` clean; `2` cannot load a registry it downloaded (deleted on
 refusal); `8` the reference resolve, the tarball download, or an existing
 snapshot's validation failed. On any failure the previous snapshot stays in
-use.
+use. When a downloaded snapshot does not validate, the failure's hint always
+names the attempted ref, where it came from (`--ref`, `$FACET_REGISTRY_REF`, or
+the builtin `main` default), the validation problem (for example a missing
+`index.toml`), and what to try instead.
 
 ## `facet pull`
 
