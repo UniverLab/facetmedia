@@ -336,12 +336,17 @@ def _loader_fails(monkeypatch: pytest.MonkeyPatch, error: FacetError) -> None:
 def test_skill_core_fetch_failure_still_prints(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("FACET_REGISTRY_REF", "feature/v0.1")
     _loader_fails(monkeypatch, FacetError("download_failed", "HTTP 403"))
     assert main(["skill"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("---\nname: facet\n")
     assert "## Packages in this registry" in out
-    assert "Registry not available: HTTP 403. Run `facet update`, then `facet skill` again." in out
+    assert (
+        "Registry not available: HTTP 403. Run `facet update` "
+        "(will try ref 'feature/v0.1'), then `facet skill` again."
+    ) in out
+    assert "Run `facet update`, then `facet skill` again." not in out
     assert "- echo" not in out
     assert main(["skill", "--json"]) == 0
     data = _data(capsys)
@@ -355,21 +360,26 @@ def test_skill_core_fetch_failure_still_prints(
 def test_skill_core_invalid_snapshot_still_prints(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _loader_fails(monkeypatch, FacetError("internal", "index.toml: : missing"))
+    message = "registry snapshot abc123 does not validate: index.toml: : missing"
+    _loader_fails(
+        monkeypatch,
+        FacetError("download_failed", message, details={"commit": "abc123"}),
+    )
     assert main(["skill"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("---\nname: facet\n")
     assert "## Packages in this registry" in out
-    assert (
-        "Registry not available: index.toml: : missing. "
-        "Run `facet update`, then `facet skill` again."
-    ) in out
+    assert "Registry snapshot abc123 does not validate: index.toml: : missing." in out
+    assert "does not validate: registry snapshot" not in out
+    assert "Re-running update with the same ref fails identically" in out
+    assert "Try a different --ref or $FACET_REGISTRY_REF" in out
+    assert "Run `facet update`, then `facet skill` again." not in out
     assert main(["skill", "--json"]) == 0
     data = _data(capsys)
     assert data["state"] == {
         "registry": None,
         "facets": {},
-        "registry_error": {"code": "internal", "message": "index.toml: : missing"},
+        "registry_error": {"code": "download_failed", "message": message},
     }
 
 

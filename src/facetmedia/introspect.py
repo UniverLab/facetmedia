@@ -13,7 +13,7 @@ import json
 import math
 from typing import Any
 
-from facetmedia import check, doctor, env, licenses, schema, skill
+from facetmedia import check, doctor, env, licenses, schema, skill, update
 from facetmedia.contract import CONTRACT_VERSION, FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry, snapshot_identity
@@ -299,14 +299,37 @@ def _core_skill_data(reference: str | None) -> dict[str, Any]:
     }
 
 
+def _registry_advice(error: FacetError) -> str:
+    """One line of advice for a registry that could not be loaded.
+
+    A snapshot that fails validation can never load by re-running update with
+    the same ref: the ref resolves the same commit and install leaves nothing
+    behind.  Any other load error is not deterministic, so retrying can work.
+    """
+    if error.code == "download_failed" and "does not validate" in error.message:
+        commit = error.details.get("commit", "unknown")
+        problem = error.message.partition("does not validate")[2].lstrip(": ").strip()
+        return (
+            f"Registry snapshot {commit} does not validate: {problem or error.message}. "
+            "Re-running update with the same ref fails identically (same ref resolves "
+            "the same commit, and install_snapshot leaves nothing behind). "
+            "Try a different --ref or $FACET_REGISTRY_REF."
+        )
+    ref = update.default_ref()
+    return (
+        f"Registry not available: {error.message}. "
+        f"Run `facet update` (will try ref '{ref}'), then `facet skill` again."
+    )
+
+
 def _core_skill_no_registry(text: str, error: FacetError) -> dict[str, Any]:
-    """The core skill with a ``Registry not available`` line, no registry."""
+    """The core skill plus one line of registry advice, no registry."""
     parts = [
         text.rstrip("\n"),
         "",
         "## Packages in this registry",
         "",
-        (f"Registry not available: {error.message}. Run `facet update`, then `facet skill` again."),
+        _registry_advice(error),
     ]
     return {
         "scope": "core",
