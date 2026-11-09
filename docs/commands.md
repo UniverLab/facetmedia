@@ -340,8 +340,10 @@ ffmpeg (installed):
 Every failing line carries `→ fix: <command>`. Exit codes, in order of the
 first failing class: `0` healthy; `5` `machine_cannot` (a facet check, a
 readiness check, or a package doctor check); `4` `license_not_accepted`;
-`7` `not_installed`; `9` `runner_failed` (a doctor verb crashed). Lock:
-shared.
+`7` `not_installed`; `9` `runner_failed` (a doctor verb crashed). With
+`--json`, `facet doctor` exits nonzero if and only if its envelope reports
+`ok:false`; an unhealthy envelope keeps `data` (with `data.healthy:false`)
+and carries no `error`. Lock: shared.
 
 ## `facet check`
 
