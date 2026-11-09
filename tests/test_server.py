@@ -14,6 +14,9 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
+import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +26,7 @@ import pytest
 from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
 from facetmedia import prune as prune_module
+from facetmedia import runner as runner_module
 from facetmedia.cli import main
 from facetmedia.home import Home
 from facetmedia.registry import load_registry, validate_registry
@@ -54,6 +58,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        body = b'{"ok": true}'
+        status = 200 if self.path == "/job" else 405
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
@@ -76,10 +90,21 @@ runner = Runner()
 
 @runner.verb("run")
 def run(req: Request) -> dict[str, Any]:
-    url = os.environ["FACET_SERVER_URL"]
-    with urllib.request.urlopen(url, timeout=10) as response:
-        status = response.status
-    (req.out_dir / "probe.txt").write_text(f"{url} {status}", encoding="utf-8")
+    base = os.environ["FACET_SERVER_URL"]
+
+    def _call(path: str, data: bytes | None = None) -> tuple[int, bytes]:
+        request = urllib.request.Request(
+            base + path, data=data, method="POST" if data else "GET"
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read()
+    health_status, _health_body = _call("/health")
+    job_status, _job_body = _call("/job", b"{}")
+    if not (200 <= health_status < 300 and 200 <= job_status < 300):
+        raise SystemExit(1)
+    (req.out_dir / "probe.txt").write_text(
+        f"{base} {health_status} {job_status}", encoding="utf-8"
+    )
     return {
         "tool": {"name": "probe", "version": "0.1.0"},
         "assets": [
@@ -384,13 +409,72 @@ def test_run_starts_the_server_runs_the_client_and_kills_the_process_group(
     data = envelope["data"]
     assert data["pulled"] is False
 
-    url, status = (out / "probe.txt").read_text(encoding="utf-8").split()
-    assert status == "200"
-    assert url.startswith("http://127.0.0.1:")
-    assert url.endswith("/health")
-    port = int(url.rsplit(":", 1)[1].split("/")[0])
+    url, health_status, job_status = (out / "probe.txt").read_text(encoding="utf-8").split()
+    assert health_status == "200"
+    assert job_status == "200"
+    port = int(url.rsplit(":", 1)[1])
+    assert url == f"http://127.0.0.1:{port}"
     assert _listener_closed(port)
     assert list(out.glob(".facet-tmp-*")) == []
+
+
+def _await_health(port: int) -> None:
+    """Wait until GET /health on ``port`` answers 200, or fail after 10 s."""
+    deadline = time.monotonic() + 10.0
+    url = f"http://127.0.0.1:{port}/health"
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as response:
+                low, high = runner_module.HEALTHY_STATUS
+                if low <= response.status < high:
+                    return
+        except OSError:
+            pass
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"the fixture server never turned healthy at {url}")
+        time.sleep(0.1)
+
+
+def test_an_already_healthy_server_is_reused(
+    capsys: pytest.CaptureFixture[str],
+    server_home: Home,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    port = runner_module._free_port()
+    script = tmp_path / "serve.py"
+    script.write_text(SERVE_PY, encoding="utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, str(script), "--port", str(port)], start_new_session=True
+    )
+    try:
+        _await_health(port)
+        monkeypatch.setattr(runner_module, "_free_port", lambda: port)
+        monkeypatch.setattr(
+            runner_module,
+            "_launch_server",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("facet launched a second server process")
+            ),
+        )
+        piece = tmp_path / "piece.toml"
+        piece.write_text("[inputs]\n", encoding="utf-8")
+        out = tmp_path / "out"
+
+        code = main(["run", "probe.health", str(piece), "--out", str(out), "--json"])
+        envelope = json.loads(capsys.readouterr().out)
+        assert code == 0, envelope
+
+        url, health_status, job_status = (out / "probe.txt").read_text(encoding="utf-8").split()
+        assert health_status == "200"
+        assert job_status == "200"
+        assert url == f"http://127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def test_a_launch_that_never_turns_healthy_fails_runner_failed(

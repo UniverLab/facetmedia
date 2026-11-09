@@ -32,6 +32,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Final
+from urllib.parse import urlsplit, urlunsplit
 
 from facetmedia import config
 from facetmedia.contract import FacetError
@@ -418,16 +419,17 @@ def _server_session(inv: Invocation) -> Iterator[str | None]:
         yield None
         return
     port = _free_port()
-    url = _substitute(server.health_url, ((PORT_TOKEN, str(port)),))
-    if _healthy(url):
-        yield url
+    health_url = _substitute(server.health_url, ((PORT_TOKEN, str(port)),))
+    base_url = _base_url(health_url)
+    if _healthy(health_url):
+        yield base_url
         return
     if not inv.start_server:
         yield None
         return
-    process, _tail = _launch_server(inv, port, url)
+    process, _tail = _launch_server(inv, port, health_url)
     try:
-        yield url
+        yield base_url
     finally:
         _kill_group(process)
 
@@ -437,6 +439,12 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _base_url(url: str) -> str:
+    """The scheme and network location of ``url``, with no path or query."""
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
 
 
 def _healthy(url: str) -> bool:
