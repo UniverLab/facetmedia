@@ -15,6 +15,7 @@ import pytest
 
 from facetmedia import cli as cli_module
 from facetmedia import record as record_module
+from facetmedia.check import _relative_to_asset
 from facetmedia.cli import main
 from facetmedia.record import RecordSpec
 
@@ -106,6 +107,71 @@ def _spy_hold(calls: list[tuple[str, str, bool, float]]) -> Any:
             yield
 
     return hold
+
+
+def test_relative_to_asset_resolves_next_to_asset(tmp_path: Path) -> None:
+    """Record params naming files next to the asset go back to absolute paths.
+
+    The record stores those paths relative to its own directory, so a runner
+    invoked from any other working directory cannot open them verbatim.
+    """
+    asset_dir = tmp_path / "assets"
+    nested = asset_dir / "nested"
+    nested.mkdir(parents=True)
+    (asset_dir / "one.wav").write_text("one", encoding="utf-8")
+    (nested / "two.wav").write_text("two", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere.wav"
+    elsewhere.write_text("three", encoding="utf-8")
+
+    params: dict[str, object] = {
+        "input": "one.wav",
+        "nested": {"deep": ["nested/two.wav", "gone.wav"], "keep": "not-a-path"},
+        "absolute": str(elsewhere),
+        "missing": "missing.wav",
+        "text": "hello",
+    }
+
+    resolved = _relative_to_asset(params, asset_dir)
+
+    assert resolved["input"] == str((asset_dir / "one.wav").resolve())
+    nested_value = resolved["nested"]
+    assert isinstance(nested_value, dict)
+    assert nested_value["keep"] == "not-a-path"
+    deep = nested_value["deep"]
+    assert isinstance(deep, list)
+    assert deep == [
+        str((nested / "two.wav").resolve()),
+        "gone.wav",
+    ]
+    # Absolute strings, missing files and plain text stay untouched.
+    assert resolved["absolute"] == str(elsewhere)
+    assert resolved["missing"] == "missing.wav"
+    assert resolved["text"] == "hello"
+
+
+def test_check_from_unrelated_directory_no_regression(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+) -> None:
+    """``check`` works from any directory; echo's params carry no paths.
+
+    This passes before and after the fix and guards the working-directory
+    independence ``check`` must keep.
+    """
+    assert facet_home.is_dir()
+    out = tmp_path / "out"
+    assert main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"]) == 0
+    _envelope(capsys)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    code = main(["check", str(out / "echo.txt"), "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["passed"] is True
 
 
 def test_reverify_untouched_asset_passes(

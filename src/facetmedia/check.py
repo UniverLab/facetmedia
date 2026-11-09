@@ -15,6 +15,7 @@ package's quick doctor, through ``doctor.requirement_errors``.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 
 from facetmedia import record, runner
@@ -87,6 +88,7 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
         raise FacetError("invalid_input", f"{asset}: the record has no params")
     params: dict[str, object] = dict(params_value)
     asset_path = _asset_path(asset)
+    params = _relative_to_asset(params, asset_path.parent)
     verdict = _verify_asset(package, home, env_dir, run_id, capability_id, params, asset_path)
     recorded = stored.get("verification")
     recorded_metrics: dict[str, object] = {}
@@ -123,6 +125,33 @@ def _asset_path(asset: str) -> Path:
     if not given.is_absolute():
         given = Path.cwd() / given
     return given
+
+
+def _relative_to_asset(params: dict[str, object], asset_dir: Path) -> dict[str, object]:
+    """Resolve record params that name files next to the asset, at any depth.
+
+    A record stores an absolute input path relative to its own directory
+    (``record._relative_value``), so the stored form only means something when
+    read from there. The runner inherits ``facet``'s working directory, so the
+    paths are made absolute again here: every relative string naming an
+    existing file next to the asset becomes that file's absolute path, while
+    absolute strings, text that is not a path and missing files stay as they
+    are. ``check`` works from any directory that way.
+    """
+    return {str(key): _resolve_relative(value, asset_dir) for key, value in params.items()}
+
+
+def _resolve_relative(value: object, asset_dir: Path) -> object:
+    """The walk behind ``_relative_to_asset``, mirroring the record's walk."""
+    if isinstance(value, Mapping):
+        return {str(key): _resolve_relative(item, asset_dir) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_resolve_relative(item, asset_dir) for item in value]
+    if isinstance(value, str) and not Path(value).is_absolute():
+        candidate = asset_dir / value
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return value
 
 
 def _verify_asset(
