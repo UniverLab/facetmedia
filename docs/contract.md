@@ -133,5 +133,12 @@ A non-commercial restriction travels with the asset this way: a consumer
 reads `license.commercial_use` instead of re-resolving anything. `check`
 re-verifies the asset against this record; `preview` embeds it as data.
 
+An input may be a file or a directory of files. A directory is one asset:
+its id is a content hash of its tree — every regular file under it, in
+relative-path order, each with its own sha256 — and empty subdirectories
+do not change it. A record beside a directory asset (`<dir>.facet.json`
+next to the tree) describes the tree the same way: `bytes` is the sum of
+the file sizes, and `check` re-verifies it like any asset.
+
 Paths in a record are relative to the record's directory; no absolute path
 appears anywhere in one.
