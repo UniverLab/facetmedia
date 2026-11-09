@@ -87,7 +87,7 @@ class RecordSpec:
 
 
 def asset_id(path: Path | str) -> str:
-    """``sha256:<hex>`` of the asset's bytes, streamed in one pass."""
+    """``sha256:<hex>`` of the asset's content, streamed in one pass."""
     return f"sha256:{_require_facts(Path(path))[0]}"
 
 
@@ -205,18 +205,54 @@ def _load_record(target: Path) -> dict[str, object] | None:
     return dict(loaded)
 
 
-def _facts(path: Path) -> tuple[str, int] | None:
-    """The file's (sha256, byte count) in one pass, or ``None`` if unreadable."""
-    digest = hashlib.sha256()
+def _hash_file(path: Path, digest: hashlib._Hash) -> int:
+    """Stream ``path`` into ``digest``; return its byte count."""
     size = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(CHUNK_BYTES):
+            digest.update(chunk)
+            size += len(chunk)
+    return size
+
+
+def _facts(path: Path) -> tuple[str, int] | None:
+    """The asset's (sha256, byte count) in one pass, or ``None`` if unreadable."""
+    if path.is_dir():
+        return _dir_facts(path)
+    return _file_facts(path)
+
+
+def _file_facts(path: Path) -> tuple[str, int] | None:
+    """A regular file's (sha256, byte count), or ``None`` if unreadable."""
+    digest = hashlib.sha256()
     try:
-        with path.open("rb") as handle:
-            while chunk := handle.read(CHUNK_BYTES):
-                digest.update(chunk)
-                size += len(chunk)
+        size = _hash_file(path, digest)
     except OSError:
         return None
     return digest.hexdigest(), size
+
+
+def _dir_facts(root: Path) -> tuple[str, int] | None:
+    """A directory tree's (sha256, byte count), or ``None`` if unreadable."""
+    try:
+        files = sorted(
+            (p for p in root.rglob("*") if p.is_file()),
+            key=lambda p: p.relative_to(root).as_posix(),
+        )
+    except OSError:
+        return None
+    manifest = hashlib.sha256()
+    size = 0
+    try:
+        for item in files:
+            rel = item.relative_to(root).as_posix().encode("utf-8")
+            file_digest = hashlib.sha256()
+            file_size = _hash_file(item, file_digest)
+            manifest.update(rel + b"\0" + file_digest.hexdigest().encode("ascii") + b"\n")
+            size += file_size
+    except (OSError, UnicodeError):
+        return None
+    return manifest.hexdigest(), size
 
 
 def _require_facts(asset: Path) -> tuple[str, int]:

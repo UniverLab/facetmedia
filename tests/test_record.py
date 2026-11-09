@@ -398,6 +398,85 @@ def test_a_relative_development_registry_is_refused(monkeypatch: pytest.MonkeyPa
     assert "absolute" in exc.value.message
 
 
+def _tree(directory: Path, files: dict[str, bytes]) -> Path:
+    for name, content in files.items():
+        target = directory / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return directory
+
+
+def test_directory_id_is_stable_across_calls(tmp_path: Path) -> None:
+    tree = _tree(tmp_path / "a", {"a.txt": b"hello", "sub/b.txt": b"world"})
+    assert asset_id(tree) == asset_id(tree)
+
+
+def test_directory_id_changes_on_content_change(tmp_path: Path) -> None:
+    tree = _tree(tmp_path / "a", {"a.txt": b"hello"})
+    before = asset_id(tree)
+    (tree / "a.txt").write_bytes(b"changed")
+    assert asset_id(tree) != before
+
+
+def test_directory_id_changes_when_a_file_is_added(tmp_path: Path) -> None:
+    tree = _tree(tmp_path / "a", {"a.txt": b"hello"})
+    before = asset_id(tree)
+    (tree / "b.txt").write_bytes(b"new")
+    assert asset_id(tree) != before
+
+
+def test_directory_id_ignores_creation_order(tmp_path: Path) -> None:
+    first = _tree(tmp_path / "first", {"a.txt": b"one"})
+    (first / "b.txt").write_bytes(b"two")
+    second = tmp_path / "second"
+    second.mkdir()
+    (second / "b.txt").write_bytes(b"two")
+    (second / "a.txt").write_bytes(b"one")
+    assert asset_id(first) == asset_id(second)
+
+
+def test_empty_subdirectory_does_not_change_the_id(tmp_path: Path) -> None:
+    tree = _tree(tmp_path / "a", {"a.txt": b"hello"})
+    before = asset_id(tree)
+    (tree / "empty").mkdir()
+    assert asset_id(tree) == before
+
+
+def test_directory_id_separates_files_at_the_boundary(tmp_path: Path) -> None:
+    left = _tree(tmp_path / "left", {"a": b"xy", "b": b"z"})
+    right = _tree(tmp_path / "right", {"a": b"x", "b": b"yz"})
+    assert asset_id(left) != asset_id(right)
+
+
+def test_verify_integrity_tracks_a_directory_asset(tmp_path: Path) -> None:
+    asset = _tree(tmp_path / "comp", {"a.txt": b"hello", "sub/b.txt": b"world"})
+    spec = RecordSpec(
+        name="comp",
+        kind="composition",
+        mime="inode/directory",
+        facet="0.1.0b1",
+        capability="hyperframes.render",
+        package={"name": "hyperframes", "version": "0.1.0", "lock_sha256": "a" * 64},
+        tool={"name": "hyperframes", "version": "0.1.0"},
+    )
+    record = build_record(asset, spec, created=CREATED)
+    write_record(asset, record)
+    assert verify_integrity(asset) is True
+    (asset / "a.txt").write_bytes(b"tampered")
+    assert verify_integrity(asset) is False
+
+
+@pytest.mark.skipif(os.name != "posix", reason="undecodable names need POSIX bytes paths")
+def test_directory_with_a_non_utf8_name_is_unreadable(tmp_path: Path) -> None:
+    tree = tmp_path / "a"
+    tree.mkdir()
+    fd = os.open(os.path.join(os.fsencode(tree), b"bad\xffname"), os.O_CREAT | os.O_WRONLY)
+    os.close(fd)
+    with pytest.raises(FacetError) as exc:
+        asset_id(tree)
+    assert exc.value.code == "invalid_input"
+
+
 def test_development_registry_path_is_relative_in_the_record(
     monkeypatch: pytest.MonkeyPatch, asset_dir: Path
 ) -> None:
