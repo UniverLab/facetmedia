@@ -46,6 +46,10 @@ Every verb with `--json` prints one envelope on stdout:
 {"contract": 1, "ok": false, "facet": "0.1.0b1", "error": {"code": "invalid_input", "message": "...", "details": {}, "hint": null}}
 ```
 
+An unhealthy `facet doctor` is the exception: it prints `ok:false` **with**
+`data` and no `error` (`data.healthy` is `false`), and exits with the first
+failing class, so the envelope and the exit code always agree.
+
 Branch on the exit code, not the prose:
 
 | Exit | Code | When |

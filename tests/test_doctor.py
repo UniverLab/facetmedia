@@ -218,9 +218,9 @@ def _envelope(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
 
 
 def _data(envelope: dict[str, Any]) -> dict[str, Any]:
-    assert envelope["ok"] is True
     data = envelope["data"]
     assert isinstance(data, dict)
+    assert envelope["ok"] is (data["healthy"] is True)
     return data
 
 
@@ -1019,4 +1019,50 @@ def test_browser_check_fails_before_pull_and_passes_after(
     data = _data(_envelope(capsys))
     entry = _browser_entry(data)
     assert entry["ok"] is True
+    assert data["healthy"] is True
+
+
+# --- The exit code and the envelope verdict are one derivation.
+
+
+def test_doctor_empty_home_reports_ok_false_and_exits_nonzero(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("FACET_REGISTRY", raising=False)
+
+    code = main(["doctor", "--json"])
+    envelope = _envelope(capsys)
+    data = _data(envelope)
+    assert code == EXIT_MACHINE_CANNOT
+    assert envelope["ok"] is False
+    assert data["healthy"] is False
+    assert data["facet"]["registry"]["ok"] is False
+
+
+def test_doctor_invalid_registry_snapshot_reports_ok_false_and_exits_nonzero(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    broken = tmp_path / "registry"
+    broken.mkdir()
+    monkeypatch.setenv("FACET_REGISTRY", str(broken))
+
+    code = main(["doctor", "--json"])
+    envelope = _envelope(capsys)
+    data = _data(envelope)
+    assert code == EXIT_MACHINE_CANNOT
+    assert envelope["ok"] is False
+    assert data["healthy"] is False
+    assert data["facet"]["registry"]["ok"] is False
+
+
+def test_doctor_healthy_reports_ok_true_and_exits_zero(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+
+    code = main(["doctor", "--json"])
+    envelope = _envelope(capsys)
+    data = _data(envelope)
+    assert code == 0
+    assert envelope["ok"] is True
     assert data["healthy"] is True

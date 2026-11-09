@@ -277,10 +277,13 @@ def _announce_reverify(data: dict[str, object]) -> None:
 def _handle_doctor(args: argparse.Namespace) -> int:
     """The tool's doctor: the facet section plus each package's doctor."""
     data, code = doctor.execute(args.target, bool(args.quick), args.run_id, *_lock_params(args))
-    contract.emit(contract.ok(data), args.json)
+    ok = data.get("healthy") is True
+    envelope = contract.ok(data)
+    envelope["ok"] = ok
+    contract.emit(envelope, args.json)
     if not args.json:
         _announce_doctor(data)
-    return code
+    return 0 if ok else code
 
 
 def _announce_doctor(data: dict[str, object]) -> None:

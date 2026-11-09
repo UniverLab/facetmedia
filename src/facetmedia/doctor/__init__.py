@@ -664,15 +664,16 @@ def execute(
             section = _package_section(package, home, run_id, depth, capability)
             sections[package.name] = section
             classes.extend(_section_classes(section, named=bool(target)))
+    healthy = not classes
     data: dict[str, object] = {
-        "healthy": not classes,
+        "healthy": healthy,
         "facet": _facet_data(facet_entries),
         "packages": {name: section.as_data() for name, section in sections.items()},
     }
     if capability_id is not None and len(selected) == 1:
         data["capability"] = capability_id
         data.update(_capability_report(sections[selected[0][0].name], capability_id))
-    return data, _exit_code(classes)
+    return data, 0 if healthy else _exit_code(classes)
 
 
 def _select(target: str, home: Home) -> tuple[list[tuple[Package, str]], str | None]:
@@ -810,6 +811,8 @@ def _exit_code(classes: list[str]) -> int:
     for code in EXIT_ORDER:
         if code in classes:
             return EXIT_CODES[code]
+    if classes:
+        return EXIT_CODES.get(classes[0], 1)
     return 0
 
 

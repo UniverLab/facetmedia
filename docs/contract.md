@@ -38,6 +38,10 @@ optional one-line fix, and `details` holds structured extras (an error
 list, a log path, the known ids). Without `--json`, a failure prints its
 message (and hint, when there is one) to stderr instead of JSON.
 
+An unhealthy `facet doctor` is the one envelope that reports `ok:false`
+**with** `data` and no `error`: `data.healthy` is `false`, and the exit
+code is the first failing class.
+
 ### Exit codes
 
 Branch on the exit code without parsing prose:
