@@ -8,6 +8,8 @@ file-size cap.  ``facetmedia.env`` imports them through ``doctor`` — never cop
 from __future__ import annotations
 
 import ctypes
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Final
@@ -17,6 +19,12 @@ from facetmedia.registry_types import Package
 
 NO_HOST_LIBS_HINT: Final[str] = "facet never installs host libraries"
 NVIDIA_SMI_TIMEOUT_S: Final[float] = 2.0
+NVIDIA_SMI: Final[str] = "nvidia-smi"
+WSL_LIB_PATH: Final[Path] = Path("/usr/lib/wsl/lib")
+WSL_SMI_NAME: Final[str] = NVIDIA_SMI
+WSL_DXG_DEVICE: Final[Path] = Path("/dev/dxg")
+WSL_VERSION_MARKER: Final[str] = "microsoft"
+WSL_VERSION_SOURCE: Final[Path] = Path("/proc/version")
 
 
 def mem_total_gb() -> float | None:
@@ -59,12 +67,41 @@ def tree_bytes(path: Path) -> int:
     return total
 
 
+def _wsl_detected() -> bool:
+    """True when running under WSL: ``/dev/dxg`` exists or version mentions it."""
+    try:
+        if WSL_DXG_DEVICE.exists():
+            return True
+        text = WSL_VERSION_SOURCE.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return WSL_VERSION_MARKER in text.lower()
+
+
+def _resolve_smi() -> str | None:
+    """Path to ``nvidia-smi``: PATH first, then the WSL2 driver path."""
+    found = shutil.which(NVIDIA_SMI)
+    if found:
+        return found
+    candidate = WSL_LIB_PATH / WSL_SMI_NAME
+    if _wsl_detected() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
+
+
 def gpu_info() -> str | None:
-    """One line per GPU from ``nvidia-smi``, or ``None`` when there is none."""
+    """One line per GPU from ``nvidia-smi``, or ``None`` when there is none.
+
+    Falls back to the WSL2 driver path (``/usr/lib/wsl/lib/nvidia-smi``)
+    when ``nvidia-smi`` is not on PATH.
+    """
+    resolved = _resolve_smi()
+    if resolved is None:
+        return None
     try:
         completed = subprocess.run(
             [
-                "nvidia-smi",
+                resolved,
                 "--query-gpu=name,memory.total,memory.used",
                 "--format=csv,noheader",
             ],
