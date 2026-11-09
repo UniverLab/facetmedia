@@ -167,7 +167,8 @@ Without `--available` and nothing installed, facet names the answer instead
 of printing nothing: ``no packages installed; `facet list --available`
 shows the registry's``. `--json` adds the machine data: per package
 `name`, `version`, `facet`, `weight`, `compatible`, `installed`, sizes and
-its capabilities; and the registry it read. Lock: none.
+its capabilities; an `available` summary of the registry's package,
+capability and facet counts; and the registry it read. Lock: none.
 
 Exit codes: `0` (an empty list is a success with data, never an error).
 

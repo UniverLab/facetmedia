@@ -29,6 +29,16 @@ def _registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
 
 
+def _available_counts() -> dict[str, int]:
+    """The counts ``data.available`` must report for the fixture snapshot."""
+    registry = load_registry(FIXTURES)
+    return {
+        "packages": len(registry.packages),
+        "capabilities": sum(len(package.capabilities) for package in registry.packages.values()),
+        "facets": len({package.facet for package in registry.packages.values()}),
+    }
+
+
 def _data(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
     """The ``data`` of the single JSON document facet printed on stdout."""
     envelope: Any = json.loads(capsys.readouterr().out)
@@ -110,9 +120,11 @@ def test_fake_installed_echo_is_listed_alone(
     payload.write_bytes(b"1234567")
 
     assert main(["list", "--json"]) == 0
-    rows = _data(capsys)["packages"]
+    data = _data(capsys)
+    rows = data["packages"]
     assert [row["name"] for row in rows] == ["echo"]
     assert rows[0]["installed"] is True
+    assert data["available"] == _available_counts()
     # env_bytes is tree_bytes(<env>): the 64-byte .complete marker plus the
     # 7-byte payload file.
     assert rows[0]["env_bytes"] == len(echo.lock_sha256) + 7
@@ -136,7 +148,9 @@ def test_list_text_says_nothing_is_installed(
         "no text packages installed; `facet list --available --facet text` shows the registry's\n"
     )
     assert main(["list", "--json"]) == 0
-    assert _data(capsys)["packages"] == []
+    data = _data(capsys)
+    assert data["packages"] == []
+    assert data["available"] == _available_counts()
 
 
 @pytest.mark.parametrize(

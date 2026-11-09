@@ -17,7 +17,15 @@ from facetmedia import check, doctor, env, licenses, schema, skill, update
 from facetmedia.contract import CONTRACT_VERSION, FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry, snapshot_identity
-from facetmedia.registry_types import FACETS, Capability, Field, Model, Package, weight
+from facetmedia.registry_types import (
+    FACETS,
+    Capability,
+    Field,
+    Model,
+    Package,
+    Registry,
+    weight,
+)
 
 __all__ = ["describe_data", "list_data", "skill_data"]
 
@@ -45,7 +53,19 @@ def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
         rows = [row for row in rows if row["installed"] is True]
     if facet is not None:
         rows = [row for row in rows if row["facet"] == facet]
-    return {"registry": snapshot_identity(), "packages": rows}
+    data: dict[str, Any] = {"registry": snapshot_identity(), "packages": rows}
+    if not available:
+        data["available"] = _available_summary(active)
+    return data
+
+
+def _available_summary(active: Registry) -> dict[str, int]:
+    """Whole-snapshot counts for the installed-set ``data.available``."""
+    return {
+        "packages": len(active.packages),
+        "capabilities": sum(len(package.capabilities) for package in active.packages.values()),
+        "facets": len({package.facet for package in active.packages.values()}),
+    }
 
 
 def _package_row(package: Package, home: Home) -> dict[str, Any]:

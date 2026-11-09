@@ -4,7 +4,7 @@ Add `--json` to any `facet` command for machine-readable output:
 
 ```console
 $ facet list --json
-{"contract": 1, "data": {"packages": [], "registry": {"path": "…"}}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"available": {"capabilities": "…", "facets": "…", "packages": "…"}, "packages": [], "registry": {"path": "…"}}, "facet": "0.1.0b1", "ok": true}
 ```
 
 With `--json`, stdout carries exactly one JSON document: an **envelope**
