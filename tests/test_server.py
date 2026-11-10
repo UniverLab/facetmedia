@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import uv
 
 from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
@@ -598,6 +599,77 @@ def test_validate_rejects_a_health_url_without_scheme(tmp_path: Path) -> None:
     _root, found = _server_manifest(tmp_path, health_url="127.0.0.1:{{port}}/health")
 
     assert ("packages/echo/package.toml", "engine.server.health_url", "value") in found
+
+
+# --- build: a uv.lock server syncs the locked project; anything else pip-installs.
+
+
+def test_server_build_from_a_uv_lock_runs_one_frozen_sync(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    monkeypatch.setattr(env_module, "_stream_output", lambda argv, env: calls.append((argv, env)))
+    package = load_registry(FIXTURES).packages["echo"]
+    server = Server(
+        REPO_URL, "a" * 40, "uv.lock", ("python", "{{port}}"), "http://127.0.0.1:{{port}}/health"
+    )
+    target = tmp_path / "checkout"
+
+    env_module._server_build(Home.from_env(), target, package, server)
+
+    assert len(calls) == 1
+    argv, env = calls[0]
+    assert argv == [
+        uv.find_uv_bin(),
+        "sync",
+        "--frozen",
+        "--no-dev",
+        "--project",
+        str(target),
+        "--python",
+        package.python,
+    ]
+    assert env["UV_PROJECT_ENVIRONMENT"] == str(target / "venv")
+    assert not any("pip" in token and token == "pip" for token in argv[1:3])
+
+
+def test_server_build_from_a_requirements_file_keeps_venv_and_pip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    monkeypatch.setattr(env_module, "_stream_output", lambda argv, env: calls.append((argv, env)))
+    package = load_registry(FIXTURES).packages["echo"]
+    server = Server(
+        REPO_URL,
+        "a" * 40,
+        "requirements.txt",
+        ("python", "{{port}}"),
+        "http://127.0.0.1:{{port}}/health",
+    )
+    target = tmp_path / "checkout"
+    uv_bin = uv.find_uv_bin()
+
+    env_module._server_build(Home.from_env(), target, package, server)
+
+    assert [argv for argv, _ in calls] == [
+        [uv_bin, "venv", "--python", package.python, str(target / "venv")],
+        [
+            uv_bin,
+            "pip",
+            "install",
+            "--python",
+            str(target / "venv" / "bin" / "python"),
+            "-r",
+            str(target / "requirements.txt"),
+        ],
+    ]
+    assert all("UV_PROJECT_ENVIRONMENT" not in env for _, env in calls)
+
+
+def test_validate_accepts_a_uv_lock_requirements(tmp_path: Path) -> None:
+    _root, found = _server_manifest(tmp_path, requirements="uv.lock")
+
+    assert found == set()
 
 
 # --- prune: server checkouts join the orphans contract and the clean sweep.

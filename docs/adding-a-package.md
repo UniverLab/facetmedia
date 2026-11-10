@@ -320,7 +320,7 @@ python = "3.12"
 [engine.server]
 repo = "https://github.com/example/tool"   # https only
 rev = "<40 lowercase hex>"                 # the exact commit
-requirements = "requirements.txt"          # the tool's own file, in the checkout
+requirements = "requirements.txt"          # or "uv.lock", the tool's own file, in the checkout
 launch = ["python", "main.py", "--port", "{{port}}"]
 health_url = "http://127.0.0.1:{{port}}/health"   # 200 means ready
 timeout_s = 120                            # startup wait; optional, defaults to 120
@@ -337,10 +337,16 @@ a non-https `repo`, a `rev` that is not 40 lowercase hex characters, a
 package, then clones the repo once per home at
 `<home>/servers/<package>/<version>/<shortrev>/` — a shallow, branchless fetch
 of exactly `rev`, skipped when that directory already holds a verified
-checkout. The server venv is created with `uv venv --python <engine.python>`
-and the tool's requirements are installed into it with `uv pip install -r`,
-untouched by facet. A `.complete` marker holding the rev and the requirements
-fingerprint is written last, so an interrupted pull is redone by the next one.
+checkout. A pip requirements file builds the server venv with
+`uv venv --python <engine.python>` and installs the tool's requirements into
+it with `uv pip install -r`, untouched by facet. `requirements = "uv.lock"`
+instead builds from the upstream project's own lock with
+`uv sync --frozen --no-dev --project <checkout> --python <engine.python>`
+with `UV_PROJECT_ENVIRONMENT=<checkout>/venv`, which creates the venv itself.
+Prefer the lock when the upstream requirements file pulls packages that need a
+build step, as ACE-Step's does with flash-attn. A `.complete` marker holding
+the rev and that file's sha256 is written last, so an interrupted pull is
+redone by the next one.
 `installed` means both the client environment and the server checkout are
 complete; `facet remove` and `facet clean` free the checkout tree like an
 environment.

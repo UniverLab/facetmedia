@@ -33,7 +33,7 @@ from facetmedia.contract import FacetError
 from facetmedia.env import download as env_download
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
-from facetmedia.registry_types import Binary, HostApp
+from facetmedia.registry_types import Binary, HostApp, Server
 from tests.registry_server import COMMIT, OTHER_COMMIT, FakeGitHub
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
@@ -882,3 +882,52 @@ def test_runner_env_points_playwright_at_the_shared_browsers_dir(
     _registry(monkeypatch)
     plain = load_registry(FIXTURES).packages["echo"]
     assert "PLAYWRIGHT_BROWSERS_PATH" not in runner_module.runner_env(home, plain)
+
+
+# --- a uv.lock server: one frozen sync, and the marker holds the lock's sha256.
+
+
+def test_pull_of_a_uv_lock_server_writes_the_lock_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    monkeypatch.setattr(env_module, "_stream_output", lambda argv, env: calls.append((argv, env)))
+    lock = b"the upstream uv.lock\n"
+
+    def _fake_checkout(target: Path, server: Server, env_vars: dict[str, str]) -> None:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "uv.lock").write_bytes(lock)
+
+    monkeypatch.setattr(env_module, "_git_checkout", _fake_checkout)
+    rev = "a" * 40
+    package = dataclasses.replace(
+        load_registry(FIXTURES).packages["echo"],
+        server=Server(
+            repo="https://example.invalid/tool.git",
+            rev=rev,
+            requirements="uv.lock",
+            launch=("python", "serve.py", "--port", "{{port}}"),
+            health_url="http://127.0.0.1:{{port}}/health",
+        ),
+    )
+    home = Home.from_env()
+
+    env_module._fetch_server(package, home)
+
+    assert len(calls) == 1
+    argv, env = calls[0]
+    target = env_module.server_dir(package, home)
+    assert argv == [
+        env_module.uv.find_uv_bin(),
+        "sync",
+        "--frozen",
+        "--no-dev",
+        "--project",
+        str(target),
+        "--python",
+        package.python,
+    ]
+    assert env["UV_PROJECT_ENVIRONMENT"] == str(target / "venv")
+    assert "pip" not in argv
+    marker = (target / ".complete").read_text(encoding="utf-8")
+    assert marker == f"{rev}\n{hashlib.sha256(lock).hexdigest()}"

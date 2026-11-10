@@ -748,6 +748,31 @@ def _git(cwd: Path, argv: list[str], env_vars: dict[str, str]) -> None:
 
 def _server_build(home: Home, target: Path, package: Package, server: Server) -> None:
     """Create the venv with the manifest's pinned python and install requirements."""
+    if Path(server.requirements).name == "uv.lock":
+        _server_sync(home, target, package)
+    else:
+        _server_pip_install(home, target, package, server)
+
+
+def _server_sync(home: Home, target: Path, package: Package) -> None:
+    """Build the venv from the checkout's locked project with ``uv sync``."""
+    argv = [
+        uv.find_uv_bin(),
+        "sync",
+        "--frozen",
+        "--no-dev",
+        "--project",
+        str(target),
+        "--python",
+        package.python,
+    ]
+    env_vars = uv_env(home)
+    env_vars["UV_PROJECT_ENVIRONMENT"] = str(target / "venv")
+    _stream_output(argv, env_vars)
+
+
+def _server_pip_install(home: Home, target: Path, package: Package, server: Server) -> None:
+    """Create the venv and pip-install the manifest's requirements file."""
     uv_bin = uv.find_uv_bin()
     _stream_output(
         [uv_bin, "venv", "--python", package.python, str(target / "venv")],
