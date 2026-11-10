@@ -1,3 +1,9 @@
+---
+title: facet
+description: Install creation tools in pinned environments and drive them through one verifiable --json contract.
+order: 1
+---
+
 # facet
 
 facet installs creation tools — text to speech, transcription, audio

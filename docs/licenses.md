@@ -1,3 +1,9 @@
+---
+title: Licences
+description: How models with terms are accepted once, explicitly, before facet uses them.
+order: 5
+---
+
 # Licences
 
 Some models come with terms — a non-commercial licence, for example. Such

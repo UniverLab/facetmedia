@@ -1,3 +1,9 @@
+---
+title: The --json contract
+description: The JSON envelope every facet command prints, its error codes and exit statuses.
+order: 3
+---
+
 # The `--json` contract
 
 Add `--json` to any `facet` command for machine-readable output:

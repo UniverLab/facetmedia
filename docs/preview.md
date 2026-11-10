@@ -1,3 +1,9 @@
+---
+title: facet preview
+description: How facet shows an asset to an agent as data and to a person through its viewer.
+order: 4
+---
+
 # `facet preview`
 
 `facet preview` shows one asset facet made: to an agent as data, to a

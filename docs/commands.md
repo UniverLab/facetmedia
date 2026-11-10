@@ -1,3 +1,9 @@
+---
+title: Command reference
+description: Every facet verb, its flags and its human and --json output.
+order: 2
+---
+
 # Command reference
 
 Every verb prints its human form by default and one JSON document with

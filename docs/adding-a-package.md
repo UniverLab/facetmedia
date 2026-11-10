@@ -1,3 +1,9 @@
+---
+title: Adding a package
+description: How to write a registry package: its manifest, runner, skill and tests.
+order: 6
+---
+
 # Adding a package
 
 A **registry** is the repository facet installs from
