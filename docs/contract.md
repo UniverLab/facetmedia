@@ -142,3 +142,9 @@ the file sizes, and `check` re-verifies it like any asset.
 
 Paths in a record are relative to the record's directory; no absolute path
 appears anywhere in one.
+
+A parameter is treated as a path only when the filesystem confirms it is
+one. Text that cannot be a path — a string too long for a file name, or
+holding characters no path may have — stays text: the record keeps it as
+given, and `check` re-verifies a record holding it normally, never
+treating it as a missing or oversized file.
