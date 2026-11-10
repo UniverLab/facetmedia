@@ -388,10 +388,16 @@ def _host_libs(package: Package) -> Check:
 def _installed(package: Package, home: Home) -> Check:
     from facetmedia import env as env_module  # noqa: PLC0415
 
+    env_dir = home.env_dir(package.name, package.version)
+    if env_module.package_stale(package, home):
+        return Check(
+            False,
+            f"{env_dir}: the package's files changed in the registry since it was installed",
+            f"facet pull {package.name}",
+        )
     node_check = doctor_host.engine_installed_check(package, home)
     if node_check is not None:
         return node_check
-    env_dir = home.env_dir(package.name, package.version)
     if env_module.is_installed(package, home):
         return Check(True, f"installed at {env_dir}")
     detail = f"{env_dir}: the environment is not complete"

@@ -397,16 +397,22 @@ description = "The image to take."
 """
 
 
-def _registry_with_pick(monkeypatch: pytest.MonkeyPatch, directory: Path) -> None:
+def _registry_with_pick(
+    monkeypatch: pytest.MonkeyPatch, directory: Path, runner: str | None = None
+) -> None:
     """A registry copy with ``echo.pick`` (a ``path`` input) on the echo package.
 
-    The environment files are copied verbatim, so the shared ``echo`` install
-    still matches the lock and no test triggers a second sync.
+    The manifest edit changes the package fingerprint, so a shared install
+    from the base fixtures reads as stale and the run rebuilds it: when
+    ``runner`` is given it also replaces the copy's ``runner.py``, because
+    only a runner staged from the copy executes after that rebuild.
     """
     target = directory / "registry"
     shutil.copytree(FIXTURES, target)
     manifest = target / "packages" / "echo" / "package.toml"
     manifest.write_text(manifest.read_text(encoding="utf-8") + PICK_CAPABILITY, encoding="utf-8")
+    if runner is not None:
+        (target / "packages" / "echo" / "runner.py").write_text(runner, encoding="utf-8")
     monkeypatch.setenv("FACET_REGISTRY", str(target))
 
 
@@ -588,6 +594,50 @@ def test_run_no_pull_on_a_fresh_home_is_not_installed(
     assert list((tmp_path / "fresh-home" / "envs").glob("*/*")) == []
 
 
+def test_run_no_pull_refuses_a_package_changed_since_install(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    home = Home.from_env()
+    marker = home.env_dir("echo", "0.1.0") / ".package"
+    original = marker.read_bytes()
+    marker.unlink()
+    try:
+        code = main(["run", "echo.text", str(_piece(tmp_path)), "--no-pull", "--json"])
+        error = _error(_envelope(capsys))
+    finally:
+        marker.write_bytes(original)
+    assert code == EXIT_NOT_INSTALLED
+    assert error["code"] == "not_installed"
+    assert error["message"] == "echo 0.1.0 changed in the registry since it was installed"
+    assert error["hint"] == "run facet pull echo, or drop --no-pull"
+
+
+def test_run_pulls_a_package_changed_since_install(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    registry_copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry_copy)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry_copy))
+    home = Home.from_env()
+    piece = _piece(tmp_path)
+    out = tmp_path / "out"
+    assert main(["run", "echo.text", str(piece), "--out", str(out), "--json"]) == 0
+    assert _envelope(capsys)["data"]["pulled"] is True
+
+    skill = registry_copy / "packages" / "echo" / "skill" / "SKILL.md"
+    edited = skill.read_text(encoding="utf-8") + "\nEdited in the registry.\n"
+    skill.write_text(edited, encoding="utf-8")
+
+    out_next = tmp_path / "out-next"
+    code = main(["run", "echo.text", str(piece), "--out", str(out_next), "--json"])
+    assert code == 0
+    assert _envelope(capsys)["data"]["pulled"] is True
+    staged = home.env_dir("echo", "0.1.0") / "package" / "skill" / "SKILL.md"
+    assert staged.read_text(encoding="utf-8") == edited
+
+
 def test_run_refuses_a_machine_that_cannot_before_pulling(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -704,7 +754,7 @@ def test_run_refuses_an_asset_that_would_overwrite_an_input(
     facet_home: Path,
     swap_echo_runner: Callable[[str], None],
 ) -> None:
-    _registry_with_pick(monkeypatch, tmp_path)
+    _registry_with_pick(monkeypatch, tmp_path, COLLIDING_RUNNER)
     swap_echo_runner(COLLIDING_RUNNER)
     image = tmp_path / "lamina.png"
     image.write_bytes(b"original")
@@ -733,7 +783,7 @@ def test_run_hashes_inputs_before_the_runner(
     facet_home: Path,
     swap_echo_runner: Callable[[str], None],
 ) -> None:
-    _registry_with_pick(monkeypatch, tmp_path)
+    _registry_with_pick(monkeypatch, tmp_path, MUTATING_RUNNER)
     swap_echo_runner(MUTATING_RUNNER)
     image = tmp_path / "lamina.png"
     image.write_bytes(b"before")
@@ -761,6 +811,11 @@ def test_run_refuses_overwriting_the_piece(
     swap_echo_runner: Callable[[str], None],
 ) -> None:
     _registry(monkeypatch)
+    # An earlier test may have restaged the shared install from another
+    # registry copy; pull first so the install matches this registry, then
+    # swap the runner into the install the run will actually use.
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
     swap_echo_runner(PIECE_HIT_RUNNER)
     piece = _piece(tmp_path)
     original = piece.read_bytes()

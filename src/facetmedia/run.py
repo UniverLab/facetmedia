@@ -227,22 +227,34 @@ def _require_machine(package: Package, run_id: str) -> list[str]:
 
 
 def _ensure_installed(args: argparse.Namespace, package: Package, run_id: str) -> tuple[bool, int]:
-    """Pull the package when needed; ``--no-pull`` refuses an absent env."""
+    """Pull the package when needed; ``--no-pull`` refuses an absent or stale env."""
     home = Home.from_env()
-    if env.is_installed(package, home):
+    if env.is_installed(package, home) and not env.package_stale(package, home):
         return False, 0
     if not args.pull:
-        raise FacetError(
-            "not_installed",
-            f"{package.name} {package.version} is not installed",
-            hint="run facet pull, or drop --no-pull",
-            details={"package": package.name, "version": package.version},
-        )
+        raise _not_installed_error(package, home)
     wait, wait_timeout = _lock_params(args)
     with hold("exclusive", "facet run pull", wait, wait_timeout):
         report = env.pull(package, home, run_id=run_id)
     downloaded = report.get("downloaded_bytes", 0)
     return True, downloaded if isinstance(downloaded, int) else 0
+
+
+def _not_installed_error(package: Package, home: Home) -> FacetError:
+    """The ``--no-pull`` refusal: absent, or changed since it was installed."""
+    if env.package_stale(package, home):
+        return FacetError(
+            "not_installed",
+            f"{package.name} {package.version} changed in the registry since it was installed",
+            hint=f"run facet pull {package.name}, or drop --no-pull",
+            details={"package": package.name, "version": package.version},
+        )
+    return FacetError(
+        "not_installed",
+        f"{package.name} {package.version} is not installed",
+        hint="run facet pull, or drop --no-pull",
+        details={"package": package.name, "version": package.version},
+    )
 
 
 def _piece_inputs(

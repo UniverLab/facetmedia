@@ -31,7 +31,7 @@ from typing import Final
 from facetmedia import __version__
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_json, read_json
-from facetmedia.registry import load_registry
+from facetmedia.registry import Package, load_registry
 
 __all__ = [
     "COMPLETE",
@@ -386,27 +386,44 @@ def _previous_commit(state_file: Path) -> str | None:
     return commit if isinstance(commit, str) and commit else None
 
 
-def _versions(home: Home, commit: str | None) -> dict[str, str]:
-    """Manifest versions of the snapshot ``commit``, empty when unreadable."""
+def _previous_packages(home: Home, commit: str | None) -> dict[str, Package]:
+    """Manifest packages of the snapshot ``commit``, empty when unreadable."""
     if not commit:
         return {}
     try:
         previous = load_registry(home.registry_dir(commit))
     except FacetError:
         return {}
-    return {name: package.version for name, package in previous.packages.items()}
+    return dict(previous.packages)
+
+
+def _package_changed(before: Package | None, package: Package) -> bool:
+    """Whether ``package`` is new, re-versioned, or edited in place.
+
+    A same-version registry edit keeps the version but changes the files, so
+    the fingerprints of the two snapshots are compared as well. An
+    unreadable file reads as changed: the next report errs towards pulling.
+    """
+    if before is None or before.version != package.version:
+        return True
+    from facetmedia.env.package_marker import package_fingerprint  # noqa: PLC0415
+
+    try:
+        return package_fingerprint(before) != package_fingerprint(package)
+    except OSError:
+        return True
 
 
 def _package_records(home: Home, snapshot: Path, previous: str | None) -> list[dict[str, object]]:
-    """One record per package, with the version change against ``previous``."""
-    versions = _versions(home, previous)
+    """One record per package, with the change against ``previous``."""
+    before = _previous_packages(home, previous)
     registry = load_registry(snapshot)
     return [
         {
             "name": package.name,
             "version": package.version,
             "compatible": package.compatible,
-            "changed": versions.get(package.name) != package.version,
+            "changed": _package_changed(before.get(package.name), package),
         }
         for package in sorted(registry.packages.values(), key=lambda item: item.name)
     ]

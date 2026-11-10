@@ -18,6 +18,7 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
+from facetmedia import env as env_module
 from facetmedia import record, runner
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
@@ -73,16 +74,9 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
         )
     _capability, package = resolve(capability_id)
     package.require_compatible()
-    from facetmedia import env as env_module  # noqa: PLC0415
 
     env_dir = home.env_dir(package.name, package.version)
-    if not env_module.is_installed(package, home):
-        raise FacetError(
-            "not_installed",
-            f"{package.name} {package.version} is not installed",
-            hint=f"run facet pull {package.name}",
-            details={"package": package.name, "version": package.version},
-        )
+    _require_installed(package, home)
     params_value = provenance.get("params")
     if not isinstance(params_value, dict):
         raise FacetError("invalid_input", f"{asset}: the record has no params")
@@ -109,6 +103,27 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
         },
     }
     return data, 0 if verdict.passed else 3
+
+
+def _require_installed(package: Package, home: Home) -> None:
+    """Refuse a package that is absent or changed since it was installed.
+
+    ``check`` never verifies with stale code: a package whose files changed
+    in the registry reads exactly like one that was never installed, except
+    the message names the change.
+    """
+    if env_module.is_installed(package, home) and not env_module.package_stale(package, home):
+        return
+    if env_module.package_stale(package, home):
+        message = f"{package.name} {package.version} changed in the registry since it was installed"
+    else:
+        message = f"{package.name} {package.version} is not installed"
+    raise FacetError(
+        "not_installed",
+        message,
+        hint=f"run facet pull {package.name}",
+        details={"package": package.name, "version": package.version},
+    )
 
 
 def _recorded_status(recorded: object) -> object:

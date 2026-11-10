@@ -235,6 +235,29 @@ def test_reverify_edited_bytes_fails_with_exit_3(
     assert error["code"] == "verification_failed"
 
 
+def test_reverify_refuses_a_package_changed_since_install(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    out = tmp_path / "out"
+    code = main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"])
+    assert code == 0
+    _envelope(capsys)
+    home = Home.from_env()
+    marker = home.env_dir("echo", "0.1.0") / ".package"
+    original = marker.read_bytes()
+    marker.write_text("bogus", encoding="utf-8")
+    try:
+        code = main(["check", str(out / "echo.txt"), "--json"])
+        error = _error(_envelope(capsys))
+    finally:
+        marker.write_bytes(original)
+    assert code == EXIT_NOT_INSTALLED
+    assert error["code"] == "not_installed"
+    assert error["message"] == "echo 0.1.0 changed in the registry since it was installed"
+    assert error["hint"] == "run facet pull echo"
+
+
 def test_reverify_missing_record_is_invalid_input(
     capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
 ) -> None:

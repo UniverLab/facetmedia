@@ -323,6 +323,33 @@ def test_a_version_bump_is_reported_as_changed(fake_github: FakeGitHub, tmp_path
     assert _registry_dirs() == sorted([COMMIT, OTHER_COMMIT])
 
 
+def _edited_registry(tmp_path: Path) -> Path:
+    """The fixture registry with echo's skill edited at the same version."""
+    root = tmp_path / "edited-registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    skill = root / "packages" / "echo" / "skill" / "SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "\nEdited in place.\n", encoding="utf-8")
+    return root
+
+
+def test_a_same_version_content_edit_is_reported_as_changed(
+    fake_github: FakeGitHub, tmp_path: Path
+) -> None:
+    home = Home.from_env()
+    update.update_registry(home, "main")
+    fake_github.commit = OTHER_COMMIT
+    fake_github.archive_commit = OTHER_COMMIT
+    fake_github.archive = build_archive(
+        _edited_registry(tmp_path), top=f"registry-{OTHER_COMMIT[:7]}"
+    )
+
+    data = update.update_registry(home, "main")
+
+    assert data["previous_commit"] == COMMIT
+    assert _changed(data) == {"echo": True, "future": False, "termsy": False}
+    assert _registry_dirs() == sorted([COMMIT, OTHER_COMMIT])
+
+
 def test_first_use_fetches_the_registry(
     fake_github: FakeGitHub, capsys: pytest.CaptureFixture[str]
 ) -> None:

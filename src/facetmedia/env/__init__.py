@@ -3,9 +3,12 @@
 ``facet pull`` runs here.  Preflight refuses what the machine cannot do before
 anything is written or downloaded; the environment is rebuilt from scratch
 whenever its ``.complete`` marker does not hold the package's ``uv.lock``
-hash; models stream into ``<home>/models/direct`` through a ``.part`` file and
-are checked by sha256.  Every step either finishes or is redone by the next
-pull: there is no repair command.
+hash, or its ``.package`` marker does not hold the fingerprint over every
+file under the package directory (see ``facetmedia.env.package_marker``):
+a same-version registry edit still triggers a rebuild.  Models stream into
+``<home>/models/direct`` through a ``.part`` file and are checked by sha256.
+Every step either finishes or is redone by the next pull: there is no
+repair command.
 """
 
 from __future__ import annotations
@@ -46,7 +49,22 @@ from facetmedia.env.download import (
     _part_path,
     _stream_to_part,
 )
-from facetmedia.env.node import node_staged_current, stage_node
+from facetmedia.env.node import (
+    NODE_MARKER,
+    node_package_present,
+    node_present,
+    node_problem,
+    node_runtime_present,
+    node_staged_current,
+    stage_node,
+)
+from facetmedia.env.package_marker import (
+    COMPLETE,
+    PACKAGE_MARKER,
+    complete_matches,
+    package_fingerprint,
+    package_stale,
+)
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import (
     Browser,
@@ -59,6 +77,7 @@ from facetmedia.registry_types import (
 )
 
 __all__ = [
+    "COMPLETE",
     "binary_dir",
     "binary_present",
     "binary_problem",
@@ -72,6 +91,8 @@ __all__ = [
     "node_problem",
     "node_runtime_present",
     "node_staged_current",
+    "package_fingerprint",
+    "package_stale",
     "pull",
     "server_dir",
     "server_present",
@@ -81,7 +102,6 @@ __all__ = [
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
-COMPLETE: Final[str] = ".complete"
 UV_TAIL_LINES: Final[int] = 40
 HF_API: Final[str] = "https://huggingface.co"
 #: The official Playwright CDN the ``[browser]`` archives come from.
@@ -90,10 +110,6 @@ PLAYWRIGHT_CDN: Final[str] = "https://cdn.playwright.dev/dbazure/download/playwr
 BROWSER_MARKER: Final[str] = ".facet-verified"
 #: The official Node.js distribution root the ``node`` engine downloads from.
 NODE_DIST: Final[str] = "https://nodejs.org/dist"
-#: The marker a verified node extraction carries: the declared hash.
-NODE_MARKER: Final[str] = ".facet-verified"
-#: How long the ``node --version`` probe a verified runtime gets may take.
-NODE_PROBE_TIMEOUT_S: Final[float] = 10.0
 SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.md"})
 #: feat(run) ships the runner SDK; until then there is nothing to copy.
 #: ``runner_sdk.py`` stays at the package root, one level above ``env``.
@@ -117,7 +133,7 @@ def client_env_present(package: Package, home: Home) -> bool:
         return binary
     if package.node is not None:
         return node_present(package, home) and node_staged_current(package, home)
-    return _is_complete(home.env_dir(package.name, package.version), package.lock_sha256)
+    return complete_matches(home.env_dir(package.name, package.version), package.lock_sha256)
 
 
 def is_installed(package: Package, home: Home) -> bool:
@@ -146,7 +162,7 @@ def pull(
         return env_binary.pull_report(package, home, env_dir, started, verify_models)
     if package.browser is not None:
         _fetch_browser(package.browser, home)
-    up_to_date = _is_current(package, env_dir)
+    up_to_date = _is_current(package, env_dir) and not package_stale(package, home)
     server_ready = server_present(package, home)
     if not up_to_date:
         _rebuild(package, home, env_dir)
@@ -154,6 +170,7 @@ def pull(
     records, downloaded = _fetch_models(package, home, verify_models)
     if not up_to_date:
         atomic_write_text(env_dir / COMPLETE, package.lock_sha256, home.tmp_dir)
+        atomic_write_text(env_dir / PACKAGE_MARKER, package_fingerprint(package), home.tmp_dir)
         if package.uses:
             atomic_write_text(env_dir / shared.MARKER, shared.fingerprint(package), home.tmp_dir)
     return {
@@ -174,9 +191,10 @@ def _pull_node(
     """The ``node`` engine's pull: verified extractions, then a staged entry."""
     node = package.node
     assert node is not None
-    up_to_date = node_present(package, home) and node_staged_current(package, home)
+    stale = package_stale(package, home)
+    up_to_date = node_present(package, home) and node_staged_current(package, home) and not stale
     downloaded = _fetch_node(node, home)
-    if not node_staged_current(package, home):
+    if not node_staged_current(package, home) or stale:
         stage_node(package, home, env_dir)
     records, model_bytes = _fetch_models(package, home, verify_models)
     downloaded += model_bytes
@@ -278,17 +296,9 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
 # --- FR3: the environment at <home>/envs/<package>/<version>/.
 
 
-def _is_complete(env_dir: Path, lock_sha256: str) -> bool:
-    """Whether ``.complete`` holds this package's lock hash."""
-    try:
-        return (env_dir / COMPLETE).read_text(encoding="utf-8").strip() == lock_sha256
-    except OSError:
-        return False
-
-
 def _is_current(package: Package, env_dir: Path) -> bool:
     """Whether the lock hash and, when the package has uses, the marker match."""
-    if not _is_complete(env_dir, package.lock_sha256):
+    if not complete_matches(env_dir, package.lock_sha256):
         return False
     return not package.uses or shared.matches(package, env_dir)
 
@@ -758,76 +768,9 @@ def _server_build(home: Home, target: Path, package: Package, server: Server) ->
 
 
 # --- The node engine: one verified runtime and npm tarballs per home.
-
-
-def node_runtime_present(node: Node, home: Home) -> bool:
-    """Whether the runtime extraction exists and its marker holds the sha256."""
-    try:
-        marker = (home.node_runtime_dir(node.runtime) / NODE_MARKER).read_text(encoding="utf-8")
-    except OSError:
-        return False
-    return marker.strip() == node.runtime_sha256
-
-
-def node_package_present(spec: NodePackage, home: Home) -> bool:
-    """Whether the package extraction exists and its marker holds the integrity."""
-    try:
-        marker = (home.node_pkg_dir(spec.name, spec.version) / NODE_MARKER).read_text(
-            encoding="utf-8"
-        )
-    except OSError:
-        return False
-    return marker.strip() == spec.integrity
-
-
-def node_present(package: Package, home: Home) -> bool:
-    """Whether the runtime and every declared package extraction verify."""
-    node = package.node
-    if node is None:
-        return False
-    return node_runtime_present(node, home) and all(
-        node_package_present(spec, home) for spec in node.packages
-    )
-
-
-def node_problem(package: Package, home: Home) -> str | None:
-    """Why the node engine is not usable, or ``None`` when it is.
-
-    A missing or unverified extraction is pull-fixable; a verified runtime
-    whose binary cannot run on this host is not — no pull changes that.
-    """
-    node = package.node
-    if node is None:
-        return None
-    runtime_dir = home.node_runtime_dir(node.runtime)
-    if not node_runtime_present(node, home):
-        return f"{runtime_dir}: the extraction is not verified"
-    for spec in node.packages:
-        target = home.node_pkg_dir(spec.name, spec.version)
-        if not node_package_present(spec, home):
-            return f"{target}: the extraction is not verified"
-    if not node_staged_current(package, home):
-        staged = home.env_dir(package.name, package.version) / "package" / package.entry
-        return f"{staged}: the staged runner is not current"
-    if not _node_runs(home, node):
-        return f"{runtime_dir / 'bin' / 'node'}: the managed node binary cannot run on this host"
-    return None
-
-
-def _node_runs(home: Home, node: Node) -> bool:
-    """Whether ``bin/node --version`` exits zero; the linux-x64 probe."""
-    binary = home.node_runtime_dir(node.runtime) / "bin" / "node"
-    try:
-        result = subprocess.run(
-            [str(binary), "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=NODE_PROBE_TIMEOUT_S,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+#
+# The node queries live in ``facetmedia.env.node`` beside ``stage_node`` and
+# are re-exported here; this module keeps the downloads that fill them.
 
 
 def _fetch_node(node: Node, home: Home) -> int:

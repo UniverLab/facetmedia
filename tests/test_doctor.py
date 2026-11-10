@@ -935,6 +935,28 @@ def test_shared_modules_check_without_uses_or_environment(
     }
 
 
+def test_doctor_flags_a_package_changed_since_install(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry_copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry_copy)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry_copy))
+    home = Home.from_env()
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
+    package = load_registry(registry_copy).packages["echo"]
+    marker = home.env_dir("echo", "0.1.0") / ".package"
+    marker.write_text("bogus", encoding="utf-8")
+
+    checks, _failures = doctor_module.machine_checks(package, home)
+
+    assert checks["installed"]["ok"] is False
+    assert checks["installed"]["fix"] == "facet pull echo"
+    assert "the package's files changed in the registry since it was installed" in str(
+        checks["installed"]["detail"]
+    )
+
+
 def test_doctor_detects_stale_shared_modules_in_override_mode(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

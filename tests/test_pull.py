@@ -33,6 +33,7 @@ from facetmedia.contract import FacetError
 from facetmedia.env import download as env_download
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
+from facetmedia.registry_types import Binary, HostApp
 from tests.registry_server import COMMIT, OTHER_COMMIT, FakeGitHub
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
@@ -139,6 +140,102 @@ def test_pull_echo_rebuilds_when_the_complete_marker_is_gone(
         path.read_text(encoding="utf-8") for path in (env_dir / "venv").rglob("facet_runner_sdk.py")
     ]
     assert copied == ["# runner SDK\n"]
+
+
+def test_pull_writes_the_package_fingerprint_marker(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    package = load_registry(FIXTURES).packages["echo"]
+    env_dir = home.env_dir("echo", "0.1.0")
+
+    code, _envelope = _pull(capsys, "pull", "echo")
+
+    assert code == 0
+    marker = env_dir / ".package"
+    assert marker.read_text(encoding="utf-8").strip() == env_module.package_fingerprint(package)
+    assert env_module.package_stale(package, home) is False
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert _data(envelope)["already_installed"] is True
+
+
+def test_pull_rebuilds_when_a_non_entry_file_changes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry_copy)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry_copy))
+    home = Home.from_env()
+
+    assert _pull(capsys, "pull", "echo")[0] == 0
+    env_dir = home.env_dir("echo", "0.1.0")
+    complete = (env_dir / ".complete").read_text(encoding="utf-8")
+    package = load_registry(registry_copy).packages["echo"]
+    assert env_module.package_stale(package, home) is False
+
+    skill = registry_copy / "packages" / "echo" / "skill" / "SKILL.md"
+    skill.write_text(
+        skill.read_text(encoding="utf-8") + "\nEdited in the registry.\n", encoding="utf-8"
+    )
+    edited = load_registry(registry_copy).packages["echo"]
+    assert env_module.package_stale(edited, home) is True
+
+    code, envelope = _pull(capsys, "pull", "echo")
+
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    # The lock is untouched, so the `.complete` marker is rewritten as-is.
+    assert (env_dir / ".complete").read_text(encoding="utf-8") == complete
+    staged = env_dir / "package" / "skill" / "SKILL.md"
+    assert staged.read_text(encoding="utf-8") == skill.read_text(encoding="utf-8")
+    assert env_module.package_stale(edited, home) is False
+
+
+def test_pull_treats_a_missing_package_marker_as_stale_once(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    assert _pull(capsys, "pull", "echo")[0] == 0
+    package = load_registry(FIXTURES).packages["echo"]
+    env_dir = home.env_dir("echo", "0.1.0")
+    (env_dir / ".package").unlink()
+
+    assert env_module.package_stale(package, home) is True
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    assert env_module.package_stale(package, home) is False
+
+
+def test_package_stale_is_false_where_no_package_copy_is_staged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Host-app and binary packages stage no copy, and absence is never stale."""
+    _registry(monkeypatch)
+    home = Home.from_env()
+    echo = load_registry(FIXTURES).packages["echo"]
+    assert env_module.package_stale(echo, home) is False
+    hosted = dataclasses.replace(
+        echo,
+        host_app=HostApp(app="blender", min_version="4.0", config_key="blender.path", env="X"),
+    )
+    assert env_module.package_stale(hosted, home) is False
+    nailed = dataclasses.replace(
+        echo,
+        binary=Binary(
+            name="tool",
+            version="1.0",
+            url="https://example.invalid/tool.zip",
+            sha256="0" * 64,
+            bin="tool",
+        ),
+    )
+    assert env_module.package_stale(nailed, home) is False
 
 
 def test_termsy_without_acceptance_downloads_nothing(

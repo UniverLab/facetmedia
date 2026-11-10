@@ -577,6 +577,35 @@ def test_pull_restages_the_entry_when_the_entry_changes(
     assert marker.strip() == hashlib.sha256(edited.encode("utf-8")).hexdigest()
 
 
+def test_pull_restages_when_a_non_entry_file_changes(
+    world: World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = Home.from_env()
+    assert _pull(capsys, "pull", "nodepkg")[0] == 0
+    env_dir = home.env_dir("nodepkg", "0.1.0")
+    package = _nodepkg(world)
+    marker = env_dir / env_module.PACKAGE_MARKER
+    assert marker.read_text(encoding="utf-8").strip() == env_module.package_fingerprint(package)
+    assert env_module.package_stale(package, home) is False
+
+    skill = world.registry / "packages" / "nodepkg" / "skill" / "SKILL.md"
+    skill.write_text(SKILL + "\nEdited in the registry.\n", encoding="utf-8")
+    edited = _nodepkg(world)
+    assert env_module.is_installed(edited, home) is True
+    assert env_module.package_stale(edited, home) is True
+
+    code, envelope = _pull(capsys, "pull", "nodepkg")
+
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    assert (env_dir / "package" / "skill" / "SKILL.md").read_text(
+        encoding="utf-8"
+    ) == skill.read_text(encoding="utf-8")
+    expected = hashlib.sha256(JS_ENTRY.encode("utf-8")).hexdigest()
+    assert (env_dir / env_module.COMPLETE).read_text(encoding="utf-8").strip() == expected
+    assert env_module.package_stale(edited, home) is False
+
+
 def test_pull_rebuilds_after_an_extraction_is_removed(
     world: World, capsys: pytest.CaptureFixture[str]
 ) -> None:
