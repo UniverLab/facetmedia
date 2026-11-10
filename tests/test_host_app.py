@@ -599,6 +599,25 @@ def test_freecad_wrapper_passes_the_script_exit_code(tmp_path: Path) -> None:
     assert result.returncode == SCRIPT_EXIT
 
 
+def test_freecad_wrapper_runs_under_the_stem_name_freecadcmd_gives_it(tmp_path: Path) -> None:
+    """freecadcmd runs a script as ``__name__ == "<stem>"``, never ``__main__``."""
+    script = tmp_path / "failing.py"
+    script.write_text(FAILING_SCRIPT, encoding="utf-8")
+    launch = (
+        "import runpy, sys; "
+        "runpy.run_path(sys.argv[1], run_name='host_freecad_run')"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", launch, str(runner_module.FREECAD_WRAPPER), "--pass", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == SCRIPT_EXIT
+
+
 def test_freecad_run_fails_when_the_script_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -47,5 +47,7 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
+# freecadcmd executes a script with ``__name__`` set to the file's stem, not
+# ``__main__``; imported as ``facetmedia.host_freecad_run`` it stays inert.
+if __name__ in ("__main__", "host_freecad_run"):
     os._exit(main(sys.argv[1:]))
