@@ -219,8 +219,8 @@ when the registry is a snapshot, or, with `FACET_REGISTRY` set, an
 `override:<sha256>` over the used modules (sorted by name) and the
 package's `package.toml`. A changed lock hash **or** a changed fingerprint
 makes the environment stale, so the next `facet pull` rebuilds it and
-rewrites both markers. `facet doctor` reports a stale copy with the fix
-`facet pull <package>`; that fix never gates a pull or a run.
+rewrites `.complete` and `.registry`. `facet doctor` reports a stale copy
+with the fix `facet pull <package>`; that fix never gates a pull or a run.
 
 Beside those two markers the environment carries a third one, `.package`:
 a sha256 over the sorted relative paths plus the bytes of every file under
@@ -228,9 +228,10 @@ the package directory (`__pycache__/` and `*.pyc` excluded). It covers the
 whole package — the runner, helper modules, flows, scenes and skill files —
 so a registry edit that keeps the version, the lock and the entry file
 still triggers a rebuild: a missing or differing `.package` reads as stale
-once, and the next `facet pull` rebuilds from scratch and rewrites it.
-`facet run --no-pull` refuses a stale package with `not_installed`, and
-`facet check` refuses to verify with it.
+once, and the next `facet pull` — or a `facet run`, which pulls a stale
+package the way it pulls an absent one — rebuilds from scratch and rewrites
+it. `facet run --no-pull` refuses a stale package with `not_installed`, and
+so does `facet check`: neither verifies with stale code.
 
 ## Browser artifact
 
@@ -398,13 +399,13 @@ package runs with no network at all.
 The pull also stages the package directory at
 `<home>/envs/<package>/<version>/package/` — the whole directory, so
 helper files the entry requires relatively come with it. `<env>/.complete`
-holds the **sha256 of the source entry file's bytes**, written last, and
+holds the **sha256 of the source entry file's bytes**, and
 `<env>/.package` holds the fingerprint over every file under the package
-directory (`__pycache__/` and `*.pyc` excluded); a later pull restages the
-whole tree from scratch when either marker no longer matches, so an edited
-entry — or an edited helper, flow, scene or skill file at the same version —
-is picked up and an interrupted copy is redone. The staged copy is never
-merged into.
+directory (`__pycache__/` and `*.pyc` excluded); both are written last,
+after the copy, and a later pull restages the whole tree from scratch when
+either marker no longer matches, so an edited entry — or an edited helper,
+flow, scene or skill file at the same version — is picked up and an
+interrupted copy is redone. The staged copy is never merged into.
 
 Every node package writes its template with `{{node}}`, which resolves to
 the managed binary, mirroring `{{python}}`:

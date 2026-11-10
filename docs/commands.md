@@ -57,10 +57,12 @@ registry 3decd7089bfbc7196d08851df7221c4ccf76d635 (ref feature/v0.1)
   whisper 0.1.0 changed
 ```
 
-Each package line names whether its manifest version differs from the
-previous snapshot, meaning its next `pull` or `run` rebuilds the
-environment. The GitHub resolve counts against the anonymous API limit;
-`GITHUB_TOKEN` lifts it. Installing environments is never touched.
+Each package line names whether its version differs from the previous
+snapshot **or** its files changed under the same version, meaning its next
+`pull` or `run` rebuilds the environment: a registry fix that keeps the
+version and the lock still reaches an installed package. The GitHub
+resolve counts against the anonymous API limit; `GITHUB_TOKEN` lifts it.
+Installing environments is never touched.
 Lock: exclusive (`update` is the writer the other heavy verbs wait for).
 
 Exit codes: `0` clean; `2` cannot load a registry it downloaded (deleted on
@@ -88,10 +90,18 @@ ffmpeg 0.1.0 installed at /tmp/opencode/facet-docs/envs/ffmpeg/0.1.0 (no model d
 When a package's manifest declares `uses`, its shared modules are copied
 from the registry's `lib/` into the environment as `facet_lib/<name>.py`
 in the same step that installs `facet_runner_sdk`. The environment records
-their fingerprint in a `.registry` marker, and a pull whose lock hash and
-marker both still match is `already installed`; a change in either
-rebuilds the environment. A package without `uses` writes no `.registry`
-and keeps the lock-only behaviour.
+their fingerprint in a `.registry` marker, and a pull whose lock hash,
+marker and `.package` fingerprint all still match is `already installed`;
+a change in any of them rebuilds the environment. A package without `uses`
+writes no `.registry` and keeps the lock-only behaviour.
+
+The `python-env` environment also carries a `.package` marker: a sha256
+over the sorted relative paths and the bytes of every file under the
+package directory (`__pycache__/` and `*.pyc` excluded). It covers the
+whole package — the runner, helper modules, flows, scenes and skill files —
+so a registry edit that keeps the version, the lock and the entry file
+still makes the environment stale, and the next pull rebuilds it from
+scratch.
 
 A package that declares `[browser]` also gets the shared Chromium build:
 `facet pull` downloads the Playwright archive once, verifies its sha256,
@@ -111,9 +121,11 @@ tarballs under `~/.facet/node_pkgs/<name>/<version>/`, each verified by
 hash, with no Python environment built. It also stages the package
 directory at `~/.facet/envs/<package>/<version>/package/` — the whole
 directory, so the entry's helper files come with it — and writes
-`.complete` last, holding the sha256 of the entry file's bytes;
-`already installed` also means that staged copy is current, and a pull
-whose marker no longer matches restages the tree from scratch. A package
+`.complete`, holding the sha256 of the entry file's bytes, then `.package`
+with the whole-directory fingerprint; `already installed` also means that
+staged copy is current, and a pull whose `.complete` or `.package` no
+longer matches restages the tree from scratch, so an edited skill or helper
+file at the same version comes with it. A package
 that declares `[engine.binary]` downloads its pinned zip once into
 `~/.facet/bin/<name>/<version>/`, verified by sha256, with the executable
 bit set on the declared `bin`.
@@ -126,7 +138,9 @@ exact `facet license accept <model>` command instead. A backend-owned
 model (`backend = true`, served by the backend, never fetched) needs no
 download and is reported as `backend-owned`, but its terms still gate the
 run. An interrupted pull
-is repaired by the next pull; `.complete` written last marks "installed".
+is repaired by the next pull; the markers written last —
+`.complete` marking "installed" and `.package` recording the files it was
+built from — are what a later pull compares against.
 Lock: exclusive.
 
 Exit codes: `0` (`already installed` is also `0`); `2` unknown package;
@@ -285,9 +299,13 @@ unverified checkout under `installed`, also with the fix `facet pull
 <package>`; the server is probed, never started. A package that declares
 `[engine.node]` reports a missing or unverified extraction, or a staged
 runner that is not current, under `installed` with the same fix; a
-verified runtime the host cannot execute is not pull-fixable. None of
-these gates a run by itself. The `gpu` check asks `nvidia-smi`: the binary
-on `PATH`, or, on WSL2, the driver's own `/usr/lib/wsl/lib/nvidia-smi`
+verified runtime the host cannot execute is not pull-fixable. An installed
+`python-env` or `node` package whose files changed in the registry since
+the pull reports under `installed` as `the package's files changed in the
+registry since it was installed`, with the fix `facet pull <package>`.
+None of these gates a run by itself. The `gpu` check asks `nvidia-smi`: the
+binary on `PATH`, or, on WSL2, the driver's own
+`/usr/lib/wsl/lib/nvidia-smi`
 when `PATH` misses it, so a host whose driver keeps the binary off `PATH`
 still reports the GPU's name, total and used VRAM instead of `none`, and a
 package that requires a GPU no longer refuses for want of one it has. A
@@ -369,14 +387,18 @@ The argument is the asset or its record; the printed line and `data.asset`
 carry the same path, resolved. `fresh` carries the new verification next
 to the `recorded` one. A record
 whose asset is not installed re-installs nothing: `not_installed` (7) with
-`facet pull <package>`. Lock: taken per the package manifest (shared or
-exclusive), always waiting with the defaults — `check` rejects the waiting
-flags.
+`facet pull <package>`. A package whose files changed in the registry since
+the pull is refused the same way, with
+`<package> <version> changed in the registry since it was installed` —
+`check` never verifies with stale code. Lock: taken per the package manifest
+(shared or exclusive), always waiting with the defaults — `check` rejects
+the waiting flags.
 
 Exit codes: `0` when the fresh verdict passes; `3` `verification_failed`
 when it does not (the envelope stays `ok: true`, because the check ran);
 `2` a missing file or a record whose capability is unknown; `4` a model
-whose acceptance lapsed; `7` the package is not installed.
+whose acceptance lapsed; `7` the package is not installed, or its files
+changed in the registry since the pull.
 
 ## `facet run`
 
@@ -386,9 +408,14 @@ capability's inputs, runs the tool in the package's own environment,
 verifies every asset, and writes the records.
 
 Flags: `--out DIR` (default: the piece's directory), `--no-verify`,
-`--no-pull` (fail `not_installed` instead of pulling), `--timeout
-SECONDS` (kill the runner's process group), `--ephemeral` (install for
-this run, remove the environment after).
+`--no-pull` (fail `not_installed` instead of pulling an absent or changed
+package), `--timeout SECONDS` (kill the runner's process group),
+`--ephemeral` (install for this run, remove the environment after).
+
+An installed package whose files changed in the registry since the pull is
+rebuilt before the run, exactly as an absent one; with `--no-pull` it fails
+with `<package> <version> changed in the registry since it was installed`
+and the hint `run facet pull <package>, or drop --no-pull`.
 
 For a package that declares `[engine.server]`, the run probes the tool's
 health endpoint and, when nothing answers, starts it on a free port, points
@@ -431,7 +458,7 @@ asset that would overwrite a path input of the same run; `4` a model the
 piece selects needs acceptance — only the gated models the piece actually
 selects are required (see [licenses.md](licenses.md)); `5` the machine
 gate refuses; `7` `--no-pull` on an
-uninstalled package; `9` the runner crashed or broke the protocol.
+absent or changed package; `9` the runner crashed or broke the protocol.
 
 ## `facet preview`
 
