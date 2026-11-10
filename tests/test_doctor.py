@@ -36,6 +36,10 @@ EXIT_LICENSE_NOT_ACCEPTED = 4
 EXIT_MACHINE_CANNOT = 5
 EXIT_NOT_INSTALLED = 7
 EXIT_RUNNER_FAILED = 9
+#: VRAM the fixture GPU line reports: round(8151 / 1024, 3).
+RTX_5060_VRAM_GB = 7.96
+#: More than the fixture GPU reports, so the VRAM gate must fail.
+TOO_MUCH_VRAM_GB = 12.0
 
 #: An SDK runner without a ``doctor`` verb: the SDK answers for it.
 NO_DOCTOR_RUNNER = '''"""Echo run; no doctor verb is registered."""
@@ -594,6 +598,49 @@ def test_check_required_gpu_without_nvidia_fails(monkeypatch: pytest.MonkeyPatch
     assert checks["gpu"]["ok"] is False
     assert "GPU" in checks["gpu"]["fix"]
     assert failures[0].code == "machine_cannot"
+
+
+def test_check_gpu_with_enough_vram_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    package = load_registry(FIXTURES).packages["echo"]
+    requirements = dataclasses.replace(package.requirements, gpu=True, vram_gb=4.0)
+    monkeypatch.setattr(
+        doctor_module, "gpu_info", lambda: "NVIDIA GeForce RTX 5060, 8151 MiB, 931 MiB"
+    )
+    checks, failures = doctor_module.machine_checks(
+        dataclasses.replace(package, requirements=requirements), Home.from_env()
+    )
+    assert checks["gpu"]["ok"] is True
+    assert "8.0 GB" in str(checks["gpu"]["detail"])
+    assert failures == []
+
+
+def test_check_gpu_with_too_little_vram_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    package = load_registry(FIXTURES).packages["echo"]
+    requirements = dataclasses.replace(package.requirements, gpu=True, vram_gb=TOO_MUCH_VRAM_GB)
+    monkeypatch.setattr(
+        doctor_module, "gpu_info", lambda: "NVIDIA GeForce RTX 5060, 8151 MiB, 931 MiB"
+    )
+    checks, failures = doctor_module.machine_checks(
+        dataclasses.replace(package, requirements=requirements), Home.from_env()
+    )
+    assert checks["gpu"]["ok"] is False
+    assert failures[0].code == "machine_cannot"
+    assert failures[0].details["required_gb"] == TOO_MUCH_VRAM_GB
+    assert failures[0].details["available_gb"] == RTX_5060_VRAM_GB
+    assert f"needs {TOO_MUCH_VRAM_GB} GB of VRAM" in failures[0].message
+
+
+def test_check_gpu_with_unreadable_total_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    package = load_registry(FIXTURES).packages["echo"]
+    requirements = dataclasses.replace(package.requirements, gpu=True, vram_gb=4.0)
+    info = "NVIDIA GeForce RTX 5060, N/A, 931 MiB"
+    monkeypatch.setattr(doctor_module, "gpu_info", lambda: info)
+    checks, failures = doctor_module.machine_checks(
+        dataclasses.replace(package, requirements=requirements), Home.from_env()
+    )
+    assert checks["gpu"]["ok"] is False
+    assert failures[0].code == "machine_cannot"
+    assert info in failures[0].message
 
 
 # --- FR2: the facet section.

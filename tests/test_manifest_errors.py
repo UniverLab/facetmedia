@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from facetmedia.manifest import RegistryLoader
 from facetmedia.registry import validate_registry
 
 BASE = """name = "pkg"
@@ -94,6 +95,18 @@ CASES = [
     ),
     pytest.param(
         BASE.replace("ram_gb = 1", 'ram_gb = "1"'), "requirements.ram_gb", "type", id="ram-type"
+    ),
+    pytest.param(
+        BASE.replace("ram_gb = 1", 'ram_gb = 1\nvram_gb = "4"'),
+        "requirements.vram_gb",
+        "type",
+        id="vram-type",
+    ),
+    pytest.param(
+        BASE.replace("ram_gb = 1", "ram_gb = 1\nvram_gb = 8"),
+        "requirements.vram_gb",
+        "value",
+        id="vram-without-gpu",
     ),
     pytest.param(_with_top('licenses = "MIT"'), "licenses", "type", id="licenses-type"),
     pytest.param(_with_top('licenses = ["MIT"]'), "licenses[0].subject", "type", id="license-item"),
@@ -288,3 +301,22 @@ def test_manifest_problem_is_reported_with_file_and_key(
     manifest: str, key: str, problem: str, tmp_path: Path
 ) -> None:
     assert ("packages/pkg/package.toml", key, problem) in _problems(manifest, tmp_path)
+
+
+VRAM_GB = 8.5
+
+
+def test_vram_gb_parses(tmp_path: Path) -> None:
+    loader = RegistryLoader(tmp_path)
+    requirements = loader.requirements(
+        {"requirements": {"gpu": True, "vram_gb": VRAM_GB}}, "package.toml"
+    )
+    assert requirements.vram_gb == VRAM_GB
+    assert loader.problems == []
+
+
+def test_vram_gb_defaults_to_zero(tmp_path: Path) -> None:
+    loader = RegistryLoader(tmp_path)
+    requirements = loader.requirements({"requirements": {"gpu": False}}, "package.toml")
+    assert requirements.vram_gb == 0.0
+    assert loader.problems == []

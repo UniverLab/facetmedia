@@ -53,7 +53,8 @@
     "platforms": [
       "linux"
     ],
-    "ram_gb": 0.1
+    "ram_gb": 0.1,
+    "vram_gb": 0.0
   },
   "skill": "facet skill echo",
   "summary": "Echo text back, repeated.",

@@ -147,7 +147,16 @@ _ENGINE_KEYS: Final[frozenset[str]] = frozenset(
 _ENGINE_TYPES: Final[frozenset[str]] = frozenset({"python-env", "node", "host-app", "binary"})
 _TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
 _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
-    {"gpu", "ram_gb", "disk_gb", "exclusive", "platforms", "host_libs", "host_hint"}
+    {
+        "gpu",
+        "ram_gb",
+        "vram_gb",
+        "disk_gb",
+        "exclusive",
+        "platforms",
+        "host_libs",
+        "host_hint",
+    }
 )
 _LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
 _CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
@@ -542,9 +551,14 @@ class RegistryLoader:
         if table is None:
             return Requirements()
         self.unknown(table, _REQUIREMENT_KEYS, file, "requirements.")
+        gpu = self.boolean(table, "gpu", file, "requirements.", default=False)
+        vram_gb = self.number(table, "vram_gb", file, "requirements.") or 0.0
+        if vram_gb > 0 and not gpu:
+            self.add(file, "requirements.vram_gb", "value")
         return Requirements(
-            gpu=self.boolean(table, "gpu", file, "requirements.", default=False),
+            gpu=gpu,
             ram_gb=self.number(table, "ram_gb", file, "requirements.") or 0.0,
+            vram_gb=vram_gb,
             disk_gb=self.number(table, "disk_gb", file, "requirements.") or 0.0,
             exclusive=self.boolean(table, "exclusive", file, "requirements.", default=True),
             platforms=self.string_list(table, "platforms", file, "requirements.") or ("linux",),

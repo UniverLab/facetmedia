@@ -83,6 +83,7 @@ class Requirements:
 
     gpu: bool = False
     ram_gb: float = 0.0
+    vram_gb: float = 0.0
     disk_gb: float = 0.0
     exclusive: bool = True
     platforms: tuple[str, ...] = ("linux",)

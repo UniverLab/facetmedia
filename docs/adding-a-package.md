@@ -103,6 +103,7 @@ entry = "runner.py"   # relative to the package directory for every engine but b
 [requirements]
 gpu = false           # default false
 ram_gb = 2            # default 0
+vram_gb = 0           # default 0; needs gpu = true when above 0
 disk_gb = 1.2         # default 0
 exclusive = true      # default true: a run takes the facet lock exclusively
 platforms = ["linux"] # default ["linux"]
@@ -112,7 +113,8 @@ host_hint = ""        # how a person installs them
 
 facet never installs host libraries; `host_hint` is what the readiness
 check prints, and `exclusive = false` is what lets several light runs
-overlap.
+overlap. `vram_gb` above 0 needs `gpu = true`; `doctor`, `pull` and `run`
+refuse a machine whose GPU reports less VRAM than the package needs.
 
 ### `[[licenses]]`
 

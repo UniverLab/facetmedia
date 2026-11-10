@@ -8,6 +8,9 @@ from pathlib import Path
 
 import facetmedia.probes as probes_module
 
+SINGLE_GPU_MIB = 8151
+TWO_GPU_LARGEST_MIB = 24564
+
 
 def _fake_wsl_home(monkeypatch, tmp_path: Path) -> Path:
     lib = tmp_path / "lib"
@@ -66,3 +69,31 @@ def test_wsl_stub_exit_nonzero(monkeypatch, tmp_path) -> None:
     (tmp_path / "version").write_text("Microsoft", encoding="utf-8")
     monkeypatch.setattr(probes_module.shutil, "which", lambda _name: None)
     assert probes_module.gpu_info() is None
+
+
+def test_gpu_total_mib_single_gpu(monkeypatch) -> None:
+    monkeypatch.setattr(
+        probes_module,
+        "gpu_info",
+        lambda: f"NVIDIA GeForce RTX 5060, {SINGLE_GPU_MIB} MiB, 931 MiB",
+    )
+    assert probes_module.gpu_total_mib() == SINGLE_GPU_MIB
+
+
+def test_gpu_total_mib_largest_wins(monkeypatch) -> None:
+    monkeypatch.setattr(
+        probes_module,
+        "gpu_info",
+        lambda: f"GPU-A, 8192 MiB, 100 MiB\nGPU-B, {TWO_GPU_LARGEST_MIB} MiB, 200 MiB",
+    )
+    assert probes_module.gpu_total_mib() == TWO_GPU_LARGEST_MIB
+
+
+def test_gpu_total_mib_unparsable_line_is_none(monkeypatch) -> None:
+    monkeypatch.setattr(probes_module, "gpu_info", lambda: "Fake GPU, N/A, 1 MiB")
+    assert probes_module.gpu_total_mib() is None
+
+
+def test_gpu_total_mib_no_gpu_is_none(monkeypatch) -> None:
+    monkeypatch.setattr(probes_module, "gpu_info", lambda: None)
+    assert probes_module.gpu_total_mib() is None

@@ -43,6 +43,7 @@ from facetmedia.probes import (
     host_lib_error,
     mem_available_gb,
     mem_total_gb,
+    total_mib,
     tree_bytes,
 )
 from facetmedia.registry import (
@@ -343,7 +344,36 @@ def _gpu(package: Package) -> Check:
             f"{package.name} needs an NVIDIA GPU with drivers",
             error,
         )
-    return Check(True, info)
+    needs = package.requirements.vram_gb
+    if needs <= 0:
+        return Check(True, info)
+    total = total_mib(info)
+    if total is None:
+        error = FacetError(
+            "machine_cannot",
+            f"{package.name} needs {needs} GB of VRAM but the GPU total is unreadable: {info}",
+            details={"gpu": info},
+        )
+        return Check(
+            False,
+            f"{info}: {error.message}",
+            f"{package.name} needs {needs} GB of VRAM",
+            error,
+        )
+    if total < needs * 1024:
+        available = round(total / 1024, 3)
+        error = FacetError(
+            "machine_cannot",
+            f"{package.name} needs {needs} GB of VRAM, this GPU has {total / 1024:.1f} GB",
+            details={"required_gb": needs, "available_gb": available},
+        )
+        return Check(
+            False,
+            f"total {total / 1024:.1f} GB, need {needs} GB: {error.message}",
+            f"{package.name} needs {needs} GB of VRAM",
+            error,
+        )
+    return Check(True, f"total {total / 1024:.1f} GB, need {needs} GB")
 
 
 def _host_libs(package: Package) -> Check:

@@ -69,6 +69,17 @@ def test_describe_echo_text_matches_golden(
     assert _data(capsys) == golden
 
 
+def test_list_and_describe_report_vram_gb(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["list", "--available", "--json"]) == 0
+    for row in _data(capsys)["packages"]:
+        assert row["vram_gb"] == 0.0
+    assert main(["describe", "echo.text", "--json"]) == 0
+    assert _data(capsys)["requirements"]["vram_gb"] == 0.0
+
+
 def test_the_future_fixture_is_incompatible(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

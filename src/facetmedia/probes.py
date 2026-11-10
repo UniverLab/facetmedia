@@ -25,6 +25,8 @@ WSL_SMI_NAME: Final[str] = NVIDIA_SMI
 WSL_DXG_DEVICE: Final[Path] = Path("/dev/dxg")
 WSL_VERSION_MARKER: Final[str] = "microsoft"
 WSL_VERSION_SOURCE: Final[Path] = Path("/proc/version")
+#: Index of the total-memory column in ``gpu_info()`` CSV lines.
+TOTAL_COLUMN: Final[int] = 1
 
 
 def mem_total_gb() -> float | None:
@@ -116,6 +118,32 @@ def gpu_info() -> str | None:
         return None
     text = completed.stdout.strip()
     return text or None
+
+
+def total_mib(info: str | None) -> int | None:
+    """Largest GPU total memory in MiB from a ``gpu_info()`` string.
+
+    Parses the second CSV field of each line (``name, total MiB, used MiB``)
+    and returns the largest total; ``None`` when ``info`` is missing or no
+    line parses.
+    """
+    if not info:
+        return None
+    totals: list[int] = []
+    for line in info.splitlines():
+        fields = line.split(",")
+        if len(fields) <= TOTAL_COLUMN:
+            continue
+        try:
+            totals.append(int(fields[TOTAL_COLUMN].split()[0]))
+        except (IndexError, ValueError):
+            continue
+    return max(totals) if totals else None
+
+
+def gpu_total_mib() -> int | None:
+    """Largest GPU total memory in MiB, or ``None`` when there is no GPU."""
+    return total_mib(gpu_info())
 
 
 def host_lib_error(package: Package) -> FacetError | None:

@@ -17,6 +17,7 @@
       "provider": "facet",
       "tool_name": "Echo",
       "version": "0.1.0",
+      "vram_gb": 0.0,
       "weight": "light"
     },
     {
@@ -36,6 +37,7 @@
       "provider": "facet",
       "tool_name": "Future",
       "version": "0.1.0",
+      "vram_gb": 0.0,
       "weight": "cpu-heavy"
     },
     {
@@ -55,6 +57,7 @@
       "provider": "facet",
       "tool_name": "Termsy",
       "version": "0.1.0",
+      "vram_gb": 0.0,
       "weight": "cpu-heavy"
     }
   ],

@@ -78,6 +78,7 @@ def _package_row(package: Package, home: Home) -> dict[str, Any]:
         "provider": package.provider,
         "facet": package.facet,
         "weight": weight(package),
+        "vram_gb": package.requirements.vram_gb,
         "compatible": package.compatible,
         "installed": installed,
         "env_bytes": doctor.tree_bytes(env_dir) if installed else 0,
@@ -134,6 +135,7 @@ def _requirements(package: Package) -> dict[str, Any]:
     return {
         "gpu": requirements.gpu,
         "ram_gb": requirements.ram_gb,
+        "vram_gb": requirements.vram_gb,
         "disk_gb": requirements.disk_gb,
         "exclusive": requirements.exclusive,
         "platforms": list(requirements.platforms),
