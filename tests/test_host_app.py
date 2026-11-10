@@ -603,10 +603,7 @@ def test_freecad_wrapper_runs_under_the_stem_name_freecadcmd_gives_it(tmp_path: 
     """freecadcmd runs a script as ``__name__ == "<stem>"``, never ``__main__``."""
     script = tmp_path / "failing.py"
     script.write_text(FAILING_SCRIPT, encoding="utf-8")
-    launch = (
-        "import runpy, sys; "
-        "runpy.run_path(sys.argv[1], run_name='host_freecad_run')"
-    )
+    launch = "import runpy, sys; runpy.run_path(sys.argv[1], run_name='host_freecad_run')"
 
     result = subprocess.run(
         [sys.executable, "-c", launch, str(runner_module.FREECAD_WRAPPER), "--pass", str(script)],
