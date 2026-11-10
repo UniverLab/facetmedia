@@ -9,6 +9,7 @@ runner reports its process group before sleeping.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 import json
@@ -24,12 +25,14 @@ from typing import Any
 
 import pytest
 
+from facetmedia import config as config_module
 from facetmedia import doctor as doctor_module
 from facetmedia import record, runner, runner_sdk
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
+from facetmedia.registry_types import HostApp
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -1102,3 +1105,178 @@ def test_sdk_request_file_must_be_an_object(
     assert code == 1
     assert "not a JSON object" in capsys.readouterr().err
     assert not result_file.exists()
+
+
+# --- Windows host applications from WSL: absolute paths and WSLENV.
+
+
+EXE_BINARY = "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe"
+
+
+def _hosted_invocation(tmp_path: Path) -> runner.Invocation:
+    """An invocation for a host-app package driving a stub application."""
+    package = load_registry(FIXTURES).packages["echo"]
+    hosted = dataclasses.replace(
+        package,
+        host_app=HostApp(
+            app="blender",
+            min_version="4.0",
+            config_key="blender.path",
+            env="BLENDER_EXE",
+        ),
+    )
+    home = Home(tmp_path)
+    return runner.Invocation(hosted, home, tmp_path, tmp_path, "run-1")
+
+
+def _resolve_as(path: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "resolve",
+        lambda _home, _app: config_module.HostAppPath(path, "config blender.path"),
+    )
+
+
+@pytest.mark.parametrize("verb", ["run", "verify", "preview", "doctor"])
+def test_make_request_writes_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    request = runner.make_request(
+        verb, "echo.text", {}, Path("build_foto"), Path("build_foto") / ".facet-tmp-x", {}
+    )
+    assert request["out_dir"] == os.path.abspath("build_foto")
+    assert request["piece_dir"] == os.path.abspath(str(Path("build_foto") / ".facet-tmp-x"))
+    assert Path(str(request["out_dir"])).is_absolute()
+    assert Path(str(request["piece_dir"])).is_absolute()
+
+
+def test_host_arg_converts_the_absolute_path_for_an_exe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seen: list[str] = []
+    monkeypatch.setattr(runner, "_wslpath", lambda value: seen.append(value) or f"W:{value}")
+    converted = runner._host_arg("./out/result.json", EXE_BINARY)
+    assert seen == [os.path.abspath("./out/result.json")]
+    assert converted == f"W:{os.path.abspath('./out/result.json')}"
+
+
+def test_host_arg_leaves_linux_binaries_and_bare_flags_alone() -> None:
+    assert runner._host_arg("./out/result.json", "/usr/bin/blender") == "./out/result.json"
+    assert runner._host_arg("--input", EXE_BINARY) == "--input"
+
+
+def test_exe_launch_forwards_facet_variables_through_wslenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _resolve_as(EXE_BINARY, monkeypatch)
+    env_vars = {
+        "FACET_MODELS": "/models",
+        "HF_HOME": "/hf",
+        "FACET_SERVER_URL": "http://127.0.0.1:9",
+        "CUDA_VISIBLE_DEVICES": "",
+        "WSLENV": "MYVAR:FACET_MODELS/p",
+    }
+    runner._maybe_add_wslenv(_hosted_invocation(tmp_path), env_vars)
+    assert env_vars["WSLENV"] == (
+        "MYVAR:FACET_MODELS/p:HF_HOME/p:FACET_SERVER_URL:CUDA_VISIBLE_DEVICES"
+    )
+
+
+def test_linux_launch_leaves_the_environment_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _resolve_as("/usr/bin/blender", monkeypatch)
+    env_vars = {"FACET_MODELS": "/models", "WSLENV": "MYVAR"}
+    runner._maybe_add_wslenv(_hosted_invocation(tmp_path), env_vars)
+    assert env_vars == {"FACET_MODELS": "/models", "WSLENV": "MYVAR"}
+    package = load_registry(FIXTURES).packages["echo"]
+    home = Home(tmp_path)
+    invocation = runner.Invocation(package, home, tmp_path, tmp_path, "run-1")
+    runner._maybe_add_wslenv(invocation, env_vars)
+    assert env_vars == {"FACET_MODELS": "/models", "WSLENV": "MYVAR"}
+
+
+#: A runner that echoes the request's directories back in an asset file.
+PATHS_RUNNER = '''"""Echo run; write the request's directories into an asset."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    (req.out_dir / "paths.txt").write_text(
+        f"{req.out_dir}\\n{req.piece_dir}\\n", encoding="utf-8"
+    )
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": "paths.txt",
+                "name": "echo",
+                "kind": "text",
+                "mime": "text/plain",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [],
+            }
+        ],
+    }
+
+
+@runner.verb("verify")
+def verify(req: Request) -> dict[str, Any]:
+    return {
+        "assets": [
+            {
+                "file": path.name,
+                "passed": True,
+                "metrics": {},
+                "thresholds": {},
+                "verifier": "echo-agreeing",
+            }
+            for path in req.assets
+        ]
+    }
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
+
+def test_relative_out_sends_absolute_request_paths(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Callable[[str], None],
+) -> None:
+    _registry(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    swap_echo_runner(PATHS_RUNNER)
+    piece = _piece(tmp_path)
+
+    code = main(["run", "echo.text", str(piece), "--out", "./build_foto", "--json"])
+    envelope = _envelope(capsys)
+    assert code == 0
+    assert envelope["ok"] is True
+    # The envelope's own out_dir stays the relative path the caller passed.
+    assert envelope["data"]["out_dir"] == "build_foto"
+    lines = (tmp_path / "build_foto" / "paths.txt").read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith(str(tmp_path / "build_foto" / ".facet-tmp-"))
+    assert Path(lines[0]).is_absolute()
+    assert Path(lines[1]).is_absolute()
+    assert lines[1] == str(tmp_path)

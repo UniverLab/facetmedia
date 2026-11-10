@@ -19,9 +19,12 @@ import pytest
 import facetmedia.cli as cli_module
 from facetmedia import preview as preview_module
 from facetmedia import record as record_module
+from facetmedia import runner as runner_module
 from facetmedia.cli import build_parser, main
+from facetmedia.home import Home
 from facetmedia.preview_server import Site, make_server, serve
 from facetmedia.record import RecordSpec
+from facetmedia.registry import load_registry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_NOT_INSTALLED = 7
@@ -541,3 +544,27 @@ def test_last_activity_starts_at_bind(tmp_path: Path) -> None:
         assert before <= server.last_activity <= time.monotonic()
     finally:
         server.server_close()
+
+
+def test_preview_request_carries_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative asset still sends absolute request directories to the runner."""
+    monkeypatch.chdir(tmp_path)
+    home = Home(tmp_path / "home")
+    package = load_registry(FIXTURES).packages["echo"]
+    (tmp_path / "asset.txt").write_text("x", encoding="utf-8")
+    preview_file = tmp_path / "asset.preview.json"
+    captured: dict[str, object] = {}
+
+    def fake_call(invocation: object, verb: str, request: dict[str, object]) -> object:
+        captured.update(request)
+        preview_file.write_text("{}", encoding="utf-8")
+        return runner_module.Outcome({}, "")
+
+    monkeypatch.setattr(runner_module, "call", fake_call)
+    preview_module._ensure_preview(
+        package, home, "run-1", "echo.text", {}, Path("asset.txt"), preview_file
+    )
+    assert captured["out_dir"] == str(tmp_path)
+    assert captured["piece_dir"] == str(tmp_path)

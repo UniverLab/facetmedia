@@ -13,11 +13,15 @@ from typing import Any
 
 import pytest
 
+from facetmedia import check as check_module
 from facetmedia import cli as cli_module
 from facetmedia import record as record_module
+from facetmedia import runner as runner_module
 from facetmedia.check import _relative_to_asset
 from facetmedia.cli import main
+from facetmedia.home import Home
 from facetmedia.record import RecordSpec
+from facetmedia.registry import load_registry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -345,3 +349,26 @@ def test_check_asset_takes_an_exclusive_lock_and_reports_not_installed(
     assert code == EXIT_NOT_INSTALLED
     assert error["code"] == "not_installed"
     assert calls == [("exclusive", "facet check", True, 3600.0)]
+
+
+def test_check_request_carries_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative asset still sends absolute request directories to the runner."""
+    monkeypatch.chdir(tmp_path)
+    home = Home(tmp_path / "home")
+    package = load_registry(FIXTURES).packages["echo"]
+    (tmp_path / "asset.txt").write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_call(invocation: object, verb: str, request: dict[str, object]) -> object:
+        captured.update(request)
+        return runner_module.Outcome({"assets": [{"file": "asset.txt", "passed": True}]}, "")
+
+    monkeypatch.setattr(runner_module, "call", fake_call)
+    verdict = check_module._verify_asset(
+        package, home, tmp_path / "env", "run-1", "echo.text", {}, Path("asset.txt")
+    )
+    assert verdict.passed is True
+    assert captured["piece_dir"] == str(tmp_path)
+    assert Path(str(captured["out_dir"])).is_absolute()

@@ -542,6 +542,15 @@ resolved binary is a Windows `.exe` under WSL, path arguments — the script,
 the wrapper, `{{input}}`, `{{result}}` and any remaining argument containing
 `/` — cross through `wslpath -w`, as the lab's scripts do.
 
+Runners always receive absolute `out_dir` and `piece_dir` in the request,
+whatever the caller passed, so a Windows host resolves them the same way
+facet does. For a Windows `.exe` host, facet also forwards its own variables
+through `WSLENV`, which is the only environment a WSL-launched `.exe` sees:
+path variables (`FACET_MODELS`, `HF_HOME`, and, when set, `FACET_HOME`,
+`FACET_BIN` and `PLAYWRIGHT_BROWSERS_PATH`) with the `/p` flag, and
+`FACET_SERVER_URL` and `CUDA_VISIBLE_DEVICES` without a flag. Any `WSLENV`
+already present is kept, and no variable is listed twice.
+
 ## Capabilities and their inputs
 
 Each capability is `[capabilities.<name>]`, its id is

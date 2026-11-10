@@ -88,6 +88,20 @@ BLENDER_FLAGS: Final[tuple[str, ...]] = (
 #: The bundled FreeCAD wrapper, ported from the lab's ``freecad_run.py``.
 FREECAD_WRAPPER: Final[Path] = Path(__file__).with_name("host_freecad_run.py")
 WSLPATH_TIMEOUT_S: Final[float] = 10.0
+#: Facet variables forwarded through ``WSLENV`` to a Windows ``.exe`` host.
+#: Path variables take the ``/p`` flag so WSL translates them; the rest
+#: cross as plain strings.
+WSLENV_PATH_VARS: Final[tuple[str, ...]] = (
+    "FACET_MODELS",
+    "HF_HOME",
+    "FACET_HOME",
+    "FACET_BIN",
+    "PLAYWRIGHT_BROWSERS_PATH",
+)
+WSLENV_PLAIN_VARS: Final[tuple[str, ...]] = (
+    "FACET_SERVER_URL",
+    "CUDA_VISIBLE_DEVICES",
+)
 
 
 class RunnerInterruptedError(Exception):
@@ -243,7 +257,7 @@ def _host_arg(value: str, binary: str) -> str:
     """Convert an argument that crosses into Windows, as the lab scripts do."""
     if not binary.lower().endswith(".exe") or "/" not in value:
         return value
-    return _wslpath(value)
+    return _wslpath(os.path.abspath(value))
 
 
 def _wslpath(value: str) -> str:
@@ -321,8 +335,8 @@ def make_request(
         "verb": verb,
         "capability": capability,
         "inputs": dict(inputs),
-        "out_dir": str(out_dir),
-        "piece_dir": str(piece_dir),
+        "out_dir": os.path.abspath(str(out_dir)),
+        "piece_dir": os.path.abspath(str(piece_dir)),
         "models": {key: str(models[key]) for key in sorted(models)},
         "assets": listed,
     }
@@ -375,6 +389,37 @@ def call(inv: Invocation, verb: str, request: Mapping[str, object]) -> Outcome:
     return Outcome(_read_result(result_path, inv, tail), "".join(tail))
 
 
+def _maybe_add_wslenv(inv: Invocation, env_vars: dict[str, str]) -> None:
+    """Forward facet's variables through ``WSLENV`` to a Windows host.
+
+    WSL interop passes only the variables named in ``WSLENV`` to a
+    ``.exe`` process, so a Windows host application would otherwise never
+    see ``FACET_MODELS`` and friends.  Linux binaries are untouched.
+    """
+    app = inv.package.host_app
+    if app is None:
+        return
+    resolved = config.resolve(inv.home, app)
+    if resolved is None or not resolved.path.lower().endswith(".exe"):
+        return
+    parts = [part for part in env_vars.get("WSLENV", "").split(":") if part]
+    seen = {part.split("/")[0] for part in parts}
+    for name, suffix in _wslenv_entries(env_vars, seen):
+        parts.append(f"{name}{suffix}")
+        seen.add(name)
+    env_vars["WSLENV"] = ":".join(parts)
+
+
+def _wslenv_entries(env_vars: Mapping[str, str], seen: set[str]) -> Iterator[tuple[str, str]]:
+    """The ``(name, flag)`` entries to append to ``WSLENV``, in order."""
+    for name in WSLENV_PATH_VARS:
+        if name in env_vars and name not in seen:
+            yield name, "/p"
+    for name in WSLENV_PLAIN_VARS:
+        if name in env_vars and name not in seen:
+            yield name, ""
+
+
 def _run_client(
     inv: Invocation,
     verb: str,
@@ -386,6 +431,7 @@ def _run_client(
     env_vars = runner_env(inv.home, inv.package)
     if server_url is not None:
         env_vars[SERVER_URL_ENV] = server_url
+    _maybe_add_wslenv(inv, env_vars)
     try:
         process = subprocess.Popen(
             argv,
