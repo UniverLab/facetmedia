@@ -42,6 +42,8 @@ __all__ = [
     "read_record",
     "record_path",
     "registry_provenance",
+    "safe_exists",
+    "safe_is_file",
     "verify_integrity",
     "write_record",
 ]
@@ -288,6 +290,22 @@ def _relative_params(params: Mapping[str, object], base: Path) -> dict[str, obje
     return {str(key): _relative_value(value, base) for key, value in params.items()}
 
 
+def safe_is_file(path: Path) -> bool:
+    """Return ``path.is_file()``, treating overlong or NUL names as absent."""
+    try:
+        return path.is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def safe_exists(path: Path) -> bool:
+    """Return ``path.exists()``, treating overlong or NUL names as absent."""
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
+
+
 def _relative_value(value: object, base: Path) -> object:
     """Relativise the paths inside a parameter, leaving text such as "/imagine".
 
@@ -298,7 +316,7 @@ def _relative_value(value: object, base: Path) -> object:
         return {str(key): _relative_value(item, base) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_relative_value(item, base) for item in value]
-    if isinstance(value, str) and Path(value).is_absolute() and Path(value).exists():
+    if isinstance(value, str) and Path(value).is_absolute() and safe_exists(Path(value)):
         return _relative(value, base)
     return value
 

@@ -490,3 +490,18 @@ def test_development_registry_path_is_relative_in_the_record(
     assert section["commit"] is None
     assert section["path"] == Path(os.path.relpath(FIXTURES, asset_dir)).as_posix()
     assert not section["path"].startswith("/")
+
+
+def test_relative_value_leaves_long_text_but_relativises_directory(
+    asset_dir: Path,
+) -> None:
+    """A 600-character absolute string stays text; a real dir is relativised."""
+    long_text = "/" + "x" * 600
+    spec = dataclasses.replace(_spec(asset_dir), params={"long": long_text, "dir": str(asset_dir)})
+    record = build_record(asset_dir / "intro.wav", spec, created=CREATED)
+    provenance = record["provenance"]
+    assert isinstance(provenance, dict)
+    params = provenance["params"]
+    assert isinstance(params, dict)
+    assert params["long"] == long_text
+    assert not Path(str(params["dir"])).is_absolute()

@@ -372,3 +372,32 @@ def test_check_request_carries_absolute_paths(
     assert verdict.passed is True
     assert captured["piece_dir"] == str(tmp_path)
     assert Path(str(captured["out_dir"])).is_absolute()
+
+
+def test_check_long_prompt(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    """A 600-character prompt stays text; ``check`` returns a fresh verdict."""
+    assert facet_home.is_dir()
+    long_text = "x" * 600
+    piece = tmp_path / "piece.toml"
+    piece.write_text(f'[inputs]\ntext = "{long_text}"\nrepeat = 1\n', encoding="utf-8")
+    out = tmp_path / "out"
+    assert main(["run", "echo.text", str(piece), "--out", str(out), "--json"]) == 0
+    _envelope(capsys)
+
+    code = main(["check", str(out / "echo.txt"), "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["passed"] is True
+
+
+def test_resolve_relative_odd_text(tmp_path: Path) -> None:
+    """Overlong, NUL and directory strings stay unchanged by ``check``."""
+    asset_dir = tmp_path / "assets"
+    (asset_dir / "sub").mkdir(parents=True)
+    long_text = "x" * 600
+    resolved = _relative_to_asset({"long": long_text, "nul": "a\x00b", "dir": "sub"}, asset_dir)
+    assert resolved["long"] == long_text
+    assert resolved["nul"] == "a\x00b"
+    assert resolved["dir"] == "sub"

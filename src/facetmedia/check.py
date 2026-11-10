@@ -149,7 +149,7 @@ def _resolve_relative(value: object, asset_dir: Path) -> object:
         return [_resolve_relative(item, asset_dir) for item in value]
     if isinstance(value, str) and not Path(value).is_absolute():
         candidate = asset_dir / value
-        if candidate.is_file():
+        if record.safe_is_file(candidate):
             return str(candidate.resolve())
     return value
 
