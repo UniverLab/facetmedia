@@ -167,6 +167,29 @@ def test_unknown_capability_raises() -> None:
     assert set(exc.value.details["known"]) == {"echo.text", "future.thing", "termsy.make"}
 
 
+def test_package_name_lists_capabilities() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    with pytest.raises(FacetError) as exc:
+        registry.capability("echo")
+    assert exc.value.code == "invalid_input"
+    assert exc.value.message == ("echo is a package; name one of its capabilities: echo.text")
+    assert exc.value.details == {"capabilities": ["echo.text"]}
+
+
+def test_package_without_capabilities_keeps_the_unknown_message(tmp_path: Path) -> None:
+    """A package name never reaches the package hint when it has no capabilities."""
+    root = tmp_path / "registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    manifest = root / "packages" / "echo" / "package.toml"
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(text.split("[capabilities.")[0], encoding="utf-8")
+    registry = load_registry(root)
+    with pytest.raises(FacetError) as exc:
+        registry.capability("echo")
+    assert exc.value.message == "unknown capability: echo"
+    assert "known" in exc.value.details
+
+
 def test_broken_manifest_raises_with_file_and_key() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)

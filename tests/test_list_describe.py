@@ -226,6 +226,18 @@ def test_unknown_capability_is_invalid_input(
     assert "echo.text" in envelope["error"]["details"]["known"]
 
 
+def test_package_name_is_invalid_input_listing_capabilities(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["describe", "echo", "--json"]) == EXIT_INVALID_INPUT
+    envelope: Any = json.loads(capsys.readouterr().out)
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_input"
+    assert "echo is a package" in envelope["error"]["message"]
+    assert envelope["error"]["details"]["capabilities"] == ["echo.text"]
+
+
 def test_every_piece_example_validates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _registry(monkeypatch)
     registry = load_registry(FIXTURES)

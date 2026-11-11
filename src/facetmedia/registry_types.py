@@ -349,6 +349,14 @@ class Registry:
         for cap in self.capabilities():
             if cap.id == cap_id:
                 return cap
+        package = self.package(cap_id)
+        if package is not None and package.capabilities:
+            ids = sorted(cap.id for cap in package.capabilities)
+            raise FacetError(
+                "invalid_input",
+                f"{cap_id} is a package; name one of its capabilities: {', '.join(ids)}",
+                details={"capabilities": ids},
+            )
         known = [cap.id for cap in self.capabilities()]
         raise FacetError(
             "invalid_input",

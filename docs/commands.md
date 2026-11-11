@@ -223,7 +223,8 @@ installed: no
 starting point for a piece file. Lock: none.
 
 Exit codes: `0`; `2` an unknown capability id, listing the known ids in
-`details.known`.
+`details.known`; a package name lists its capability ids in
+`details.capabilities`.
 
 ## `facet skill`
 

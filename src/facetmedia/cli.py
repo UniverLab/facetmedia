@@ -41,7 +41,7 @@ _VERBS: tuple[tuple[str, str], ...] = (
     ("update", "download the registry at a pinned commit"),
     ("pull", "install a tool into its own pinned environment"),
     ("list", "list installed and available tools"),
-    ("describe", "show a tool's manifest"),
+    ("describe", "show one capability's contract"),
     ("skill", "print the skill for facet or one package"),
     ("doctor", "report facet, this machine's readiness and each package's doctor"),
     ("check", "re-verify an asset against its record"),
@@ -631,7 +631,7 @@ def _add_list_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_describe_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("capability", help="registry capability id to describe")
+    parser.add_argument("capability", help="registry capability id (one capability's contract)")
 
 
 def _add_skill_flags(parser: argparse.ArgumentParser) -> None:

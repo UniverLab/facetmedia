@@ -155,3 +155,17 @@ def test_main_refuses_native_windows(
     assert envelope["error"]["code"] == "machine_cannot"
     assert "WSL" in envelope["error"]["message"]
     assert not Path(os.environ["FACET_HOME"]).exists()
+
+
+def test_describe_help_names_one_capability(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    top = build_parser().format_help()
+    assert "show one capability's contract" in top
+    assert "tool's manifest" not in top
+    with pytest.raises(SystemExit) as exit_info:
+        main(["describe", "--help"])
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "show one capability's contract" in out
+    assert "registry capability id (one capability's contract)" in out
