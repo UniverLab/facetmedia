@@ -72,8 +72,16 @@ command, even though there is nothing to download.
 capability declares a `model` input, the piece's value names the manifest
 model id the run requires — exact id equality, nothing fuzzier — and only
 that model needs acceptance. A piece selecting an ungated model runs with
-no acceptance recorded. A capability without a `model` input keeps the
-package-wide gate: every gated model of the package needs acceptance.
+no acceptance recorded. A capability with a `model` input never declares
+`models`: the two never mix.
+
+A capability without a `model` input may declare `models = [...]` in its
+package manifest, naming the `[[models]]` ids it uses. The gate then
+asks acceptance only for those models; an empty list means the capability
+uses no manifest model and needs no acceptance at all. Without a
+`models` declaration, a capability keeps the package-wide gate: every
+gated model of the package needs acceptance. `facet describe` lists the
+same models the gate would ask for.
 
 ## What the record keeps
 
