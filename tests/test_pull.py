@@ -30,6 +30,7 @@ from facetmedia import runner as runner_module
 from facetmedia import shared as shared_module
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
+from facetmedia.env import browser as env_browser
 from facetmedia.env import download as env_download
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
@@ -49,6 +50,7 @@ HF_CONFIG = b'{"model_type": "fixture"}\n'
 HF_WEIGHTS = b"hf-weights-fixture\n"
 HF_WEIGHTS_SHA = hashlib.sha256(HF_WEIGHTS).hexdigest()
 BROWSER_REVISION = "1248"
+BROWSER_VERSION = "158.0.8127.18"
 
 
 def _pull(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict[str, object]]:
@@ -759,19 +761,24 @@ def test_pull_of_a_package_without_uses_writes_no_registry_marker(
 
 
 def _browser_zip() -> bytes:
-    """A tiny archive in Playwright's layout: ``chrome-linux/chrome``."""
+    """A tiny archive in Chrome for Testing's layout: ``chrome-linux64/chrome``."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as bundle:
-        info = zipfile.ZipInfo("chrome-linux/chrome", date_time=(2024, 1, 1, 0, 0, 0))
+        info = zipfile.ZipInfo("chrome-linux64/chrome", date_time=(2024, 1, 1, 0, 0, 0))
         bundle.writestr(info, b"#!/bin/sh\nexec true\n")
     return buffer.getvalue()
 
 
 class FakeBrowser:
-    """The Playwright CDN's ``chromium-linux.zip`` endpoint, on loopback."""
+    """The Chrome for Testing CDN's ``chrome-linux64.zip`` endpoint, on loopback."""
 
-    def __init__(self, revision: str = BROWSER_REVISION) -> None:
+    def __init__(
+        self,
+        revision: str = BROWSER_REVISION,
+        version: str = BROWSER_VERSION,
+    ) -> None:
         self.revision = revision
+        self.version = version
         self.archive = _browser_zip()
         self.sha256 = hashlib.sha256(self.archive).hexdigest()
         self.requests: list[str] = []
@@ -807,7 +814,7 @@ class FakeBrowser:
     def serve(self, handler: BaseHTTPRequestHandler) -> None:
         """Answer one GET, recording it so tests can assert what was asked."""
         self.requests.append(handler.path)
-        if handler.path == f"/chromium/{self.revision}/chromium-linux.zip":
+        if handler.path == f"/builds/cft/{self.version}/linux64/chrome-linux64.zip":
             handler.send_response(200)
             handler.send_header("Content-Length", str(len(self.archive)))
             handler.end_headers()
@@ -823,7 +830,7 @@ class FakeBrowser:
 def fake_browser(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeBrowser]:
     """Serve the chromium archive locally and point facet at it."""
     server = FakeBrowser().start()
-    monkeypatch.setattr(env_module, "PLAYWRIGHT_CDN", server.base)
+    monkeypatch.setattr(env_browser, "PLAYWRIGHT_CDN", server.base)
     try:
         yield server
     finally:
@@ -841,6 +848,7 @@ def _echo_with_browser(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sha256: 
 [browser]
 channel = "chromium"
 revision = "{BROWSER_REVISION}"
+version = "{BROWSER_VERSION}"
 sha256 = "{sha256}"
 """,
         encoding="utf-8",
@@ -857,14 +865,14 @@ def test_pull_fetches_the_browser_once_into_the_playwright_layout(
 ) -> None:
     home = _echo_with_browser(monkeypatch, tmp_path, fake_browser.sha256)
     target = home.browsers_dir / f"chromium-{BROWSER_REVISION}"
-    archive = f"/chromium/{BROWSER_REVISION}/chromium-linux.zip"
+    archive = f"/builds/cft/{BROWSER_VERSION}/linux64/chrome-linux64.zip"
 
     code, envelope = _pull(capsys, "pull", "echo")
     assert code == 0
     assert _data(envelope)["already_installed"] is False
     # Playwright's own <name>-<revision> layout, never <channel>/<revision>.
-    assert (target / "chrome-linux" / "chrome").is_file()
-    marker = target / env_module.BROWSER_MARKER
+    assert (target / "chrome-linux64" / "chrome").is_file()
+    marker = target / env_browser.BROWSER_MARKER
     assert marker.read_text(encoding="utf-8").strip() == fake_browser.sha256
     assert fake_browser.requests == [archive]
     assert not (home.browsers_dir / "chromium" / BROWSER_REVISION).exists()
@@ -879,8 +887,8 @@ def test_pull_fetches_the_browser_once_into_the_playwright_layout(
     code, _envelope = _pull(capsys, "pull", "echo")
     assert code == 0
     assert fake_browser.requests == [archive, archive]
-    assert (target / "chrome-linux" / "chrome").is_file()
-    assert (target / env_module.BROWSER_MARKER).is_file()
+    assert (target / "chrome-linux64" / "chrome").is_file()
+    assert (target / env_browser.BROWSER_MARKER).is_file()
 
     # A marker that does not hold the declared sha256 counts as absent too.
     marker.write_text("0" * 64, encoding="utf-8")
@@ -897,10 +905,31 @@ def test_runner_env_points_playwright_at_the_shared_browsers_dir(
     package = load_registry(tmp_path / "registry").packages["echo"]
     env_vars = runner_module.runner_env(home, package)
     assert env_vars["PLAYWRIGHT_BROWSERS_PATH"] == str(home.browsers_dir)
+    assert env_vars["FACET_BROWSER"] == str(
+        home.browsers_dir / f"chromium-{BROWSER_REVISION}" / "chrome-linux64" / "chrome"
+    )
 
     _registry(monkeypatch)
     plain = load_registry(FIXTURES).packages["echo"]
     assert "PLAYWRIGHT_BROWSERS_PATH" not in runner_module.runner_env(home, plain)
+    assert "FACET_BROWSER" not in runner_module.runner_env(home, plain)
+
+
+def test_pull_of_a_browser_package_refuses_a_non_x86_64_host(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = _echo_with_browser(monkeypatch, tmp_path, "0" * 64)
+    monkeypatch.setattr(env_browser.platform, "machine", lambda: "aarch64")
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == EXIT_MACHINE_CANNOT
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "machine_cannot"
+    assert "linux/aarch64" in error["message"]
+    assert not (home.browsers_dir / f"chromium-{BROWSER_REVISION}").exists()
 
 
 # --- a uv.lock server: one frozen sync, and the marker holds the lock's sha256.

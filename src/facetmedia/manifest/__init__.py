@@ -44,6 +44,7 @@ from facetmedia.registry_types import (
 
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}\Z")
+_BROWSER_VERSION_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+\.\d+\.\d+\Z")
 _PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(\.\d+)?\Z")
 _USES_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]*\Z")
 _REQUIRES_RE: Final[re.Pattern[str]] = re.compile(r"^Requires:[ \t]*(.*)$", re.MULTILINE)
@@ -163,7 +164,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "browser",
     }
 )
-_BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "sha256"})
+_BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "version", "sha256"})
 _BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
 _ENGINE_KEYS: Final[frozenset[str]] = frozenset(
     {"type", "python", "node", "server", "source", "host_app", "binary"}
@@ -479,6 +480,9 @@ class RegistryLoader:
         if channel is not None and channel not in _BROWSER_CHANNELS:
             self.add(file, "browser.channel", "value")
         revision = self.string(table, "revision", file, "browser.", required=True)
+        version = self.string(table, "version", file, "browser.", required=True)
+        if version and not _BROWSER_VERSION_RE.fullmatch(version):
+            self.add(file, "browser.version", "value")
         sha256 = self.string(table, "sha256", file, "browser.", required=True)
         if sha256 and not _SHA256_RE.fullmatch(sha256):
             self.add(file, "browser.sha256", "value")
@@ -487,6 +491,7 @@ class RegistryLoader:
         return Browser(
             channel=channel or "",
             revision=revision or "",
+            version=version or "",
             sha256=sha256 or "",
         )
 

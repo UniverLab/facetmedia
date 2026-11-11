@@ -391,7 +391,8 @@ def _echo_with_browser(tmp_path: Path, browser_toml: str) -> set[tuple[str, str,
 def test_validate_accepts_a_declared_browser(tmp_path: Path) -> None:
     found = _echo_with_browser(
         tmp_path,
-        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\nsha256 = "{BROWSER_SHA256}"\n',
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\n'
+        f'version = "158.0.8127.18"\nsha256 = "{BROWSER_SHA256}"\n',
     )
     assert found == set()
     assert main(["registry", "validate", str(tmp_path / "registry")]) == 0
@@ -400,7 +401,8 @@ def test_validate_accepts_a_declared_browser(tmp_path: Path) -> None:
 def test_validate_rejects_an_unknown_browser_channel(tmp_path: Path) -> None:
     found = _echo_with_browser(
         tmp_path,
-        f'\n[browser]\nchannel = "firefox"\nrevision = "1248"\nsha256 = "{BROWSER_SHA256}"\n',
+        f'\n[browser]\nchannel = "firefox"\nrevision = "1248"\n'
+        f'version = "158.0.8127.18"\nsha256 = "{BROWSER_SHA256}"\n',
     )
     assert ("packages/echo/package.toml", "browser.channel", "value") in found
     assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
@@ -409,7 +411,8 @@ def test_validate_rejects_an_unknown_browser_channel(tmp_path: Path) -> None:
 def test_validate_rejects_a_browser_without_a_revision(tmp_path: Path) -> None:
     found = _echo_with_browser(
         tmp_path,
-        f'\n[browser]\nchannel = "chromium"\nsha256 = "{BROWSER_SHA256}"\n',
+        f'\n[browser]\nchannel = "chromium"\n'
+        f'version = "158.0.8127.18"\nsha256 = "{BROWSER_SHA256}"\n',
     )
     assert ("packages/echo/package.toml", "browser.revision", "required") in found
     assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
@@ -418,7 +421,27 @@ def test_validate_rejects_a_browser_without_a_revision(tmp_path: Path) -> None:
 def test_validate_rejects_a_malformed_browser_sha256(tmp_path: Path) -> None:
     found = _echo_with_browser(
         tmp_path,
-        '\n[browser]\nchannel = "chromium"\nrevision = "1248"\nsha256 = "not-a-sha"\n',
+        '\n[browser]\nchannel = "chromium"\nrevision = "1248"\n'
+        'version = "158.0.8127.18"\nsha256 = "not-a-sha"\n',
     )
     assert ("packages/echo/package.toml", "browser.sha256", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_browser_without_a_version(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.version", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_malformed_browser_version(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\n'
+        f'version = "158.0.1"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.version", "value") in found
     assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID

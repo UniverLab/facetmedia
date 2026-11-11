@@ -134,6 +134,7 @@ class Browser:
 
     channel: str
     revision: str
+    version: str
     sha256: str
 
 

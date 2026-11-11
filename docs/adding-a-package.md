@@ -249,20 +249,26 @@ The package declares the build it needs in an optional top-level
 ```toml
 [browser]
 channel = "chromium"                  # the only channel in v0.1
-revision = "1248"                     # a Playwright-compatible build revision
-sha256 = "<64 lowercase hex>"         # of the official Playwright CDN archive
+revision = "1254"                     # a Playwright-compatible build revision
+version = "158.0.8127.18"             # the Chrome for Testing version
+sha256 = "<64 lowercase hex>"         # of the official Chrome for Testing archive
 ```
 
 `facet registry validate` rejects an unknown channel, a missing `revision`,
+a missing `version`, a `version` that is not four dot-separated integers,
 and a `sha256` that is not 64 lowercase hex characters.
 
-`facet pull` downloads `chromium-linux.zip` for the declared revision from
-the official Playwright CDN, with the same three attempts and backoff as
+`facet pull` downloads `chrome-linux64.zip` for the declared `version` from
+the official Chrome for Testing CDN
+(`https://cdn.playwright.dev/builds/cft/<version>/linux64/chrome-linux64.zip`),
+with the same three attempts and backoff as
 model downloads, verifies the archive's sha256, and extracts it once at
 `<home>/browsers/chromium-<revision>/` — Playwright's own
 `<name>-<revision>` layout, the same one `~/.cache/ms-playwright` uses,
-never a nested `<channel>/<revision>` directory. An extraction whose
-`.facet-verified` marker does not hold the declared sha256 is fetched again;
+never a nested `<channel>/<revision>` directory. The executable lands at
+`chromium-<revision>/chrome-linux64/chrome`. An extraction whose
+`.facet-verified` marker does not hold the declared sha256, or whose
+executable is missing, is fetched again;
 a verified one is never re-downloaded.
 
 The browser is shared: one extraction per channel and revision under
@@ -270,7 +276,12 @@ The browser is shared: one extraction per channel and revision under
 environments are rebuilt, the browser is not. The runner environment gets
 `PLAYWRIGHT_BROWSERS_PATH` pointing at `<home>/browsers`, so the package's
 own `playwright` pip dependency finds the browser without downloading
-anything itself. `facet doctor` reports a declared browser whose extraction
+anything itself, and `FACET_BROWSER` with the absolute path of the
+`chrome-linux64/chrome` executable, so drivers that take an explicit
+`executablePath` (puppeteer, Playwright) need no host Chrome.
+Browser builds are only available on Linux x86-64; on any other host `pull`
+of a package declaring `[browser]` refuses with `machine_cannot` (exit 5).
+`facet doctor` reports a declared browser whose extraction
 is missing or unverified with the fix `facet pull <package>`; like
 `installed`, `models` and `shared_modules`, that check never gates the pull
 that fixes it.

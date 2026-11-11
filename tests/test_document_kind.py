@@ -18,16 +18,16 @@ from typing import Any
 
 import pytest
 
-from facetmedia import env as env_module
 from facetmedia import preview as preview_module
 from facetmedia.cli import main
-from tests.test_pull import BROWSER_REVISION, FIXTURES, FakeBrowser
+from facetmedia.env import browser as env_browser
+from tests.test_pull import BROWSER_REVISION, BROWSER_VERSION, FIXTURES, FakeBrowser
 
 PAGE_COUNT = 11
 SHORT_PAGES = 2
 IMAGE_LIMIT = 10
 EXIT_VERIFICATION_FAILED = 3
-REVISION_REQUEST = f"/chromium/{BROWSER_REVISION}/chromium-linux.zip"
+REVISION_REQUEST = f"/builds/cft/{BROWSER_VERSION}/linux64/chrome-linux64.zip"
 
 
 @dataclass
@@ -51,7 +51,7 @@ def paged_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Paged]:
         _write_paged_package(registry_root, server.sha256)
         patcher.setenv("FACET_HOME", str(home_root))
         patcher.setenv("FACET_REGISTRY", str(registry_root))
-        patcher.setattr(env_module, "PLAYWRIGHT_CDN", server.base)
+        patcher.setattr(env_browser, "PLAYWRIGHT_CDN", server.base)
         assert main(["pull", "paged", "--json"]) == 0
         yield Paged(home=home_root, registry=registry_root, browser=server)
     finally:
@@ -153,6 +153,7 @@ viewer = "generic"
 [browser]
 channel = "chromium"
 revision = "{BROWSER_REVISION}"
+version = "{BROWSER_VERSION}"
 sha256 = "{browser_sha256}"
 """
 

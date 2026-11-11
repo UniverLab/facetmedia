@@ -22,13 +22,13 @@ from typing import Any
 import pytest
 
 from facetmedia import doctor as doctor_module
-from facetmedia import env as env_module
 from facetmedia import shared as shared_module
 from facetmedia.cli import main
+from facetmedia.env import browser as env_browser
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
 from tests.registry_server import COMMIT, OTHER_COMMIT
-from tests.test_pull import BROWSER_REVISION, FakeBrowser
+from tests.test_pull import BROWSER_REVISION, BROWSER_VERSION, FakeBrowser
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -1067,7 +1067,7 @@ def test_doctor_detects_stale_shared_modules_in_pinned_mode(
 def fake_browser(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeBrowser]:
     """Serve the chromium archive locally and point facet at it."""
     server = FakeBrowser().start()
-    monkeypatch.setattr(env_module, "PLAYWRIGHT_CDN", server.base)
+    monkeypatch.setattr(env_browser, "PLAYWRIGHT_CDN", server.base)
     try:
         yield server
     finally:
@@ -1085,6 +1085,7 @@ def _registry_with_browser(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sha2
 [browser]
 channel = "chromium"
 revision = "{BROWSER_REVISION}"
+version = "{BROWSER_VERSION}"
 sha256 = "{sha256}"
 """,
         encoding="utf-8",
@@ -1132,6 +1133,32 @@ def test_browser_check_fails_before_pull_and_passes_after(
     entry = _browser_entry(data)
     assert entry["ok"] is True
     assert data["healthy"] is True
+
+
+def test_browser_check_fails_when_the_executable_is_missing(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake_browser: FakeBrowser,
+) -> None:
+    registry_copy = _registry_with_browser(monkeypatch, tmp_path, fake_browser.sha256)
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
+
+    home = Home.from_env()
+    browser = load_registry(registry_copy).packages["echo"].browser
+    assert browser is not None
+    executable = env_browser.browser_executable(browser, home)
+    assert executable.is_file()
+    executable.unlink()
+
+    code = main(["doctor", "echo", "--json"])
+    assert code == EXIT_MACHINE_CANNOT
+    entry = _browser_entry(_data(_envelope(capsys)))
+    assert entry["ok"] is False
+    assert entry["fix"] == "facet pull echo"
 
 
 # --- The exit code and the envelope verdict are one derivation.

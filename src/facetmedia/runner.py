@@ -364,6 +364,7 @@ def runner_env(home: Home, package: Package) -> dict[str, str]:
         env_vars["PATH"] = str(resolved.parent) + os.pathsep + env_vars.get("PATH", "")
     if package.browser is not None:
         env_vars["PLAYWRIGHT_BROWSERS_PATH"] = str(home.browsers_dir)
+        env_vars["FACET_BROWSER"] = str(env_module.browser_executable(package.browser, home))
     if not package.requirements.gpu:
         env_vars["CUDA_VISIBLE_DEVICES"] = ""
     return env_vars
