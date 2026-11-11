@@ -39,6 +39,7 @@ from facetmedia import licenses, shared
 from facetmedia.contract import FacetError
 from facetmedia.env import binary as env_binary
 from facetmedia.env import browser as env_browser
+from facetmedia.env import ffmpeg as env_ffmpeg
 from facetmedia.env.binary import binary_dir, binary_present, binary_problem
 from facetmedia.env.browser import browser_dir, browser_executable, browser_present
 from facetmedia.env.download import (
@@ -49,6 +50,13 @@ from facetmedia.env.download import (
     _opened,
     _part_path,
     _stream_to_part,
+)
+from facetmedia.env.ffmpeg import (
+    ffmpeg_bin_dir,
+    ffmpeg_dir,
+    ffmpeg_executable,
+    ffmpeg_present,
+    ffprobe_executable,
 )
 from facetmedia.env.node import (
     NODE_MARKER,
@@ -85,6 +93,11 @@ __all__ = [
     "browser_dir",
     "browser_executable",
     "browser_present",
+    "ffmpeg_bin_dir",
+    "ffmpeg_dir",
+    "ffmpeg_executable",
+    "ffmpeg_present",
+    "ffprobe_executable",
     "client_env_present",
     "is_installed",
     "model_present",
@@ -162,6 +175,9 @@ def pull(
     # The browser is engine-independent: node packages render with it too.
     if package.browser is not None:
         env_browser.fetch_browser(package.browser, home)
+    # The FFmpeg build is engine-independent too: node packages encode with it.
+    if package.ffmpeg is not None:
+        env_ffmpeg.fetch_ffmpeg(package.ffmpeg, home)
     if package.host_app is not None:
         return _pull_host_app(package, home, env_dir, started)
     if package.node is not None:
@@ -257,6 +273,8 @@ def _preflight(package: Package, home: Home, run_id: str) -> None:
     require_posix()
     if package.browser is not None:
         env_browser.require_host()
+    if package.ffmpeg is not None:
+        env_ffmpeg.require_host()
     errors, _warnings = doctor_module.requirement_errors(package, home, run_id)
     # pull gates only the licences of models it downloads: a backend-owned
     # model is never fetched here, and the run gates it per piece.

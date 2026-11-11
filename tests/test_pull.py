@@ -12,14 +12,19 @@ import dataclasses
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
+import tarfile
 import threading
+import urllib.parse
+import urllib.request
 import zipfile
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from typing import IO
 
 import pytest
 
@@ -32,6 +37,7 @@ from facetmedia.cli import main
 from facetmedia.contract import FacetError
 from facetmedia.env import browser as env_browser
 from facetmedia.env import download as env_download
+from facetmedia.env import ffmpeg as env_ffmpeg
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
 from facetmedia.registry_types import Binary, HostApp, Server
@@ -930,6 +936,274 @@ def test_pull_of_a_browser_package_refuses_a_non_x86_64_host(
     assert error["code"] == "machine_cannot"
     assert "linux/aarch64" in error["message"]
     assert not (home.browsers_dir / f"chromium-{BROWSER_REVISION}").exists()
+
+
+# --- the shared FFmpeg of ``[ffmpeg]``: a tiny ``.tar.xz`` on loopback.
+
+FFMPEG_VERSION = "n8.1.3-27-g8dca1586f4"
+FFMPEG_TOP = f"ffmpeg-{FFMPEG_VERSION}-linux64-gpl-8.1"
+FFMPEG_PATH = f"/builds/{FFMPEG_TOP}.tar.xz"
+FFMPEG_HOST = "ffmpeg.example.com"
+FFMPEG_URL = f"https://{FFMPEG_HOST}{FFMPEG_PATH}"
+
+
+def _ffmpeg_bytes(
+    tops: tuple[str, ...] = (FFMPEG_TOP,),
+    names: tuple[str, ...] = ("bin/ffmpeg", "bin/ffprobe"),
+) -> bytes:
+    """A tiny ``.tar.xz`` with the named binaries under each top directory."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:xz") as bundle:
+        for top in tops:
+            for name in names:
+                payload = b"#!/bin/sh\nexec true\n"
+                info = tarfile.TarInfo(f"{top}/{name}")
+                info.size = len(payload)
+                info.mode = 0o755
+                bundle.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+class FakeFfmpeg:
+    """The upstream FFmpeg archive endpoint, on loopback."""
+
+    def __init__(self, archive: bytes) -> None:
+        self.archive = archive
+        self.sha256 = hashlib.sha256(archive).hexdigest()
+        self.requests: list[str] = []
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    @property
+    def base(self) -> str:
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}"
+
+    def start(self) -> FakeFfmpeg:
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5)
+
+    def _handler(self) -> type[BaseHTTPRequestHandler]:
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                server.serve(self)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        return Handler
+
+    def serve(self, handler: BaseHTTPRequestHandler) -> None:
+        """Answer one GET, recording it so tests can assert what was asked."""
+        self.requests.append(handler.path)
+        if handler.path == FFMPEG_PATH:
+            handler.send_response(200)
+            handler.send_header("Content-Length", str(len(self.archive)))
+            handler.end_headers()
+            handler.wfile.write(self.archive)
+            return
+        handler.send_response(404)
+        handler.send_header("Content-Length", "9")
+        handler.end_headers()
+        handler.wfile.write(b"not found")
+
+
+def _redirect_ffmpeg(monkeypatch: pytest.MonkeyPatch, server: FakeFfmpeg) -> None:
+    """Point the declared ``https`` host at the loopback server, in process only."""
+    real_urlopen = urllib.request.urlopen
+
+    def redirected(request: object, *args: object, **kwargs: object) -> IO[bytes]:
+        url = request.full_url if isinstance(request, urllib.request.Request) else str(request)
+        parts = urllib.parse.urlsplit(url)
+        if parts.hostname == FFMPEG_HOST:
+            headers = (
+                dict(request.header_items()) if isinstance(request, urllib.request.Request) else {}
+            )
+            request = urllib.request.Request(server.base + parts.path, headers=headers)
+        return real_urlopen(request, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(urllib.request, "urlopen", redirected)
+
+
+@pytest.fixture
+def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeFfmpeg]:
+    """Serve the FFmpeg archive locally and point the declared URL at it."""
+    server = FakeFfmpeg(_ffmpeg_bytes()).start()
+    _redirect_ffmpeg(monkeypatch, server)
+    try:
+        yield server
+    finally:
+        server.stop()
+
+
+def _echo_with_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sha256: str) -> Home:
+    """A registry whose echo package declares ``[ffmpeg]``."""
+    registry_copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry_copy)
+    manifest = registry_copy / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + f"""
+[ffmpeg]
+version = "{FFMPEG_VERSION}"
+url = "{FFMPEG_URL}"
+sha256 = "{sha256}"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FACET_REGISTRY", str(registry_copy))
+    return Home.from_env()
+
+
+def test_pull_fetches_the_ffmpeg_once_and_skips_a_verified_one(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake_ffmpeg: FakeFfmpeg,
+) -> None:
+    home = _echo_with_ffmpeg(monkeypatch, tmp_path, fake_ffmpeg.sha256)
+    target = home.ffmpeg_dir / FFMPEG_VERSION
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert _data(envelope)["already_installed"] is False
+    # The single top directory is stripped: the binaries land in ``bin/``.
+    assert (target / "bin" / "ffmpeg").is_file()
+    assert (target / "bin" / "ffprobe").is_file()
+    assert not (target / FFMPEG_TOP).exists()
+    marker = target / env_ffmpeg.FFMPEG_MARKER
+    assert marker.read_text(encoding="utf-8").strip() == fake_ffmpeg.sha256
+    assert fake_ffmpeg.requests == [FFMPEG_PATH]
+
+    # A verified extraction skips the download entirely.
+    code, _envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert fake_ffmpeg.requests == [FFMPEG_PATH]
+
+    # Removing the extraction makes the next pull fetch it again.
+    shutil.rmtree(target)
+    code, _envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert fake_ffmpeg.requests == [FFMPEG_PATH, FFMPEG_PATH]
+    assert (target / "bin" / "ffmpeg").is_file()
+    assert (target / env_ffmpeg.FFMPEG_MARKER).is_file()
+
+    # A marker that does not hold the declared sha256 counts as absent too.
+    marker.write_text("0" * 64, encoding="utf-8")
+    code, _envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert fake_ffmpeg.requests == [FFMPEG_PATH, FFMPEG_PATH, FFMPEG_PATH]
+    assert marker.read_text(encoding="utf-8").strip() == fake_ffmpeg.sha256
+
+    # A missing binary counts as absent too.
+    (target / "bin" / "ffprobe").unlink()
+    code, _envelope = _pull(capsys, "pull", "echo")
+    assert code == 0
+    assert fake_ffmpeg.requests == [FFMPEG_PATH] * 4
+    assert (target / "bin" / "ffprobe").is_file()
+
+
+def test_pull_of_an_ffmpeg_package_with_a_bad_sha256_fails(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake_ffmpeg: FakeFfmpeg,
+) -> None:
+    home = _echo_with_ffmpeg(monkeypatch, tmp_path, "0" * 64)
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == EXIT_DOWNLOAD_FAILED
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "download_failed"
+    assert not (home.ffmpeg_dir / FFMPEG_VERSION).exists()
+
+
+def _pull_with_archive(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    archive: bytes,
+) -> tuple[int, dict[str, object], Home, FakeFfmpeg]:
+    """Pull echo against a loopback server serving ``archive``, stopping it after."""
+    server = FakeFfmpeg(archive).start()
+    try:
+        _redirect_ffmpeg(monkeypatch, server)
+        home = _echo_with_ffmpeg(monkeypatch, tmp_path, server.sha256)
+        code, envelope = _pull(capsys, "pull", "echo")
+    finally:
+        server.stop()
+    return code, envelope, home, server
+
+
+def test_pull_of_an_ffmpeg_package_with_two_top_directories_fails(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive = _ffmpeg_bytes(tops=("ffmpeg-a", "ffmpeg-b"))
+    code, envelope, home, _server = _pull_with_archive(capsys, monkeypatch, tmp_path, archive)
+    assert code == EXIT_DOWNLOAD_FAILED
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "download_failed"
+    assert not (home.ffmpeg_dir / FFMPEG_VERSION).exists()
+
+
+def test_pull_of_an_ffmpeg_package_without_ffprobe_fails(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive = _ffmpeg_bytes(names=("bin/ffmpeg",))
+    code, envelope, home, _server = _pull_with_archive(capsys, monkeypatch, tmp_path, archive)
+    assert code == EXIT_DOWNLOAD_FAILED
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "download_failed"
+    assert not (home.ffmpeg_dir / FFMPEG_VERSION).exists()
+
+
+def test_runner_env_points_ffmpeg_at_the_shared_bin_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = _echo_with_ffmpeg(monkeypatch, tmp_path, "0" * 64)
+    package = load_registry(tmp_path / "registry").packages["echo"]
+    env_vars = runner_module.runner_env(home, package)
+    bin_dir = home.ffmpeg_dir / FFMPEG_VERSION / "bin"
+    assert env_vars["FACET_FFMPEG"] == str(bin_dir / "ffmpeg")
+    assert env_vars["FACET_FFPROBE"] == str(bin_dir / "ffprobe")
+    assert env_vars["PATH"].split(os.pathsep)[0] == str(bin_dir)
+
+    _registry(monkeypatch)
+    plain = load_registry(FIXTURES).packages["echo"]
+    bare = runner_module.runner_env(home, plain)
+    assert "FACET_FFMPEG" not in bare
+    assert "FACET_FFPROBE" not in bare
+
+
+def test_pull_of_an_ffmpeg_package_refuses_a_non_x86_64_host(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    home = _echo_with_ffmpeg(monkeypatch, tmp_path, "0" * 64)
+    monkeypatch.setattr(env_ffmpeg.platform, "machine", lambda: "aarch64")
+
+    code, envelope = _pull(capsys, "pull", "echo")
+    assert code == EXIT_MACHINE_CANNOT
+    error = envelope["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == "machine_cannot"
+    assert "linux/aarch64" in error["message"]
+    assert not (home.ffmpeg_dir / FFMPEG_VERSION).exists()
 
 
 # --- a uv.lock server: one frozen sync, and the marker holds the lock's sha256.

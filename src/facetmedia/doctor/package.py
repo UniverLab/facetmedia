@@ -40,8 +40,9 @@ def package_doctor(
     node_entry = doctor_node.doctor_entry(package, home)
     if node_entry is not None:
         return [node_entry], None
-    if package.browser is not None and not env_module.browser_present(package.browser, home):
-        return [_browser_doctor_check(package, home)], None
+    artifact_entry = _artifact_doctor_check(package, home)
+    if artifact_entry is not None:
+        return [artifact_entry], None
     if not env_module.server_present(package, home) or not env_module.source_present(package, home):
         return [_server_doctor_check(package, home)], None
     temp_dir = home.tmp_dir / f".facet-doctor-{run_id}"
@@ -60,6 +61,31 @@ def _browser_doctor_check(package: Package, home: Home) -> dict[str, object]:
     target = env_module.browser_dir(package.browser, home)
     return {
         "name": "browser",
+        "ok": False,
+        "detail": f"{target}: the extraction is not verified",
+        "fix": f"facet pull {package.name}",
+    }
+
+
+def _artifact_doctor_check(package: Package, home: Home) -> dict[str, object] | None:
+    """The doctor entry for a declared browser or FFmpeg build that is not verified."""
+    from facetmedia import env as env_module  # noqa: PLC0415
+
+    if package.browser is not None and not env_module.browser_present(package.browser, home):
+        return _browser_doctor_check(package, home)
+    if package.ffmpeg is not None and not env_module.ffmpeg_present(package.ffmpeg, home):
+        return _ffmpeg_doctor_check(package, home)
+    return None
+
+
+def _ffmpeg_doctor_check(package: Package, home: Home) -> dict[str, object]:
+    """The doctor entry for a declared FFmpeg build whose extraction is not verified."""
+    from facetmedia import env as env_module  # noqa: PLC0415
+
+    assert package.ffmpeg is not None
+    target = env_module.ffmpeg_dir(package.ffmpeg, home)
+    return {
+        "name": "ffmpeg",
         "ok": False,
         "detail": f"{target}: the extraction is not verified",
         "fix": f"facet pull {package.name}",

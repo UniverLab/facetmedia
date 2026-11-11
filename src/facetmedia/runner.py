@@ -365,6 +365,11 @@ def runner_env(home: Home, package: Package) -> dict[str, str]:
     if package.browser is not None:
         env_vars["PLAYWRIGHT_BROWSERS_PATH"] = str(home.browsers_dir)
         env_vars["FACET_BROWSER"] = str(env_module.browser_executable(package.browser, home))
+    if package.ffmpeg is not None:
+        bin_dir = env_module.ffmpeg_bin_dir(package.ffmpeg, home)
+        env_vars["FACET_FFMPEG"] = str(bin_dir / "ffmpeg")
+        env_vars["FACET_FFPROBE"] = str(bin_dir / "ffprobe")
+        env_vars["PATH"] = str(bin_dir) + os.pathsep + env_vars.get("PATH", "")
     if not package.requirements.gpu:
         env_vars["CUDA_VISIBLE_DEVICES"] = ""
     return env_vars

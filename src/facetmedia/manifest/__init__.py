@@ -17,6 +17,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from facetmedia.manifest.binary import read_binary
+from facetmedia.manifest.ffmpeg import read_ffmpeg
 from facetmedia.manifest.host import read_host_app
 from facetmedia.manifest.model import read_models
 from facetmedia.manifest.node import read_node
@@ -162,6 +163,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "capabilities",
         "uses",
         "browser",
+        "ffmpeg",
     }
 )
 _BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "version", "sha256"})
@@ -399,6 +401,7 @@ class RegistryLoader:
         dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
         uses = self.uses(data.get("uses"), file, dependencies)
         browser = self.browser(data, file)
+        ffmpeg = read_ffmpeg(self, data, file)
         if len(self.problems) != before:
             return None
         if (
@@ -432,6 +435,7 @@ class RegistryLoader:
             capabilities=capabilities,
             uses=uses,
             browser=browser,
+            ffmpeg=ffmpeg,
             server=server,
             source=source,
             node=node,

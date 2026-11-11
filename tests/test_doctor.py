@@ -25,10 +25,21 @@ from facetmedia import doctor as doctor_module
 from facetmedia import shared as shared_module
 from facetmedia.cli import main
 from facetmedia.env import browser as env_browser
+from facetmedia.env import ffmpeg as env_ffmpeg
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
 from tests.registry_server import COMMIT, OTHER_COMMIT
-from tests.test_pull import BROWSER_REVISION, BROWSER_VERSION, FakeBrowser
+from tests.test_pull import (
+    BROWSER_REVISION,
+    BROWSER_VERSION,
+    FFMPEG_HOST,
+    FFMPEG_PATH,
+    FFMPEG_VERSION,
+    FakeBrowser,
+    FakeFfmpeg,
+    _ffmpeg_bytes,
+    _redirect_ffmpeg,
+)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -1104,9 +1115,11 @@ def test_browser_check_is_absent_from_can_run_checks() -> None:
     """What a pull fixes never gates the pull that fixes it."""
     assert "browser" in doctor_module.CHECK_ORDER
     assert "browser" not in doctor_module.CAN_RUN_CHECKS
+    assert "ffmpeg" in doctor_module.CHECK_ORDER
+    assert "ffmpeg" not in doctor_module.CAN_RUN_CHECKS
     assert "node" in doctor_module.CHECK_ORDER
     assert "node" not in doctor_module.CAN_RUN_CHECKS
-    assert list(doctor_module.CHECK_ORDER)[-3:] == ["browser", "node", "shared_modules"]
+    assert list(doctor_module.CHECK_ORDER)[-4:] == ["browser", "ffmpeg", "node", "shared_modules"]
 
 
 def test_browser_check_fails_before_pull_and_passes_after(
@@ -1157,6 +1170,109 @@ def test_browser_check_fails_when_the_executable_is_missing(
     code = main(["doctor", "echo", "--json"])
     assert code == EXIT_MACHINE_CANNOT
     entry = _browser_entry(_data(_envelope(capsys)))
+    assert entry["ok"] is False
+    assert entry["fix"] == "facet pull echo"
+
+
+# --- the shared FFmpeg check: fixed by pull, never gating it.
+
+
+@pytest.fixture
+def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeFfmpeg]:
+    """Serve the FFmpeg archive locally and point the declared URL at it."""
+    server = FakeFfmpeg(_ffmpeg_bytes()).start()
+    _redirect_ffmpeg(monkeypatch, server)
+    try:
+        yield server
+    finally:
+        server.stop()
+
+
+def _registry_with_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sha256: str) -> Path:
+    """A fixture-registry copy whose echo package declares ``[ffmpeg]``."""
+    registry_copy = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry_copy)
+    manifest = registry_copy / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + f"""
+[ffmpeg]
+version = "{FFMPEG_VERSION}"
+url = "https://{FFMPEG_HOST}{FFMPEG_PATH}"
+sha256 = "{sha256}"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FACET_REGISTRY", str(registry_copy))
+    return registry_copy
+
+
+def _ffmpeg_entry(data: dict[str, Any]) -> dict[str, Any]:
+    entry = data["packages"]["echo"]["readiness"]["ffmpeg"]
+    assert isinstance(entry, dict)
+    return entry
+
+
+def test_ffmpeg_check_is_ok_without_a_declaration(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+
+    code = main(["doctor", "echo", "--json"])
+    assert code == EXIT_NOT_INSTALLED
+    entry = _ffmpeg_entry(_data(_envelope(capsys)))
+    assert entry["ok"] is True
+    assert entry["detail"] == "no ffmpeg declared"
+
+
+def test_ffmpeg_check_fails_before_pull_and_passes_after(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake_ffmpeg: FakeFfmpeg,
+) -> None:
+    _registry_with_ffmpeg(monkeypatch, tmp_path, fake_ffmpeg.sha256)
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+
+    code = main(["doctor", "echo", "--json"])
+    assert code == EXIT_NOT_INSTALLED
+    entry = _ffmpeg_entry(_data(_envelope(capsys)))
+    assert entry["ok"] is False
+    assert entry["fix"] == "facet pull echo"
+
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
+
+    code = main(["doctor", "echo", "--json"])
+    assert code == 0
+    data = _data(_envelope(capsys))
+    entry = _ffmpeg_entry(data)
+    assert entry["ok"] is True
+    assert data["healthy"] is True
+
+
+def test_ffmpeg_check_fails_when_a_binary_is_missing(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake_ffmpeg: FakeFfmpeg,
+) -> None:
+    registry_copy = _registry_with_ffmpeg(monkeypatch, tmp_path, fake_ffmpeg.sha256)
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+
+    assert main(["pull", "echo", "--json"]) == 0
+    capsys.readouterr()
+
+    home = Home.from_env()
+    ffmpeg = load_registry(registry_copy).packages["echo"].ffmpeg
+    assert ffmpeg is not None
+    binary = env_ffmpeg.ffmpeg_executable(ffmpeg, home)
+    assert binary.is_file()
+    binary.unlink()
+
+    code = main(["doctor", "echo", "--json"])
+    assert code == EXIT_MACHINE_CANNOT
+    entry = _ffmpeg_entry(_data(_envelope(capsys)))
     assert entry["ok"] is False
     assert entry["fix"] == "facet pull echo"
 

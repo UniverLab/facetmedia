@@ -76,6 +76,7 @@ class Home:
             self._root / "models" / "direct",
             self._root / "models" / "hf",
             self._root / "browsers",
+            self._root / "ffmpeg",
             self._root / "servers",
             self._root / "python",
             self._root / "runtimes" / "node",
@@ -120,6 +121,10 @@ class Home:
     @property
     def browsers_dir(self) -> Path:
         return self._root / "browsers"
+
+    @property
+    def ffmpeg_dir(self) -> Path:
+        return self._root / "ffmpeg"
 
     @property
     def servers_dir(self) -> Path:
@@ -181,6 +186,7 @@ def same_filesystem_check(home: Home) -> None:
     for directory in (
         home.models_dir,
         home.browsers_dir,
+        home.ffmpeg_dir,
         home.servers_dir,
         home.runtimes_dir,
         home.node_pkgs_dir,

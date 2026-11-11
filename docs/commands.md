@@ -314,7 +314,10 @@ and every installed package), a package name, or a capability id. The
 readiness list ends with `shared_modules`, which reports a stale `facet_lib`
 copy with the fix `facet pull <package>`; just before it, `browser` reports a
 declared Chromium extraction whose `.facet-verified` marker does not hold the
-declared sha256 or whose executable is missing, with the same fix. A package that declares `[engine.server]` reports a missing or
+declared sha256 or whose executable is missing, with the same fix, and
+`ffmpeg` reports a declared FFmpeg extraction whose `.facet-verified` marker
+does not hold the declared sha256 or whose `bin/ffmpeg` or `bin/ffprobe` is
+missing, with the same fix. A package that declares `[engine.server]` reports a missing or
 unverified checkout under `installed`, also with the fix `facet pull
 <package>`; the server is probed, never started. A package that declares
 `[engine.source]` reports its missing or unverified checkout the same way,
@@ -363,6 +366,7 @@ ascii (installed):
   ✓ licenses: no model requires acceptance
   ✓ models: 1 model(s) present
   ✓ browser: no browser declared
+  ✓ ffmpeg: no ffmpeg declared
   ✓ shared_modules: no shared modules declared
   ✓ imports: PIL 13.0.0, numpy 2.5.4, pyfiglet 1.0.4 import
   ✓ figlet_font: dos_rebel is installed with pyfiglet
@@ -378,6 +382,7 @@ ffmpeg (installed):
   ✓ licenses: no model requires acceptance
   ✓ models: the package has no models
   ✓ browser: no browser declared
+  ✓ ffmpeg: no ffmpeg declared
   ✓ shared_modules: no shared modules declared
   ✓ binary: ffmpeg 7.0.2-static at ffmpeg-linux-x86_64-v7.0.2
   ✓ encoders: flac, libmp3lame, libopus, pcm_s16le

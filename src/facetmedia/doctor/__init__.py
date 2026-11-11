@@ -97,6 +97,7 @@ CHECK_ORDER: Final[tuple[str, ...]] = (
     "licenses",
     "models",
     "browser",
+    "ffmpeg",
     "node",
     "shared_modules",
 )
@@ -235,6 +236,7 @@ def machine_checks(
         "licenses": _licenses(package),
         "models": _models(package, home),
         "browser": _browser(package, home),
+        "ffmpeg": _ffmpeg(package, home),
         "node": doctor_node.readiness(package, home),
         "shared_modules": Check(
             *shared.check(package, home.env_dir(package.name, package.version))
@@ -468,6 +470,18 @@ def _browser(package: Package, home: Home) -> Check:
     target = env_module.browser_dir(browser, home)
     if env_module.browser_present(browser, home):
         return Check(True, f"{browser.channel}-{browser.revision} verified at {target}")
+    return Check(False, f"{target}: the extraction is not verified", f"facet pull {package.name}")
+
+
+def _ffmpeg(package: Package, home: Home) -> Check:
+    from facetmedia import env as env_module  # noqa: PLC0415
+
+    ffmpeg = package.ffmpeg
+    if ffmpeg is None:
+        return Check(True, "no ffmpeg declared")
+    target = env_module.ffmpeg_dir(ffmpeg, home)
+    if env_module.ffmpeg_present(ffmpeg, home):
+        return Check(True, f"{ffmpeg.version} verified at {target}")
     return Check(False, f"{target}: the extraction is not verified", f"facet pull {package.name}")
 
 
@@ -806,6 +820,7 @@ def _package_section(
         needs_pull=readiness["installed"]["ok"] is not True
         or readiness["models"]["ok"] is not True
         or readiness["browser"]["ok"] is not True
+        or readiness["ffmpeg"]["ok"] is not True
         or readiness["node"]["ok"] is not True
         or readiness["shared_modules"]["ok"] is not True,
     )

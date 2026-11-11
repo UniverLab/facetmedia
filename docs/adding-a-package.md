@@ -289,6 +289,56 @@ is missing or unverified with the fix `facet pull <package>`; like
 `installed`, `models` and `shared_modules`, that check never gates the pull
 that fixes it.
 
+## FFmpeg artifact
+
+A package that encodes video — the video facet's encode path — needs a
+real FFmpeg with `ffprobe`, and v0.1 has no video engine of its own. The
+package declares the build it needs in an optional top-level `[ffmpeg]`
+table of its `package.toml`:
+
+```toml
+[ffmpeg]
+version = "n8.1.3-27-g8dca1586f4"   # the static build's version
+url = "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/…/ffmpeg-n8.1.3-27-g8dca1586f4-linux64-gpl-8.1.tar.xz"
+sha256 = "<64 lowercase hex>"       # of the upstream `.tar.xz` archive
+```
+
+`facet registry validate` rejects a missing `version`, `url` or `sha256`,
+a `url` that does not start with `https://`, a `sha256` that is not 64
+lowercase hex characters, and any unknown key.
+
+`facet pull` downloads the archive from the declared `url`, with the same
+three attempts and backoff as model downloads, verifies the archive's
+sha256, and extracts it once at `<home>/ffmpeg/<version>/`, stripping the
+archive's single top directory: the binaries land at
+`<version>/bin/ffmpeg` and `<version>/bin/ffprobe`, and a
+`.facet-verified` marker holds the declared sha256. An extraction whose
+marker does not hold the declared sha256, or whose `bin/ffmpeg` or
+`bin/ffprobe` is missing, is fetched again; a verified one is never
+re-downloaded. An archive without exactly one top directory, or without
+both binaries, fails the pull with `download_failed`.
+
+Any engine may declare it: a `python-env`, `node`, `binary` or `host-app`
+package's pull fetches the FFmpeg build before its own engine step, right
+after `[browser]`.
+
+The FFmpeg build is shared: one extraction per version under
+`<home>/ffmpeg`, never per package and never inside an environment —
+environments are rebuilt, the FFmpeg extraction is not. The runner
+environment gets `FACET_FFMPEG` and `FACET_FFPROBE` with the absolute
+paths of the two binaries, and `<home>/ffmpeg/<version>/bin` prepended to
+`PATH`, so tools that call `ffmpeg` by name use the shared build.
+FFmpeg builds are only available on Linux x86-64; on any other host
+`pull` of a package declaring `[ffmpeg]` refuses with `machine_cannot`
+(exit 5). `facet doctor` reports a declared FFmpeg build whose extraction
+is missing or unverified with the fix `facet pull <package>`; like
+`installed`, `models` and `shared_modules`, that check never gates the
+pull that fixes it.
+
+The build itself is GPL-3.0: `facet describe` and run records list it
+through the package's own `[[licenses]]`, the way every dependency
+licence is declared there.
+
 ## The document kind
 
 Long written documents — the texforge thesis, articles, reports — are a

@@ -139,6 +139,15 @@ class Browser:
 
 
 @dataclass(frozen=True)
+class FFmpeg:
+    """The shared FFmpeg build a package declares in ``[ffmpeg]``."""
+
+    version: str
+    url: str
+    sha256: str
+
+
+@dataclass(frozen=True)
 class Server:
     """The repo-based tool a package declares in ``[engine.server]``."""
 
@@ -245,6 +254,7 @@ class Package:
     capabilities: tuple[Capability, ...] = ()
     uses: tuple[str, ...] = ()
     browser: Browser | None = None
+    ffmpeg: FFmpeg | None = None
     server: Server | None = None
     source: Source | None = None
     node: Node | None = None

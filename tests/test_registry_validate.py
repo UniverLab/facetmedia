@@ -445,3 +445,87 @@ def test_validate_rejects_a_malformed_browser_version(tmp_path: Path) -> None:
     )
     assert ("packages/echo/package.toml", "browser.version", "value") in found
     assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+# --- the optional ``[ffmpeg]`` table: one shared, verified static build.
+
+FFMPEG_SHA256 = "b" * 64
+FFMPEG_URL = "https://example.com/ffmpeg-n8.1.3-27-g8dca1586f4-linux64-gpl-8.1.tar.xz"
+
+
+def _echo_with_ffmpeg(tmp_path: Path, ffmpeg_toml: str) -> set[tuple[str, str, str]]:
+    """The fixture registry with ``[ffmpeg]`` appended to echo's manifest."""
+    root = tmp_path / "registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    manifest = root / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + ffmpeg_toml,
+        encoding="utf-8",
+    )
+    return _problems(root)
+
+
+def _valid_ffmpeg_toml() -> str:
+    return (
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\n'
+        f'url = "{FFMPEG_URL}"\nsha256 = "{FFMPEG_SHA256}"\n'
+    )
+
+
+def test_validate_accepts_a_declared_ffmpeg(tmp_path: Path) -> None:
+    assert _echo_with_ffmpeg(tmp_path, _valid_ffmpeg_toml()) == set()
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == 0
+
+
+def test_validate_rejects_an_ffmpeg_without_a_version(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nurl = "{FFMPEG_URL}"\nsha256 = "{FFMPEG_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.version", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_an_ffmpeg_without_a_url(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\nsha256 = "{FFMPEG_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.url", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_an_ffmpeg_without_a_sha256(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\nurl = "{FFMPEG_URL}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.sha256", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_non_https_ffmpeg_url(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        '\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\n'
+        'url = "http://example.com/ffmpeg.tar.xz"\n'
+        f'sha256 = "{FFMPEG_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.url", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_malformed_ffmpeg_sha256(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\nurl = "{FFMPEG_URL}"\n'
+        'sha256 = "not-a-sha"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.sha256", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_an_unknown_ffmpeg_key(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(tmp_path, _valid_ffmpeg_toml() + 'channel = "gpl"\n')
+    assert ("packages/echo/package.toml", "ffmpeg.channel", "unknown") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID

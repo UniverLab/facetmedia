@@ -30,6 +30,7 @@ from facetmedia import doctor as doctor_module
 from facetmedia import env as env_module
 from facetmedia.cli import main
 from facetmedia.env import browser as env_browser
+from facetmedia.env import ffmpeg as env_ffmpeg
 from facetmedia.home import Home
 from facetmedia.registry import load_registry, validate_registry
 from facetmedia.registry_types import Node, NodePackage, Package
@@ -560,6 +561,28 @@ def test_pull_fetches_a_declared_browser_for_a_node_package(
     code, _envelope = _pull(capsys, "pull", "nodepkg")
     assert code == 0
     assert fetched == ["1254"]
+
+
+def test_pull_fetches_a_declared_ffmpeg_for_a_node_package(
+    world: World, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = world.registry / "packages" / "nodepkg" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + '\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\n'
+        + 'url = "https://ffmpeg.example.com/builds/ffmpeg.tar.xz"\nsha256 = "'
+        + "b" * 64
+        + '"\n',
+        encoding="utf-8",
+    )
+    fetched: list[str] = []
+    monkeypatch.setattr(
+        env_ffmpeg, "fetch_ffmpeg", lambda ffmpeg, home: fetched.append(ffmpeg.version)
+    )
+
+    code, _envelope = _pull(capsys, "pull", "nodepkg")
+    assert code == 0
+    assert fetched == ["n8.1.3-27-g8dca1586f4"]
 
 
 def test_pull_stages_the_entry_with_its_sha_marker(
