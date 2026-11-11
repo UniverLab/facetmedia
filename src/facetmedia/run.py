@@ -29,7 +29,7 @@ from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
 from facetmedia.record import RecordSpec
 from facetmedia.registry import Capability, Field, Package, load_active_registry
-from facetmedia.registry_types import Model
+from facetmedia.registry_types import Model, capability_models
 from facetmedia.runner import Invocation, Outcome, RunAsset, VerifyResult
 
 __all__ = ["execute"]
@@ -273,16 +273,19 @@ def _piece_inputs(
 def _required_models(
     package: Package, capability: Capability, inputs: Mapping[str, Any]
 ) -> list[Model]:
-    """The gated models this piece selects: exact id equality on a ``model`` input.
+    """The gated models this piece requires acceptance for.
 
-    A capability without a ``model`` input keeps the package-wide gate; a
-    ``model`` value naming no manifest model requires nothing.
+    A capability with a ``model`` input gates the model the piece selects by
+    exact id equality; a capability declaring ``models`` gates exactly those,
+    so an empty declaration requires nothing; otherwise the package-wide
+    gate applies.  A ``model`` value naming no manifest model requires
+    nothing.
     """
-    if capability.input("model") is None:
-        return list(package.models)
-    value = inputs.get("model")
-    model = next((item for item in package.models if item.id == value), None)
-    return [model] if model is not None else []
+    if capability.input("model") is not None:
+        value = inputs.get("model")
+        model = next((item for item in package.models if item.id == value), None)
+        return [model] if model is not None else []
+    return capability_models(package, capability)
 
 
 def _input_paths(capability: Capability, values: Mapping[str, Any]) -> tuple[Path, ...]:

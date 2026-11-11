@@ -24,6 +24,7 @@ from facetmedia.registry_types import (
     Model,
     Package,
     Registry,
+    capability_models,
     weight,
 )
 
@@ -123,7 +124,9 @@ def describe_data(capability_id: str) -> dict[str, Any]:
         "requirements": _requirements(package),
         "licenses": {
             "tools": [{"subject": lic.subject, "spdx": lic.spdx} for lic in package.licenses],
-            "models": [_model_row(model, accepted) for model in package.models],
+            "models": [
+                _model_row(model, accepted) for model in capability_models(package, capability)
+            ],
         },
         "download_bytes": _download_bytes(package, home, installed),
         "installed": installed,
@@ -430,7 +433,9 @@ def _machine_section(
     installed = env.is_installed(package, home)
     accepted = licenses.accepted_models(package.models)
     missing = _download_bytes(package, home, installed)
-    models = [_model_row(model, accepted) for model in package.models]
+    named = next((cap for cap in package.capabilities if cap.id == capability_id), None)
+    shown = package.models if named is None else capability_models(package, named)
+    models = [_model_row(model, accepted) for model in shown]
     lines = [
         f"## On this machine ({capability_id})" if capability_id else "## On this machine",
         "",

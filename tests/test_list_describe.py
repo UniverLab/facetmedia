@@ -331,3 +331,78 @@ def test_piece_example_covers_every_field_kind(tmp_path: Path) -> None:
     )
     piece: Any = tomllib.loads(example)
     schema_module.validate(capability, piece["inputs"], tmp_path)
+
+
+GATED_MODEL_TOML = """
+[[models]]
+id = "gated-weights"
+spdx = "CC-BY-NC-4.0"
+commercial_use = false
+requires_acceptance = true
+terms_url = "https://example.invalid/gated-weights"
+url = "file://tests/fixtures/models/termsy.bin"
+sha256 = "85a73737b5d85eaba43e73ba33ceade28de49f1f4f7573377f02d58408f715c7"
+bytes = 21
+path = "gated-weights/termsy.bin"
+"""
+
+VOX_CAPABILITY_TOML = """
+[capabilities.vox]
+summary = "Echo with the selected model."
+kind = "text"
+
+[capabilities.vox.inputs.model]
+type = "enum"
+values = ["gated-weights"]
+required = true
+description = "The model to use."
+
+[capabilities.vox.preview]
+viewer = "generic"
+"""
+
+EMPTY_CAPABILITY_TOML = """
+[capabilities.cap]
+summary = "Make one termsy asset without a model."
+kind = "text"
+models = []
+
+[capabilities.cap.preview]
+viewer = "generic"
+"""
+
+
+def _copied_registry(tmp_path: Path) -> Path:
+    registry = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry)
+    return registry
+
+
+def test_describe_capability_with_empty_models_lists_no_licence(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A capability declaring ``models = []`` has no model licence to accept."""
+    registry = _copied_registry(tmp_path)
+    manifest = registry / "packages" / "termsy" / "package.toml"
+    with manifest.open("a", encoding="utf-8") as handle:
+        handle.write(EMPTY_CAPABILITY_TOML)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+
+    assert main(["describe", "termsy.cap", "--json"]) == 0
+    assert _data(capsys)["licenses"]["models"] == []
+
+
+def test_describe_capability_with_model_input_lists_package_models(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A capability with a ``model`` input lists the package's gated models."""
+    registry = _copied_registry(tmp_path)
+    manifest = registry / "packages" / "echo" / "package.toml"
+    with manifest.open("a", encoding="utf-8") as handle:
+        handle.write(GATED_MODEL_TOML + VOX_CAPABILITY_TOML)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+
+    assert main(["describe", "echo.vox", "--json"]) == 0
+    models = _data(capsys)["licenses"]["models"]
+    assert [row["id"] for row in models] == ["gated-weights"]
+    assert models[0]["requires_acceptance"] is True

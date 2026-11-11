@@ -98,6 +98,29 @@ def _dependency_names(path: Path) -> frozenset[str] | None:
     return frozenset(names)
 
 
+def _read_capability_models(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str
+) -> tuple[str, ...] | None:
+    """A capability's declared manifest models, or ``None`` when undeclared.
+
+    Every entry must be the ``id`` of a ``[[models]]`` entry in the same
+    package manifest: the loader's ``model_ids`` maps each id to its file,
+    so an id from another package (or none at all) is unknown here.  An
+    empty list is valid and means the capability uses no manifest model.
+    """
+
+    raw = item.get("models")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(entry, str) for entry in raw):
+        loader.add(file, f"{prefix}models", "value")
+        return ()
+    for entry in raw:
+        if loader.model_ids.get(entry) != file:
+            loader.add(file, f"{prefix}models", f"unknown model {entry}")
+    return tuple(raw)
+
+
 def _missing_requirements(module: Path, dependencies: frozenset[str] | None) -> str | None:
     """The first distribution a module's ``Requires:`` line names but the package lacks."""
 
@@ -160,7 +183,7 @@ _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
 )
 _LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
 _CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
-    {"summary", "kind", "inputs", "verify", "preview"}
+    {"summary", "kind", "inputs", "verify", "preview", "models"}
 )
 _VERIFY_KEYS: Final[frozenset[str]] = frozenset({"thresholds"})
 _PREVIEW_KEYS: Final[frozenset[str]] = frozenset({"viewer"})
@@ -623,6 +646,13 @@ class RegistryLoader:
         inputs = self.fields(item.get("inputs"), file, f"{prefix}inputs.", allow_array=True)
         thresholds = self.verify(item.get("verify"), file, prefix)
         viewer = self.preview(item.get("preview"), file, prefix)
+        models = _read_capability_models(self, item, file, prefix)
+        if models is not None and any(field.name == "model" for field in inputs):
+            self.add(
+                file,
+                f"{prefix}models",
+                "a capability with a model input selects its model per piece",
+            )
         if len(self.problems) != before or summary is None or kind is None:
             return None
         return Capability(
@@ -633,6 +663,7 @@ class RegistryLoader:
             inputs=inputs,
             thresholds=thresholds,
             viewer=viewer,
+            models=models,
         )
 
     def verify(self, raw: object, file: str, prefix: str) -> Mapping[str, float]:

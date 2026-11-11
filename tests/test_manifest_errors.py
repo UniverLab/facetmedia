@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from facetmedia.manifest import RegistryLoader
-from facetmedia.registry import validate_registry
+from facetmedia.registry import load_registry, validate_registry
 
 BASE = """name = "pkg"
 version = "0.1.0"
@@ -320,3 +320,94 @@ def test_vram_gb_defaults_to_zero(tmp_path: Path) -> None:
     requirements = loader.requirements({"requirements": {"gpu": False}}, "package.toml")
     assert requirements.vram_gb == 0.0
     assert loader.problems == []
+
+
+MODEL_CAPABILITY = CAPABILITY + 'models = ["m1"]\n'
+MODEL_INPUT = '\n[capabilities.speech.inputs.model]\ntype = "enum"\nvalues = ["m1"]\n'
+CAPABILITY_PREVIEW = '\n[capabilities.speech.preview]\nviewer = "generic"\n'
+
+MODEL_CASES = [
+    pytest.param(
+        BASE + MODEL + CAPABILITY + 'models = ["nope"]\n',
+        "capabilities.speech.models",
+        "unknown model nope",
+        id="models-unknown",
+    ),
+    pytest.param(
+        BASE + MODEL + CAPABILITY + 'models = "m1"\n',
+        "capabilities.speech.models",
+        "value",
+        id="models-non-list",
+    ),
+    pytest.param(
+        BASE + MODEL + CAPABILITY + 'models = ["m1", 1]\n',
+        "capabilities.speech.models",
+        "value",
+        id="models-non-string",
+    ),
+    pytest.param(
+        BASE + MODEL + MODEL_CAPABILITY + MODEL_INPUT,
+        "capabilities.speech.models",
+        "a capability with a model input selects its model per piece",
+        id="models-with-model-input",
+    ),
+    pytest.param(
+        BASE + MODEL + CAPABILITY + "models = []\n" + MODEL_INPUT,
+        "capabilities.speech.models",
+        "a capability with a model input selects its model per piece",
+        id="models-empty-with-model-input",
+    ),
+]
+
+
+@pytest.mark.parametrize(("manifest", "key", "problem"), MODEL_CASES)
+def test_capability_models_problems(manifest: str, key: str, problem: str, tmp_path: Path) -> None:
+    assert ("packages/pkg/package.toml", key, problem) in _problems(manifest, tmp_path)
+
+
+def _write_package(manifest: str, root: Path, name: str = "pkg") -> None:
+    pkg_dir = root / "packages" / name
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    (pkg_dir / "package.toml").write_text(manifest, encoding="utf-8")
+    for filename in ("pyproject.toml", "uv.lock", "runner.py"):
+        (pkg_dir / filename).write_text("", encoding="utf-8")
+
+
+def test_capability_models_list_parses(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "pkg"\n', encoding="utf-8"
+    )
+    _write_package(BASE + MODEL + MODEL_CAPABILITY + CAPABILITY_PREVIEW, tmp_path)
+    (capability,) = load_registry(tmp_path).package("pkg").capabilities
+    assert capability.models == ("m1",)
+
+
+def test_capability_models_empty_list_means_no_model(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "pkg"\n', encoding="utf-8"
+    )
+    _write_package(BASE + MODEL + CAPABILITY + "models = []\n" + CAPABILITY_PREVIEW, tmp_path)
+    (capability,) = load_registry(tmp_path).package("pkg").capabilities
+    assert capability.models == ()
+
+
+def test_capability_models_undeclared_is_none(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "pkg"\n', encoding="utf-8"
+    )
+    _write_package(BASE + MODEL + CAPABILITY + CAPABILITY_PREVIEW, tmp_path)
+    (capability,) = load_registry(tmp_path).package("pkg").capabilities
+    assert capability.models is None
+
+
+def test_capability_models_rejects_another_packages_model(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "pkg"\n[[packages]]\nname = "other"\n',
+        encoding="utf-8",
+    )
+    _write_package(BASE + MODEL + CAPABILITY + 'models = ["m1"]\n', tmp_path, name="other")
+    _write_package(BASE + CAPABILITY + 'models = ["m1"]\n', tmp_path, name="pkg")
+    assert ("packages/pkg/package.toml", "capabilities.speech.models", "unknown model m1") in {
+        (problem["file"], problem["key"], problem["problem"])
+        for problem in validate_registry(tmp_path)
+    }

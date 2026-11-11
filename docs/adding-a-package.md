@@ -637,6 +637,25 @@ Every capability declares its `[capabilities.<c>.preview]` table —
 `validate` rejects a capability without one, for every kind: no kind
 ships without an agent preview. Omitting `viewer` keeps `generic`.
 
+A capability may declare exactly which manifest models it uses:
+
+```toml
+[capabilities.profile]
+summary = "Register the speaker's own voice."
+kind = "audio"
+models = []
+```
+
+`models` lists `[[models]]` ids from the same package; anything else is
+rejected (`unknown model <id>`), as is a non-list or a non-string entry.
+The gate follows the declaration: the piece needs acceptance only for the
+listed models, so an empty list needs no acceptance at all. A capability
+without `models` keeps the package-wide gate. A capability with a `model`
+input never declares `models`: the piece selects its model, so the gate
+follows the piece instead. `facet describe` lists the same models the gate
+would ask for: the declared ones, or the package's when the capability has
+a `model` input or declares nothing.
+
 ## The runner protocol
 
 Registry runners are code that arrives from the network, so facet never

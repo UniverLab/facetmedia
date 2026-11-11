@@ -202,6 +202,7 @@ class Capability:
     inputs: tuple[Field, ...] = ()
     thresholds: Mapping[str, float] = dc_field(default_factory=dict)
     viewer: str = "generic"
+    models: tuple[str, ...] | None = None
 
     def input(self, name: str) -> Field | None:
         for field in self.inputs:
@@ -278,6 +279,23 @@ class Package:
                 "protocol": self.protocol,
             },
         )
+
+
+def capability_models(package: Package, capability: Capability) -> list[Model]:
+    """The manifest models a capability lists and gates on without a piece.
+
+    A capability with a ``model`` input keeps the package-wide listing, since
+    a piece may select any of those models; a capability declaring ``models``
+    lists exactly those, so an empty declaration lists nothing; otherwise the
+    package-wide listing applies.
+    """
+
+    if capability.input("model") is not None:
+        return list(package.models)
+    if capability.models is None:
+        return list(package.models)
+    wanted = set(capability.models)
+    return [model for model in package.models if model.id in wanted]
 
 
 def is_backend(model: Model) -> bool:

@@ -351,6 +351,152 @@ def test_license_accept_and_list_cover_backend_owned_ids(
     assert rows["dl-gated"]["accepted"] is False
 
 
+DECLARED_CAPABILITIES_TOML = """
+[capabilities.empty]
+summary = "Echo without using any model."
+kind = "text"
+models = []
+
+[capabilities.empty.inputs.text]
+type = "string"
+required = true
+description = "Text to echo."
+
+[capabilities.empty.preview]
+viewer = "generic"
+
+[capabilities.picked]
+summary = "Echo with the dl-gated model."
+kind = "text"
+models = ["dl-gated"]
+
+[capabilities.picked.inputs.text]
+type = "string"
+required = true
+description = "Text to echo."
+
+[capabilities.picked.preview]
+viewer = "generic"
+"""
+
+
+@pytest.fixture(scope="module")
+def declared_setup(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """One home with echo installed from a registry copy carrying declared models."""
+    root = tmp_path_factory.mktemp("facet-declared-models")
+    registry = root / "registry"
+    shutil.copytree(FIXTURES, registry)
+    manifest = registry / "packages" / "echo" / "package.toml"
+    with manifest.open("a", encoding="utf-8") as handle:
+        handle.write(MODELS_TOML + CAPABILITIES_TOML + DECLARED_CAPABILITIES_TOML)
+    home = root / "home"
+    previous = {name: os.environ.get(name) for name in ("FACET_HOME", "FACET_REGISTRY")}
+    os.environ["FACET_HOME"] = str(home)
+    os.environ["FACET_REGISTRY"] = str(registry)
+    try:
+        assert main(["license", "accept", "dl-gated", "--yes", "--json"]) == 0
+        assert main(["license", "accept", "backend-gated", "--yes", "--json"]) == 0
+        assert main(["pull", "echo", "--json"]) == 0
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return home, registry
+
+
+@pytest.fixture
+def declared_home(
+    declared_setup: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path]:
+    home, registry = declared_setup
+    monkeypatch.setenv("FACET_HOME", str(home))
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+    return home, registry
+
+
+@pytest.fixture
+def saved_declared_licenses(declared_home: tuple[Path, Path]) -> Iterator[None]:
+    """Snapshot the seeded acceptances; tests that forget them restore on exit."""
+    home, _registry = declared_home
+    path = home / "state" / "licenses.json"
+    try:
+        saved: bytes | None = path.read_bytes()
+    except OSError:
+        saved = None
+    yield
+    if saved is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(saved)
+
+
+def _text_piece(directory: Path) -> Path:
+    piece = directory / "piece.toml"
+    piece.write_text('[inputs]\ntext = "hello"\n', encoding="utf-8")
+    return piece
+
+
+def test_empty_models_capability_runs_without_acceptance(
+    capsys: pytest.CaptureFixture[str],
+    declared_home: tuple[Path, Path],
+    saved_declared_licenses: Iterator[None],
+    tmp_path: Path,
+) -> None:
+    home, _registry = declared_home
+    _forget_licenses(home)
+    out = tmp_path / "out"
+
+    code = main(
+        [
+            "run",
+            "echo.empty",
+            str(_text_piece(tmp_path)),
+            "--out",
+            str(out),
+            "--no-verify",
+            "--json",
+        ]
+    )
+    envelope, _err = _envelope(capsys)
+    assert code == 0
+    assert envelope["ok"] is True
+    stored = json.loads((out / "echo.txt.facet.json").read_text(encoding="utf-8"))
+    assert envelope["data"]["assets"] == [stored]
+    assert stored["license"]["accepted"] == []
+    assert not (home / "state" / "licenses.json").exists()
+
+
+def test_declared_model_capability_is_refused_without_acceptance(
+    capsys: pytest.CaptureFixture[str],
+    declared_home: tuple[Path, Path],
+    saved_declared_licenses: Iterator[None],
+    tmp_path: Path,
+) -> None:
+    home, _registry = declared_home
+    _forget_licenses(home)
+    out = tmp_path / "out"
+
+    code = main(
+        [
+            "run",
+            "echo.picked",
+            str(_text_piece(tmp_path)),
+            "--out",
+            str(out),
+            "--no-verify",
+            "--json",
+        ]
+    )
+    envelope, _err = _envelope(capsys)
+    assert code == EXIT_LICENSE_NOT_ACCEPTED
+    error = envelope["error"]
+    assert error["code"] == "license_not_accepted"
+    assert error["message"] == "license not accepted: dl-gated (CC-BY-NC-4.0)"
+    assert error["hint"] == "facet license accept dl-gated"
+
+
 def test_manifest_rejects_a_backend_model_with_a_source(tmp_path: Path) -> None:
     root = tmp_path / "registry"
     root.mkdir()
