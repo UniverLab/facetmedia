@@ -110,12 +110,18 @@ still makes the environment stale, and the next pull rebuilds it from
 scratch.
 
 A package that declares `[browser]` also gets the shared Chromium build:
-`facet pull` downloads the Playwright archive once, verifies its sha256,
-and extracts it into the shared browser directory
+`facet pull` downloads the Chrome for Testing archive once from
+`https://cdn.playwright.dev/builds/cft/<version>/linux64/chrome-linux64.zip`,
+verifies its sha256, and extracts it into the shared browser directory
 `~/.facet/browsers/chromium-<revision>/`, which every package declaring the
-same channel and revision shares. The runner's environment carries
+same channel and revision shares. The executable lands at
+`chromium-<revision>/chrome-linux64/chrome`. The runner's environment carries
 `PLAYWRIGHT_BROWSERS_PATH` pointing at `~/.facet/browsers`, so the
-package's own `playwright` finds the browser without downloading it.
+package's own `playwright` finds the browser without downloading it, and
+`FACET_BROWSER` with the absolute path of that executable, so drivers that
+take an explicit `executablePath` need no host Chrome. Browser builds are
+only available on Linux x86-64; on any other host `pull` of a package
+declaring `[browser]` refuses with `machine_cannot` (exit 5).
 
 A package that declares `[engine.server]` also gets its pinned checkout at
 `~/.facet/servers/<package>/<version>/<shortrev>/` with its own venv, and
@@ -306,8 +312,8 @@ flags together are `invalid_input`, exit 2), plus a target: nothing (facet
 and every installed package), a package name, or a capability id. The
 readiness list ends with `shared_modules`, which reports a stale `facet_lib`
 copy with the fix `facet pull <package>`; just before it, `browser` reports a
-declared Chromium extraction that is missing or unverified, with the same
-fix. A package that declares `[engine.server]` reports a missing or
+declared Chromium extraction whose `.facet-verified` marker does not hold the
+declared sha256 or whose executable is missing, with the same fix. A package that declares `[engine.server]` reports a missing or
 unverified checkout under `installed`, also with the fix `facet pull
 <package>`; the server is probed, never started. A package that declares
 `[engine.source]` reports its missing or unverified checkout the same way,
