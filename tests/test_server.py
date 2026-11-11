@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -599,6 +599,107 @@ def test_validate_rejects_a_health_url_without_scheme(tmp_path: Path) -> None:
     _root, found = _server_manifest(tmp_path, health_url="127.0.0.1:{{port}}/health")
 
     assert ("packages/echo/package.toml", "engine.server.health_url", "value") in found
+
+
+# --- validate: the optional ``[engine.server.env]`` table.
+
+
+def _server_manifest_env(tmp_path: Path, *lines: str) -> tuple[Path, set[tuple[str, str, str]]]:
+    """The server manifest plus an ``[engine.server.env]`` table, revalidated."""
+    root, _found = _server_manifest(tmp_path)
+    manifest = root / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "[engine.server.env]\n" + "".join(lines),
+        encoding="utf-8",
+    )
+    found = {
+        (problem["file"], problem["key"], problem["problem"]) for problem in validate_registry(root)
+    }
+    return root, found
+
+
+def test_validate_accepts_a_server_env_with_the_data_and_port_tokens(
+    tmp_path: Path,
+) -> None:
+    root, found = _server_manifest_env(
+        tmp_path,
+        'ZED = "{{port}}"\n',
+        'TOOL_DATA_DIR = "{{data}}/tool"\n',
+    )
+
+    assert found == set()
+    package = load_registry(root).packages["echo"]
+    assert package.server is not None
+    assert package.server.env == (("TOOL_DATA_DIR", "{{data}}/tool"), ("ZED", "{{port}}"))
+
+
+def test_validate_rejects_a_lowercase_server_env_key(tmp_path: Path) -> None:
+    _root, found = _server_manifest_env(tmp_path, 'tool_data_dir = "{{data}}/tool"\n')
+
+    assert (
+        "packages/echo/package.toml",
+        "engine.server.env.tool_data_dir",
+        "name",
+    ) in found
+
+
+def test_validate_rejects_a_reserved_server_env_key(tmp_path: Path) -> None:
+    _root, found = _server_manifest_env(tmp_path, 'PATH = "{{data}}/tool"\n')
+
+    assert ("packages/echo/package.toml", "engine.server.env.PATH", "name") in found
+
+
+def test_validate_rejects_a_facet_prefixed_server_env_key(tmp_path: Path) -> None:
+    _root, found = _server_manifest_env(tmp_path, 'FACET_X = "{{data}}/tool"\n')
+
+    assert ("packages/echo/package.toml", "engine.server.env.FACET_X", "name") in found
+
+
+def test_validate_rejects_a_non_string_server_env_value(tmp_path: Path) -> None:
+    _root, found = _server_manifest_env(tmp_path, "TOOL_DATA_DIR = 3\n")
+
+    assert (
+        "packages/echo/package.toml",
+        "engine.server.env.TOOL_DATA_DIR",
+        "value",
+    ) in found
+
+
+def test_validate_rejects_an_unknown_server_env_token(tmp_path: Path) -> None:
+    _root, found = _server_manifest_env(tmp_path, 'TOOL_DATA_DIR = "{{nope}}/tool"\n')
+
+    assert (
+        "packages/echo/package.toml",
+        "engine.server.env.TOOL_DATA_DIR",
+        "token",
+    ) in found
+
+
+def test_server_env_substitutes_the_data_and_port_tokens(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+    home = Home.from_env()
+    package = replace(
+        load_registry(FIXTURES).packages["echo"],
+        server=Server(
+            REPO_URL,
+            VALID_REV,
+            "requirements.txt",
+            ("python", "serve.py", "--port", "{{port}}"),
+            "http://127.0.0.1:{{port}}/health",
+            120,
+            (("TOOL_DATA_DIR", "{{data}}/tool"), ("SERVE_PORT", "{{port}}")),
+        ),
+    )
+    inv = runner_module.Invocation(package, home, home.env_dir("echo", "0.1.0"), home.tmp_dir, "t")
+
+    got = runner_module._server_env(inv, 4321)
+
+    assert got["TOOL_DATA_DIR"] == str(home.data_dir("echo") / "tool")
+    assert (home.data_dir("echo")).is_dir()
+    assert got["SERVE_PORT"] == got["PORT"] == "4321"
+    assert got["PATH"].startswith(str(env_module.server_venv(package, home) / "bin"))
 
 
 # --- build: a uv.lock server syncs the locked project; anything else pip-installs.

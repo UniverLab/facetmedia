@@ -330,7 +330,16 @@ requirements = "requirements.txt"          # or "uv.lock", the tool's own file, 
 launch = ["python", "main.py", "--port", "{{port}}"]
 health_url = "http://127.0.0.1:{{port}}/health"   # 200 means ready
 timeout_s = 120                            # startup wait; optional, defaults to 120
+env = { TOOL_DATA_DIR = "{{data}}/tool" }  # optional extra environment, see below
 ```
+
+Each `env` key must match `^[A-Z_][A-Z0-9_]*$` and must not be `PATH`,
+`PORT`, or start with `FACET_`; each value must be a string holding only
+the `{{data}}` and `{{port}}` tokens. `{{data}}` resolves to
+`<home>/data/<package>/`, created on first use, and `{{port}}` to the
+port facet picked. `<home>/data/<package>/` is the package's own data:
+no facet command — not `remove`, `clean`, `update`, nor pruning old
+versions — ever deletes it.
 
 There is no `type = "server"` engine: the runner stays a thin `cli` client
 that talks to the server facet started for it, and `facet registry validate`

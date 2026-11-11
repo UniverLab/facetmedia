@@ -66,6 +66,8 @@ SERVER_URL_ENV: Final[str] = "FACET_SERVER_URL"
 SERVER_PORT_ENV: Final[str] = "PORT"
 #: The manifest's port token; the same spelling ``[engine.server]`` declares.
 PORT_TOKEN: Final[str] = "{{port}}"
+#: The manifest's data token: the package's persistent directory under the home.
+DATA_TOKEN: Final[str] = "{{data}}"
 HEALTH_TIMEOUT_S: Final[float] = 1.0
 SERVER_POLL_S: Final[float] = 0.2
 HEALTHY_STATUS: Final[tuple[int, int]] = (200, 300)
@@ -560,6 +562,13 @@ def _server_env(inv: Invocation, port: int) -> dict[str, str]:
     env_vars["PATH"] = venv_bin + os.pathsep + env_vars.get("PATH", "")
     env_vars[SERVER_PORT_ENV] = str(port)
     env_vars.pop(SERVER_URL_ENV, None)
+    server = inv.package.server
+    assert server is not None
+    data_dir = inv.home.data_dir(inv.package.name)
+    for key, value in server.env:
+        if DATA_TOKEN in value:
+            data_dir.mkdir(parents=True, exist_ok=True)
+        env_vars[key] = _substitute(value, ((DATA_TOKEN, str(data_dir)), (PORT_TOKEN, str(port))))
     return env_vars
 
 

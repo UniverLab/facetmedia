@@ -364,12 +364,16 @@ def _handle_gc(args: argparse.Namespace) -> int:
 def _announce_rm(data: dict[str, object]) -> None:
     removed = data.get("removed")
     paths = [path for path in removed if isinstance(path, str)] if isinstance(removed, list) else []
-    if not paths:
+    kept = data.get("kept")
+    kept_paths = [path for path in kept if isinstance(path, str)] if isinstance(kept, list) else []
+    if not paths and not kept_paths:
         print("nothing to remove")
         return
     for path in paths:
         print(path)
     print(f"freed {data.get('freed_bytes')} bytes")
+    for path in kept_paths:
+        print(f"kept {path} (the package's own data; delete it by hand to discard it)")
 
 
 def _announce_gc(data: dict[str, object]) -> None:

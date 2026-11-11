@@ -128,6 +128,60 @@ def test_remove_echo_frees_its_environment_then_is_a_noop(
     assert data == {"removed": [], "freed_bytes": 0}
 
 
+def test_remove_keeps_the_package_data_dir_and_reports_it(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    env_dir = _plant_env(home, "echo", "0.1.0")
+    voice = home.data_dir("echo") / "voices" / "a.wav"
+    voice.parent.mkdir(parents=True)
+    voice.write_bytes(b"voice")
+
+    code, data = _run_json(capsys, "remove", "echo")
+
+    assert code == 0
+    assert data["removed"] == [str(env_dir)]
+    assert data["kept"] == [str(home.data_dir("echo"))]
+    assert voice.is_file()
+
+
+def test_remove_announces_the_kept_data_dir_in_human_output(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    _plant_env(home, "echo", "0.1.0")
+    (home.data_dir("echo") / "voices").mkdir(parents=True)
+
+    assert main(["remove", "echo"]) == 0
+
+    out = capsys.readouterr().out
+    expected = (
+        f"kept {home.data_dir('echo')} (the package's own data; delete it by hand to discard it)"
+    )
+    assert expected in out
+
+
+def test_clean_never_collects_the_package_data_dir(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    home = Home.from_env()
+    _plant_env(home, "echo", "0.1.0")
+    voice = home.data_dir("echo") / "voices" / "a.wav"
+    voice.parent.mkdir(parents=True)
+    voice.write_bytes(b"voice")
+    data_dir = home.data_dir("echo")
+
+    code, data = _run_json(capsys, "clean")
+
+    assert code == 0
+    assert voice.is_file()
+    paths = [Path(item["path"]) for item in _items(data)]
+    assert all(path != data_dir and data_dir not in path.parents for path in paths)
+
+
 def test_remove_models_deletes_the_model_of_the_package(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

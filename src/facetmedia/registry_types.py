@@ -147,6 +147,7 @@ class Server:
     launch: tuple[str, ...]
     health_url: str
     timeout_s: int = 120
+    env: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

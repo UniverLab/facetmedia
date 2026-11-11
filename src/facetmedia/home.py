@@ -71,6 +71,7 @@ class Home:
         for directory in (
             self._root / "registry",
             self._root / "state",
+            self._root / "data",
             self._root / "envs",
             self._root / "models" / "direct",
             self._root / "models" / "hf",
@@ -96,6 +97,10 @@ class Home:
 
     def env_dir(self, package: str, version: str) -> Path:
         return self._root / "envs" / package / version
+
+    def data_dir(self, package: str) -> Path:
+        """``<home>/data/<package>``: the package's own data, never deleted."""
+        return self._root / "data" / package
 
     def model_dir(self, model_id: str) -> Path:
         return self._root / "models" / "direct" / model_id

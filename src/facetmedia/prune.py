@@ -199,7 +199,11 @@ def rm_package(
                 freed += dir_bytes(model_dir)
                 removed.append(str(model_dir))
                 _delete(model_dir)
-    return {"removed": removed, "freed_bytes": freed}
+    result: dict[str, object] = {"removed": removed, "freed_bytes": freed}
+    data_dir = home.data_dir(name)
+    if data_dir.is_dir():
+        result["kept"] = [str(data_dir)]
+    return result
 
 
 def _rmdir_if_empty(path: Path) -> None:

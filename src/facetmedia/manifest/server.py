@@ -20,10 +20,16 @@ if TYPE_CHECKING:
     from facetmedia.manifest import RegistryLoader
 
 SERVER_KEYS: Final[frozenset[str]] = frozenset(
-    {"repo", "rev", "requirements", "launch", "health_url", "timeout_s"}
+    {"repo", "rev", "requirements", "launch", "health_url", "timeout_s", "env"}
 )
 #: The manifest's port token, substituted with the free port facet picked.
 PORT_TOKEN: Final[str] = "{{port}}"
+#: The manifest's data token, substituted with the package's persistent dir.
+DATA_TOKEN: Final[str] = "{{data}}"
+_ENV_KEY_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
+_ENV_RESERVED: Final[frozenset[str]] = frozenset({"PATH", "PORT"})
+_ENV_TOKENS: Final[tuple[str, ...]] = (DATA_TOKEN, PORT_TOKEN)
+_ENV_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"\{\{[^}]*\}\}")
 DEFAULT_TIMEOUT_S: Final[int] = 120
 _REVISION_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -70,6 +76,7 @@ def read_server(
     timeout_s = loader.integer(table, "timeout_s", file, "engine.server.", required=False)
     if timeout_s is not None and timeout_s <= 0:
         loader.add(file, "engine.server.timeout_s", "value")
+    env = read_env(loader, table, file)
     if len(loader.problems) != before:
         return None
     return Server(
@@ -79,7 +86,32 @@ def read_server(
         launch=launch,
         health_url=values["health_url"],
         timeout_s=timeout_s or DEFAULT_TIMEOUT_S,
+        env=env,
     )
+
+
+def read_env(
+    loader: RegistryLoader, table: Mapping[str, Any], file: str
+) -> tuple[tuple[str, str], ...]:
+    """The optional ``env`` table: sorted ``(key, value)`` pairs, or ``()``."""
+    raw = loader.table(table, "env", file, "engine.server.", required=False)
+    if raw is None:
+        return ()
+    found: list[tuple[str, str]] = []
+    for key in sorted(raw):
+        item = f"engine.server.env.{key}"
+        if not _ENV_KEY_RE.fullmatch(key) or key in _ENV_RESERVED or key.startswith("FACET_"):
+            loader.add(file, item, "name")
+            continue
+        value = raw[key]
+        if not isinstance(value, str):
+            loader.add(file, item, "value")
+            continue
+        if any(token not in _ENV_TOKENS for token in _ENV_TOKEN_RE.findall(value)):
+            loader.add(file, item, "token")
+            continue
+        found.append((key, value))
+    return tuple(found)
 
 
 def _launch(loader: RegistryLoader, table: Mapping[str, Any], file: str) -> tuple[str, ...]:

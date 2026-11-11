@@ -528,6 +528,10 @@ $ facet remove ascii
 freed 86478727 bytes
 ```
 
+When the package keeps its own data under `<home>/data/<package>/`, the
+output adds a `kept <path> (the package's own data; delete it by hand to
+discard it)` line: that directory is never deleted by facet.
+
 Removing an uninstalled package is a no-op with exit 0, so a script may
 remove twice. Lock: exclusive.
 
