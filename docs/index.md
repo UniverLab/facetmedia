@@ -78,6 +78,7 @@ FACET_HOME=/data/facet`. The directory is created on first use:
 ├── bin/                 # managed binary extractions, one per package version
 ├── browsers/            # shared Chromium builds, one per channel-revision
 ├── cache/uv/            # uv's cache (UV_CACHE_DIR)
+├── data/                # one persistent data dir per package, never deleted by facet
 ├── envs/                # one environment per package version
 ├── logs/                # one debug log per invocation
 ├── models/
@@ -94,10 +95,13 @@ Environments are persistent and safe to keep: heavy work takes a
 `state/lock` exclusively, so only one heavy job runs at a time — `update`,
 `pull`, `remove`, `clean`, `license accept` and a run under an exclusive manifest,
 while light runs overlap. A crashed job leaves no stuck lock; the kernel
-holds it. `facet remove` and `facet clean` are how disk comes back when you want it
-back. Every invocation leaves a debug log under
-`logs/<YYYY-MM-DD>/<run-id>.log`, and state files are written through
-atomic renames, so a machine that powers off mid-write keeps its state.
+holds it. `facet remove` and `facet clean` are how disk comes back when you
+want it back, with one exception: a package's own data under
+`data/<package>/` — the state a package keeps between runs — survives both,
+and deleting that directory by hand is the only way to discard it. Every
+invocation leaves a debug log under `logs/<YYYY-MM-DD>/<run-id>.log`, and
+state files are written through atomic renames, so a machine that powers off
+mid-write keeps its state.
 
 ## The registry and how it is pinned
 

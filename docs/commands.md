@@ -530,7 +530,9 @@ freed 86478727 bytes
 
 When the package keeps its own data under `<home>/data/<package>/`, the
 output adds a `kept <path> (the package's own data; delete it by hand to
-discard it)` line: that directory is never deleted by facet.
+discard it)` line: that directory is never deleted by facet. With `--json`
+the same directory is in `data.kept`, a list that is absent when the
+package has no data directory yet.
 
 Removing an uninstalled package is a no-op with exit 0, so a script may
 remove twice. Lock: exclusive.
@@ -558,8 +560,9 @@ It removes stale environment versions, environments of packages the
 snapshot no longer has, server checkouts that are stale, unfinished or of a
 gone package, unlisted models, old snapshots, tmp scratch, kept
 leftover directories of failed runs, logs older than 30 days, and prunes
-uv's cache. Environments in the active snapshot are kept. Lock:
-exclusive.
+uv's cache. Environments in the active snapshot are kept, and so is every
+package's own data under `<home>/data/<package>/`: that directory is never
+collected. Lock: exclusive.
 
 Exit codes: `0`; `2` bad arguments; `6` the lock is busy and `--no-wait`
 was given.

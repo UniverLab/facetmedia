@@ -368,12 +368,13 @@ environment.
 
 A server is per run, never a daemon: `facet run` probes `health_url`, and when
 nothing answers it starts `launch` with the checkout as cwd, the server venv
-first on `PATH` and `PORT` set to the port facet picked, waits for a 200 up to
-`timeout_s`, runs the client with `FACET_SERVER_URL` set to the server's base
-URL (the scheme, host and port of `health_url`, no path), and always kills the
-server's whole process group afterwards. A launch that never turns healthy
-fails `runner_failed` with its last output lines. The client reads
-`FACET_SERVER_URL`; it never starts, stops or holds the tool.
+first on `PATH`, `PORT` set to the port facet picked, and the manifest's own
+`env` entries resolved (`{{data}}` and `{{port}}` substituted), waits for a
+200 up to `timeout_s`, runs the client with `FACET_SERVER_URL` set to the
+server's base URL (the scheme, host and port of `health_url`, no path), and
+always kills the server's whole process group afterwards. A launch that never
+turns healthy fails `runner_failed` with its last output lines. The client
+reads `FACET_SERVER_URL`; it never starts, stops or holds the tool.
 
 ## Node engine
 

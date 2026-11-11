@@ -17,7 +17,7 @@ uv tool install facetmedia
 Linux and WSL only. Everything facet installs or remembers lives under one
 directory, `~/.facet` (override with `FACET_HOME`): environments, models,
 shared browser builds, pinned server checkouts, the registry snapshots,
-per-invocation logs and state. The user
+per-invocation logs, state, and each package's own data. The user
 guide is [docs/index.md](docs/index.md) — install, the facets and their
 packages, the first run, and how an agent starts with `facet skill`.
 
