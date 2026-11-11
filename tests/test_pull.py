@@ -238,6 +238,25 @@ def test_package_stale_is_false_where_no_package_copy_is_staged(
     assert env_module.package_stale(nailed, home) is False
 
 
+def test_pull_does_not_gate_a_backend_owned_model_it_never_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The run gates a backend-owned model per piece; pull never fetches it."""
+    _registry(monkeypatch)
+    home = Home.from_env()
+    termsy = load_registry(FIXTURES).packages["termsy"]
+    backend_only = dataclasses.replace(
+        termsy,
+        models=tuple(dataclasses.replace(model, backend=True) for model in termsy.models),
+    )
+
+    env_module._preflight(backend_only, home, "")
+
+    with pytest.raises(FacetError) as refused:
+        env_module._preflight(termsy, home, "")
+    assert refused.value.code == "license_not_accepted"
+
+
 def test_termsy_without_acceptance_downloads_nothing(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

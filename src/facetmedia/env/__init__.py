@@ -36,7 +36,7 @@ import uv
 
 from facetmedia import config as config_module
 from facetmedia import doctor as doctor_module
-from facetmedia import shared
+from facetmedia import licenses, shared
 from facetmedia.contract import FacetError
 from facetmedia.env import binary as env_binary
 from facetmedia.env.binary import binary_dir, binary_present, binary_problem
@@ -249,8 +249,12 @@ def _preflight(package: Package, home: Home, run_id: str) -> None:
     """
     require_posix()
     errors, _warnings = doctor_module.requirement_errors(package, home, run_id)
+    # pull gates only the licences of models it downloads: a backend-owned
+    # model is never fetched here, and the run gates it per piece.
+    errors = [error for error in errors if error.code != "license_not_accepted"]
     if errors:
         raise errors[0]
+    licenses.require(model for model in package.models if not is_backend(model))
 
 
 # --- The plan, printed to stderr before anything happens.
