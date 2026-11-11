@@ -340,7 +340,7 @@ def test_doctor_after_pull_is_healthy_and_reports_the_full_depth(
 ) -> None:
     assert facet_home.is_dir()
 
-    code = main(["doctor", "echo.text", "--json"])
+    code = main(["doctor", "echo.text", "--full", "--json"])
     data = _data(_envelope(capsys))
     assert code == 0
     assert data["healthy"] is True
@@ -367,6 +367,49 @@ def test_doctor_quick_runs_only_the_quick_depth(
     assert "(quick)" in checks[0]["detail"]
     # quick writes nothing: the doctor's throwaway word is not there.
     assert not list((facet_home / "tmp").glob(".facet-doctor-*"))
+
+
+def test_doctor_without_a_flag_runs_the_quick_depth(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+
+    code = main(["doctor", "echo.text", "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    details = [entry["detail"] for entry in data["packages"]["echo"]["doctor"]]
+    assert any("(quick)" in detail for detail in details)
+    assert not any("(full)" in detail for detail in details)
+    assert not any("throwaway word" in detail for detail in details)
+
+
+def test_doctor_quick_and_full_together_is_invalid_input(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+
+    code = main(["doctor", "echo.text", "--quick", "--full", "--json"])
+    assert code == EXIT_INVALID_INPUT
+    envelope = _envelope(capsys)
+    assert envelope["error"]["code"] == "invalid_input"
+
+
+def test_doctor_human_output_names_the_depth_and_hints_at_full(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    """Quick names its depth and advertises --full; full says so and does not."""
+    assert facet_home.is_dir()
+    hint = "--full also starts each package's server and runs it once"
+
+    assert main(["doctor", "echo.text"]) == 0
+    quick = capsys.readouterr().out
+    assert "depth: quick" in quick
+    assert hint in quick
+
+    assert main(["doctor", "echo.text", "--full"]) == 0
+    full = capsys.readouterr().out
+    assert "depth: full" in full
+    assert hint not in full
 
 
 def test_doctor_without_a_target_lists_only_installed_packages(

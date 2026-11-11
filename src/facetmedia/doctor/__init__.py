@@ -683,16 +683,17 @@ def _doctor_errors(
 
 def execute(
     target: str,
-    quick: bool,
+    depth: str,
     run_id: str,
     wait: bool = True,
     timeout_s: float = 3600.0,
 ) -> tuple[dict[str, object], int]:
     """Run the doctor; returns the ``--json`` data and the process exit code."""
+    if depth not in DOCTOR_TIMEOUTS:
+        raise FacetError("invalid_input", f"unknown doctor depth: {depth}")
     home = Home.from_env()
     facet_entries = facet_checks(home)
     selected, capability_id = _select(target, home)
-    depth = "quick" if quick else "full"
     sections: dict[str, PackageSection] = {}
     classes: list[str] = _facet_classes(facet_entries)
     with lock.hold("shared", "facet doctor", wait, timeout_s):

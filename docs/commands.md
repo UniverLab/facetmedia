@@ -296,14 +296,16 @@ is not valid TOML.
 
 Questions about the tool: facet's nine own checks, then, per target, the
 readiness checks and the package's `doctor` verb at two depths — `quick`
-(about 10 s, writes nothing) and, by default, `full` (up to 30 s, a
-throwaway output that facet removes). It reports; it never downloads or
+(about 10 s, writes nothing), which runs by default, and `full` via `--full`
+(up to 30 s, a throwaway output that facet removes; it also starts each
+package's server and runs it once). It reports; it never downloads or
 repairs.
 
-Flags: `--quick` (only the quick depth), plus a target: nothing (facet and
-every installed package), a package name, or a capability id. The readiness
-list ends with `shared_modules`, which reports a stale `facet_lib` copy
-with the fix `facet pull <package>`; just before it, `browser` reports a
+Flags: `--full` (the full depth), `--quick` (accepted; the default; both
+flags together are `invalid_input`, exit 2), plus a target: nothing (facet
+and every installed package), a package name, or a capability id. The
+readiness list ends with `shared_modules`, which reports a stale `facet_lib`
+copy with the fix `facet pull <package>`; just before it, `browser` reports a
 declared Chromium extraction that is missing or unverified, with the same
 fix. A package that declares `[engine.server]` reports a missing or
 unverified checkout under `installed`, also with the fix `facet pull
@@ -329,8 +331,10 @@ never fetched) needs no download: the `models` check stays ok and notes
 `licenses` check with `license_not_accepted` (exit 4).
 
 ```console
-$ facet doctor --quick
+$ facet doctor
 healthy
+depth: quick
+--full also starts each package's server and runs it once
 facet:
   ✓ python: python 3.13.12
   ✓ uv: uv 0.13.5 (x86_64-unknown-linux-gnu)

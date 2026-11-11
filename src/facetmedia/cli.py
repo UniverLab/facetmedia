@@ -276,17 +276,20 @@ def _announce_reverify(data: dict[str, object]) -> None:
 
 def _handle_doctor(args: argparse.Namespace) -> int:
     """The tool's doctor: the facet section plus each package's doctor."""
-    data, code = doctor.execute(args.target, bool(args.quick), args.run_id, *_lock_params(args))
+    if args.quick and args.full:
+        raise FacetError("invalid_input", "--quick and --full cannot be combined")
+    depth = "full" if args.full else "quick"
+    data, code = doctor.execute(args.target, depth, args.run_id, *_lock_params(args))
     ok = data.get("healthy") is True
     envelope = contract.ok(data)
     envelope["ok"] = ok
     contract.emit(envelope, args.json)
     if not args.json:
-        _announce_doctor(data)
+        _announce_doctor(data, depth)
     return 0 if ok else code
 
 
-def _announce_doctor(data: dict[str, object]) -> None:
+def _announce_doctor(data: dict[str, object], depth: str) -> None:
     state = "healthy" if data.get("healthy") is True else "unhealthy"
     capability = data.get("capability")
     prefix = f"{capability}: " if isinstance(capability, str) else ""
@@ -294,6 +297,9 @@ def _announce_doctor(data: dict[str, object]) -> None:
     if data.get("needs_pull") is True:
         suffix = ", needs pull"
     print(f"{prefix}{state}{suffix}")
+    print(f"depth: {depth}")
+    if depth == "quick":
+        print("--full also starts each package's server and runs it once")
     facet = data.get("facet")
     if isinstance(facet, dict) and facet:
         print("facet:")
@@ -690,7 +696,12 @@ def _add_doctor_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="run only the quick depth of the package doctors (about 10 s each)",
+        help="the quick depth of the package doctors (the default, about 10 s each)",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="the full depth: starts each package's server and runs it once (up to 30 s each)",
     )
 
 
