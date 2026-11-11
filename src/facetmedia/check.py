@@ -182,7 +182,16 @@ def _verify_asset(
     temp_dir = home.tmp_dir / f".facet-check-verify-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
     try:
-        invocation = runner.Invocation(package, home, env_dir, temp_dir, run_id, VERIFY_TIMEOUT_S)
+        capability = next((item for item in package.capabilities if item.id == capability_id), None)
+        invocation = runner.Invocation(
+            package,
+            home,
+            env_dir,
+            temp_dir,
+            run_id,
+            VERIFY_TIMEOUT_S,
+            capability is not None and capability.verify_uses_server,
+        )
         models = runner.model_paths(package, home)
         request = runner.make_request(
             "verify",

@@ -209,6 +209,12 @@ def test_describe_carries_facet_weight_and_skill(
     assert data["skill"] == "facet skill termsy"
 
 
+def test_describe_reports_verify_uses_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The describe payload shows the capability's ``verify_uses_server`` flag."""
+    _registry(monkeypatch)
+    assert introspect.describe_data("echo.text")["verify_uses_server"] is False
+
+
 def test_unknown_capability_is_invalid_input(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -157,7 +157,13 @@ def _ensure_preview(
     temp_dir.mkdir(parents=True, exist_ok=True)
     try:
         invocation = runner.Invocation(
-            package, home, home.env_dir(package.name, package.version), temp_dir, run_id, None
+            package,
+            home,
+            home.env_dir(package.name, package.version),
+            temp_dir,
+            run_id,
+            None,
+            False,
         )
         request = runner.make_request(
             "preview",

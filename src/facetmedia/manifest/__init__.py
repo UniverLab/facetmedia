@@ -184,7 +184,7 @@ _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
 )
 _LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
 _CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
-    {"summary", "kind", "inputs", "verify", "preview", "models"}
+    {"summary", "kind", "inputs", "verify", "preview", "models", "verify_uses_server"}
 )
 _VERIFY_KEYS: Final[frozenset[str]] = frozenset({"thresholds"})
 _PREVIEW_KEYS: Final[frozenset[str]] = frozenset({"viewer"})
@@ -394,7 +394,7 @@ class RegistryLoader:
         requirements = self.requirements(data, file)
         licenses = self.licenses(data.get("licenses"), file)
         models = read_models(self, data.get("models"), file)
-        capabilities = self.capabilities(data.get("capabilities"), name, file)
+        capabilities = self.capabilities(data.get("capabilities"), name, file, server is not None)
         dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
         uses = self.uses(data.get("uses"), file, dependencies)
         browser = self.browser(data, file)
@@ -611,7 +611,9 @@ class RegistryLoader:
                 licenses.append(License(subject, spdx))
         return tuple(licenses)
 
-    def capabilities(self, raw: object, package: str, file: str) -> tuple[Capability, ...]:
+    def capabilities(
+        self, raw: object, package: str, file: str, has_server: bool
+    ) -> tuple[Capability, ...]:
         if raw is None:
             return ()
         if not isinstance(raw, dict):
@@ -627,7 +629,7 @@ class RegistryLoader:
             if not isinstance(item, dict):
                 self.add(file, prefix.rstrip("."), "type")
                 continue
-            capability = self.capability(name, package, file, prefix, item)
+            capability = self.capability(name, package, file, prefix, item, has_server)
             if capability is not None:
                 capabilities.append(capability)
         return tuple(capabilities)
@@ -639,6 +641,7 @@ class RegistryLoader:
         file: str,
         prefix: str,
         item: Mapping[str, Any],
+        has_server: bool,
     ) -> Capability | None:
         before = len(self.problems)
         self.unknown(item, _CAPABILITY_KEYS, file, prefix)
@@ -650,6 +653,9 @@ class RegistryLoader:
         thresholds = self.verify(item.get("verify"), file, prefix)
         viewer = self.preview(item.get("preview"), file, prefix)
         models = _read_capability_models(self, item, file, prefix)
+        verify_uses_server = self.boolean(item, "verify_uses_server", file, prefix, default=False)
+        if "verify_uses_server" in item and not has_server:
+            self.add(file, f"{prefix}verify_uses_server", "requires engine.server")
         if models is not None and any(field.name == "model" for field in inputs):
             self.add(
                 file,
@@ -667,6 +673,7 @@ class RegistryLoader:
             thresholds=thresholds,
             viewer=viewer,
             models=models,
+            verify_uses_server=verify_uses_server,
         )
 
     def verify(self, raw: object, file: str, prefix: str) -> Mapping[str, float]:

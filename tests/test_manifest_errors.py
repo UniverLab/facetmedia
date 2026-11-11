@@ -281,6 +281,18 @@ CASES = [
         "unknown",
         id="preview-unknown",
     ),
+    pytest.param(
+        BASE + CAPABILITY + 'verify_uses_server = "yes"\n',
+        "capabilities.speech.verify_uses_server",
+        "type",
+        id="verify-uses-server-type",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + "verify_uses_server = true\n",
+        "capabilities.speech.verify_uses_server",
+        "requires engine.server",
+        id="verify-uses-server-without-server",
+    ),
 ]
 
 
@@ -411,3 +423,48 @@ def test_capability_models_rejects_another_packages_model(tmp_path: Path) -> Non
         (problem["file"], problem["key"], problem["problem"])
         for problem in validate_registry(tmp_path)
     }
+
+
+SERVER_TABLE = """
+[engine.server]
+repo = "https://example.com/tool"
+rev = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+requirements = "requirements.txt"
+launch = ["python", "main.py", "--port", "{{port}}"]
+health_url = "http://127.0.0.1:{{port}}/health"
+"""
+
+
+def _write_index(root: Path, *names: str) -> None:
+    lines = ["version = 1"]
+    for name in names:
+        lines.append("[[packages]]")
+        lines.append(f'name = "{name}"')
+    (root / "index.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_verify_uses_server_explicit_false_with_server_loads(tmp_path: Path) -> None:
+    manifest = (
+        BASE + SERVER_TABLE + CAPABILITY + "verify_uses_server = false\n" + CAPABILITY_PREVIEW
+    )
+    _write_index(tmp_path, "pkg")
+    _write_package(manifest, tmp_path)
+    (capability,) = load_registry(tmp_path).package("pkg").capabilities
+    assert capability.verify_uses_server is False
+
+
+def test_verify_uses_server_undeclared_defaults_to_false(tmp_path: Path) -> None:
+    _write_index(tmp_path, "pkg")
+    _write_package(BASE + CAPABILITY + CAPABILITY_PREVIEW, tmp_path)
+    (capability,) = load_registry(tmp_path).package("pkg").capabilities
+    assert capability.verify_uses_server is False
+
+
+def test_verify_uses_server_true_with_server_loads(tmp_path: Path) -> None:
+    manifest = BASE + SERVER_TABLE + CAPABILITY + "verify_uses_server = true\n" + CAPABILITY_PREVIEW
+    _write_index(tmp_path, "pkg")
+    _write_package(manifest, tmp_path)
+    registry = load_registry(tmp_path)
+    assert registry.package("pkg") is not None
+    (capability,) = registry.package("pkg").capabilities
+    assert capability.verify_uses_server is True

@@ -211,6 +211,7 @@ class Capability:
     thresholds: Mapping[str, float] = dc_field(default_factory=dict)
     viewer: str = "generic"
     models: tuple[str, ...] | None = None
+    verify_uses_server: bool = False
 
     def input(self, name: str) -> Field | None:
         for field in self.inputs:

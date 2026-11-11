@@ -61,5 +61,6 @@
   "verify": {
     "thresholds": {}
   },
+  "verify_uses_server": false,
   "weight": "light"
 }

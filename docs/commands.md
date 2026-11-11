@@ -404,7 +404,10 @@ The argument is the asset or its record; the printed line and `data.asset`
 carry the same path, resolved. `fresh` carries the new verification next
 to the `recorded` one. A record
 whose asset is not installed re-installs nothing: `not_installed` (7) with
-`facet pull <package>`. A package whose files changed in the registry since
+`facet pull <package>`. The package's server starts for verify only when
+the asset's capability declares `verify_uses_server = true` in the
+manifest (default `false`); otherwise the runner gets no
+`FACET_SERVER_URL`, the same environment as a quick doctor. A package whose files changed in the registry since
 the pull is refused the same way, with
 `<package> <version> changed in the registry since it was installed` —
 `check` never verifies with stale code. Lock: taken per the package manifest
@@ -484,7 +487,9 @@ absent or changed package; `9` the runner crashed or broke the protocol.
 ## `facet preview`
 
 Shows one asset: to an agent as data, to a person through the capability's
-viewer — see [preview.md](preview.md). A `document` asset is different:
+viewer — see [preview.md](preview.md). The preview never starts the
+package's server, even for a capability with `verify_uses_server = true`.
+A `document` asset is different:
 its person preview is the PDF itself — the printed URL is the asset's
 `file://` path and the browser opens exactly that — and its `--json`
 `images` array carries the page PNGs, at most 10, with the `preview`

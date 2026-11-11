@@ -120,6 +120,7 @@ def describe_data(capability_id: str) -> dict[str, Any]:
         "inputs": schema.to_json_schema(capability),
         "piece_example": _piece_example(capability),
         "verify": {"thresholds": dict(sorted(capability.thresholds.items()))},
+        "verify_uses_server": capability.verify_uses_server,
         "preview": {"viewer": capability.viewer},
         "requirements": _requirements(package),
         "licenses": {

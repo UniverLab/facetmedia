@@ -6,6 +6,7 @@ Readiness moved to ``test_doctor.py`` with the command it now belongs to.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ from facetmedia.cli import main
 from facetmedia.home import Home
 from facetmedia.record import RecordSpec
 from facetmedia.registry import load_registry
+from facetmedia.registry_types import Server
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -395,6 +397,69 @@ def test_check_request_carries_absolute_paths(
     assert verdict.passed is True
     assert captured["piece_dir"] == str(tmp_path)
     assert Path(str(captured["out_dir"])).is_absolute()
+
+
+def _fake_verify_call(captured: dict[str, object]) -> Any:
+    """A runner ``call`` that records ``start_server`` and passes every asset."""
+
+    def fake_call(
+        invocation: runner_module.Invocation, verb: str, request: dict[str, object]
+    ) -> object:
+        captured["start_server"] = invocation.start_server
+        captured["verb"] = verb
+        return runner_module.Outcome({"assets": [{"file": "asset.txt", "passed": True}]}, "")
+
+    return fake_call
+
+
+def test_check_starts_no_server_without_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``check`` verifies with ``start_server`` off when the capability opts out."""
+    home = Home(tmp_path / "home")
+    package = load_registry(FIXTURES).packages["echo"]
+    asset = tmp_path / "asset.txt"
+    asset.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(runner_module, "call", _fake_verify_call(captured))
+    verdict = check_module._verify_asset(
+        package, home, tmp_path / "env", "run-1", "echo.text", {}, asset
+    )
+    assert verdict.passed is True
+    assert captured == {"start_server": False, "verb": "verify"}
+
+
+def _flagged_package() -> Any:
+    """The echo package with a server and a ``verify_uses_server`` capability."""
+    package = load_registry(FIXTURES).packages["echo"]
+    (capability,) = [cap for cap in package.capabilities if cap.id == "echo.text"]
+    return dataclasses.replace(
+        package,
+        server=Server(
+            repo="https://example.com/tool",
+            rev="a" * 40,
+            requirements="requirements.txt",
+            launch=("python", "main.py", "--port", "{{port}}"),
+            health_url="http://127.0.0.1:{{port}}/health",
+        ),
+        capabilities=(dataclasses.replace(capability, verify_uses_server=True),),
+    )
+
+
+def test_check_starts_server_when_capability_opts_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``check`` verifies with ``start_server`` on for a flagged capability."""
+    home = Home(tmp_path / "home")
+    asset = tmp_path / "asset.txt"
+    asset.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(runner_module, "call", _fake_verify_call(captured))
+    verdict = check_module._verify_asset(
+        _flagged_package(), home, tmp_path / "env", "run-1", "echo.text", {}, asset
+    )
+    assert verdict.passed is True
+    assert captured == {"start_server": True, "verb": "verify"}
 
 
 def test_check_long_prompt(

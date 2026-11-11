@@ -348,6 +348,25 @@ a non-https `repo`, a `rev` that is not 40 lowercase hex characters, a
 `requirements` that is missing or leaves the checkout, a `launch` argv without
 `{{port}}`, and a `health_url` without a scheme.
 
+A capability whose `verify` verb needs the backend opts in with
+`verify_uses_server = true` in its `[capabilities.<name>]` table (a boolean,
+default `false`):
+
+```toml
+[capabilities.profile]
+summary = "…"
+kind = "audio"
+verify_uses_server = true
+```
+
+`facet registry validate` rejects a non-boolean value, and rejects the key
+on a package without `[engine.server]`. `facet check` starts the package's
+server for verify only when the asset's capability declares
+`verify_uses_server = true`; otherwise the runner gets no `FACET_SERVER_URL`,
+the same environment as a quick doctor. `facet preview` never starts the
+server. `facet describe --json` shows the flag as `verify_uses_server`, so
+an agent knows a check will boot the backend.
+
 `facet pull` first builds the client environment exactly as for any other
 package, then clones the repo once per home at
 `<home>/servers/<package>/<version>/<shortrev>/` — a shallow, branchless fetch

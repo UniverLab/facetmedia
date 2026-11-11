@@ -149,6 +149,33 @@ def test_json_regenerates_a_stale_preview(
     assert second["preview"]["summary"] == "changed"
 
 
+def test_regeneration_never_starts_the_package_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The preview verb always runs with ``start_server`` off."""
+    home = Home(tmp_path / "home")
+    package = load_registry(FIXTURES).packages["echo"]
+    asset = tmp_path / "echo.txt"
+    asset.write_text("hello", encoding="utf-8")
+    preview_file = tmp_path / "echo.txt.preview.json"
+    captured: dict[str, object] = {}
+
+    def fake_call(
+        invocation: runner_module.Invocation, verb: str, request: dict[str, object]
+    ) -> object:
+        captured["start_server"] = invocation.start_server
+        captured["verb"] = verb
+        preview_file.write_text("{}", encoding="utf-8")
+        return runner_module.Outcome({}, "")
+
+    monkeypatch.setattr(runner_module, "call", fake_call)
+    assert (
+        preview_module._ensure_preview(package, home, "run-1", "echo.text", {}, asset, preview_file)
+        == {}
+    )
+    assert captured == {"start_server": False, "verb": "preview"}
+
+
 # --- T2: a person gets one URL line; --no-open never opens.
 
 
