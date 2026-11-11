@@ -121,6 +121,11 @@ A package that declares `[engine.server]` also gets its pinned checkout at
 `~/.facet/servers/<package>/<version>/<shortrev>/` with its own venv, and
 `installed` then means both the client environment and that checkout.
 
+A package that declares `[engine.source]` gets a pinned checkout at the same
+path, a shallow branchless fetch of exactly its `rev` with no server venv;
+`installed` then means both the client environment and that checkout. The
+plan names it as `source <repo> @ <shortrev>`.
+
 A package that declares `[engine.node]` instead installs a pinned Node
 runtime under `~/.facet/runtimes/node/<version>/` and its npm package
 tarballs under `~/.facet/node_pkgs/<name>/<version>/`, each verified by
@@ -303,6 +308,8 @@ declared Chromium extraction that is missing or unverified, with the same
 fix. A package that declares `[engine.server]` reports a missing or
 unverified checkout under `installed`, also with the fix `facet pull
 <package>`; the server is probed, never started. A package that declares
+`[engine.source]` reports its missing or unverified checkout the same way,
+as the `source` check. A package that declares
 `[engine.node]` reports a missing or unverified extraction, or a staged
 runner that is not current, under `installed` with the same fix; a
 verified runtime the host cannot execute is not pull-fixable. An installed
@@ -428,6 +435,10 @@ health endpoint and, when nothing answers, starts it on a free port, points
 the client at it with `FACET_SERVER_URL`, and stops its whole process group
 when the run ends — a server lives for one run, never as a daemon.
 
+For a package that declares `[engine.source]`, the runner's environment
+carries `FACET_SOURCE_DIR` with the path of its pinned checkout; the runner
+puts it on `sys.path` itself.
+
 ```console
 $ facet run ffmpeg.normalize normalize.toml
 take-voice.wav take-voice passed
@@ -516,7 +527,7 @@ typed confirmation does not match — nothing is recorded).
 
 ## `facet remove`
 
-Removes every environment and server checkout of one package. The models
+Removes every environment and server or source checkout of one package. The models
 stay — downloading them again is the expensive part; `--models` deletes
 them too, but only those no other installed package lists.
 
@@ -557,8 +568,8 @@ would free 280264681 bytes
 ```
 
 It removes stale environment versions, environments of packages the
-snapshot no longer has, server checkouts that are stale, unfinished or of a
-gone package, unlisted models, old snapshots, tmp scratch, kept
+snapshot no longer has, server and source checkouts that are stale,
+unfinished or of a gone package, unlisted models, old snapshots, tmp scratch, kept
 leftover directories of failed runs, logs older than 30 days, and prunes
 uv's cache. Environments in the active snapshot are kept, and so is every
 package's own data under `<home>/data/<package>/`: that directory is never

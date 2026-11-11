@@ -16,7 +16,7 @@ uv tool install facetmedia
 
 Linux and WSL only. Everything facet installs or remembers lives under one
 directory, `~/.facet` (override with `FACET_HOME`): environments, models,
-shared browser builds, pinned server checkouts, the registry snapshots,
+shared browser builds, pinned server and source checkouts, the registry snapshots,
 per-invocation logs, state, and each package's own data. The user
 guide is [docs/index.md](docs/index.md) — install, the facets and their
 packages, the first run, and how an agent starts with `facet skill`.
@@ -38,7 +38,7 @@ packages, the first run, and how an agent starts with `facet skill`.
 | `facet license accept` | accept a model's terms before it may be used |
 | `facet license list` | list models that need acceptance, with status |
 | `facet registry validate` | validate a registry checkout |
-| `facet clean` | remove unused environments, server checkouts and caches |
+| `facet clean` | remove unused environments, server and source checkouts and caches |
 | `facet remove` | remove an installed tool |
 
 Every verb with its flags, lock behaviour and exit codes is documented in
