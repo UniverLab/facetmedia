@@ -159,14 +159,15 @@ def pull(
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
+    # The browser is engine-independent: node packages render with it too.
+    if package.browser is not None:
+        env_browser.fetch_browser(package.browser, home)
     if package.host_app is not None:
         return _pull_host_app(package, home, env_dir, started)
     if package.node is not None:
         return _pull_node(package, home, env_dir, started, verify_models)
     if package.binary is not None:
         return env_binary.pull_report(package, home, env_dir, started, verify_models)
-    if package.browser is not None:
-        env_browser.fetch_browser(package.browser, home)
     up_to_date = _is_current(package, env_dir) and not package_stale(package, home)
     server_ready = server_present(package, home) and source_present(package, home)
     if not up_to_date:

@@ -271,6 +271,9 @@ never a nested `<channel>/<revision>` directory. The executable lands at
 executable is missing, is fetched again;
 a verified one is never re-downloaded.
 
+Any engine may declare it: a `python-env`, `node`, `binary` or `host-app`
+package's pull fetches the browser before its own engine step.
+
 The browser is shared: one extraction per channel and revision under
 `<home>/browsers`, never per package and never inside an environment —
 environments are rebuilt, the browser is not. The runner environment gets
