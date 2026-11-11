@@ -172,18 +172,46 @@ def pull(
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
-    # The browser is engine-independent: node packages render with it too.
-    if package.browser is not None:
-        env_browser.fetch_browser(package.browser, home)
-    # The FFmpeg build is engine-independent too: node packages encode with it.
-    if package.ffmpeg is not None:
-        env_ffmpeg.fetch_ffmpeg(package.ffmpeg, home)
+    artifact_bytes = _fetch_artifacts(package, home)
     if package.host_app is not None:
-        return _pull_host_app(package, home, env_dir, started)
-    if package.node is not None:
-        return _pull_node(package, home, env_dir, started, verify_models)
-    if package.binary is not None:
-        return env_binary.pull_report(package, home, env_dir, started, verify_models)
+        report = _pull_host_app(package, home, env_dir, started)
+    elif package.node is not None:
+        report = _pull_node(package, home, env_dir, started, verify_models)
+    elif package.binary is not None:
+        report = env_binary.pull_report(package, home, env_dir, started, verify_models)
+    else:
+        report = _pull_python_env(package, home, env_dir, started, verify_models)
+    return _with_artifacts(report, artifact_bytes)
+
+
+def _fetch_artifacts(package: Package, home: Home) -> int:
+    """Fetch the shared, engine-independent artifacts; returns the bytes downloaded.
+
+    The browser and the FFmpeg build serve every engine: node packages render
+    and encode with them too, so they are fetched before the engine step.
+    """
+    downloaded = 0
+    if package.browser is not None:
+        downloaded += env_browser.fetch_browser(package.browser, home)
+    if package.ffmpeg is not None:
+        downloaded += env_ffmpeg.fetch_ffmpeg(package.ffmpeg, home)
+    return downloaded
+
+
+def _with_artifacts(report: dict[str, object], artifact_bytes: int) -> dict[str, object]:
+    """Count the shared artifacts' bytes in the pull result."""
+    if not artifact_bytes:
+        return report
+    previous = report.get("downloaded_bytes")
+    report["downloaded_bytes"] = (previous if isinstance(previous, int) else 0) + artifact_bytes
+    report["already_installed"] = False
+    return report
+
+
+def _pull_python_env(
+    package: Package, home: Home, env_dir: Path, started: float, verify_models: bool
+) -> dict[str, object]:
+    """The ``python-env`` engine's pull: the environment, server, source and models."""
     up_to_date = _is_current(package, env_dir) and not package_stale(package, home)
     server_ready = server_present(package, home) and source_present(package, home)
     if not up_to_date:

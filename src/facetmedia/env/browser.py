@@ -69,18 +69,19 @@ def require_host() -> None:
         )
 
 
-def fetch_browser(browser: Browser, home: Home) -> None:
+def fetch_browser(browser: Browser, home: Home) -> int:
     """Download, verify and extract the declared browser, once per home.
 
     The archive lands at Playwright's ``<name>-<revision>`` layout under
     ``<home>/browsers``, so the package's own ``playwright`` finds it through
     ``PLAYWRIGHT_BROWSERS_PATH`` without downloading anything itself.
+    Returns the bytes downloaded: 0 when a verified extraction is present.
     """
     if browser_present(browser, home):
-        return
+        return 0
     url = f"{PLAYWRIGHT_CDN}/builds/cft/{browser.version}/linux64/chrome-linux64.zip"
     part = _part_path(home, f"{browser.channel}-{browser.revision}")
-    digest, _size = _download_with_retries(part, lambda: _stream_to_part(url, part))
+    digest, size = _download_with_retries(part, lambda: _stream_to_part(url, part))
     if digest != browser.sha256:
         part.unlink(missing_ok=True)
         raise FacetError(
@@ -105,6 +106,7 @@ def fetch_browser(browser: Browser, home: Home) -> None:
         target.unlink()
     os.replace(staging, target)
     atomic_write_text(target / BROWSER_MARKER, browser.sha256, home.tmp_dir)
+    return size
 
 
 def _extract_browser(archive: Path, staging: Path) -> None:
@@ -113,6 +115,24 @@ def _extract_browser(archive: Path, staging: Path) -> None:
     try:
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(staging)
+            _restore_modes(bundle, staging)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+
+
+def _restore_modes(bundle: zipfile.ZipFile, staging: Path) -> None:
+    """Re-apply the Unix permission bits the archive stores.
+
+    ``ZipFile.extractall`` drops them, which leaves ``chrome`` and its helpers
+    non-executable. Only the permission bits are kept: no setuid, setgid or
+    sticky bit is ever applied.
+    """
+    root = staging.resolve()
+    for info in bundle.infolist():
+        mode = (info.external_attr >> 16) & 0o777
+        if info.is_dir() or not mode:
+            continue
+        target = (staging / info.filename).resolve()
+        if target.is_relative_to(root) and target.is_file():
+            os.chmod(target, mode)

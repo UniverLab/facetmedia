@@ -771,6 +771,8 @@ def _browser_zip() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as bundle:
         info = zipfile.ZipInfo("chrome-linux64/chrome", date_time=(2024, 1, 1, 0, 0, 0))
+        info.create_system = 3
+        info.external_attr = 0o100755 << 16
         bundle.writestr(info, b"#!/bin/sh\nexec true\n")
     return buffer.getvalue()
 
@@ -876,8 +878,14 @@ def test_pull_fetches_the_browser_once_into_the_playwright_layout(
     code, envelope = _pull(capsys, "pull", "echo")
     assert code == 0
     assert _data(envelope)["already_installed"] is False
+    # The archive's bytes count in the pull result.
+    downloaded = _data(envelope)["downloaded_bytes"]
+    assert isinstance(downloaded, int)
+    assert downloaded >= len(fake_browser.archive)
     # Playwright's own <name>-<revision> layout, never <channel>/<revision>.
     assert (target / "chrome-linux64" / "chrome").is_file()
+    # The archive's Unix mode survives extraction: the browser is executable.
+    assert os.access(target / "chrome-linux64" / "chrome", os.X_OK)
     marker = target / env_browser.BROWSER_MARKER
     assert marker.read_text(encoding="utf-8").strip() == fake_browser.sha256
     assert fake_browser.requests == [archive]
@@ -1074,6 +1082,10 @@ def test_pull_fetches_the_ffmpeg_once_and_skips_a_verified_one(
     code, envelope = _pull(capsys, "pull", "echo")
     assert code == 0
     assert _data(envelope)["already_installed"] is False
+    # The archive's bytes count in the pull result.
+    downloaded = _data(envelope)["downloaded_bytes"]
+    assert isinstance(downloaded, int)
+    assert downloaded > 0
     # The single top directory is stripped: the binaries land in ``bin/``.
     assert (target / "bin" / "ffmpeg").is_file()
     assert (target / "bin" / "ffprobe").is_file()

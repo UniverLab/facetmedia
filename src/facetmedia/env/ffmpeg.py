@@ -81,17 +81,18 @@ def require_host() -> None:
         )
 
 
-def fetch_ffmpeg(ffmpeg: FFmpeg, home: Home) -> None:
+def fetch_ffmpeg(ffmpeg: FFmpeg, home: Home) -> int:
     """Download, verify and extract the declared FFmpeg build, once per home.
 
     The archive holds one top directory with ``bin/ffmpeg`` and
     ``bin/ffprobe``; the extraction strips that directory so the binaries
-    land at ``<home>/ffmpeg/<version>/bin/``.
+    land at ``<home>/ffmpeg/<version>/bin/``. Returns the bytes downloaded:
+    0 when a verified extraction is present.
     """
     if ffmpeg_present(ffmpeg, home):
-        return
+        return 0
     part = _part_path(home, f"ffmpeg-{ffmpeg.version}")
-    digest, _size = _download_with_retries(part, lambda: _stream_to_part(ffmpeg.url, part))
+    digest, size = _download_with_retries(part, lambda: _stream_to_part(ffmpeg.url, part))
     if digest != ffmpeg.sha256:
         part.unlink(missing_ok=True)
         raise FacetError(
@@ -115,6 +116,7 @@ def fetch_ffmpeg(ffmpeg: FFmpeg, home: Home) -> None:
         target.unlink()
     os.replace(staging, target)
     atomic_write_text(target / FFMPEG_MARKER, ffmpeg.sha256, home.tmp_dir)
+    return size
 
 
 def _extract_ffmpeg(ffmpeg: FFmpeg, archive: Path, staging: Path) -> None:
