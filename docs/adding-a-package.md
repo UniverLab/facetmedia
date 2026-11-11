@@ -689,7 +689,9 @@ pattern = "^[^\\n]+$"
 exist) and `array` (one level deep, of objects described by `items`).
 Optional keys are `required`, `default`, `description`, `min`, `max`,
 `pattern` (fullmatch), `min_items` and `values`; each option is only
-valid on its types. Verify thresholds and the viewer:
+valid on its types. A `pattern` field's `description` is the rule a caller
+sees when its value fails the pattern, so state the rule in words there
+and never the regular expression. Verify thresholds and the viewer:
 
 ```toml
 [capabilities.strip.verify]

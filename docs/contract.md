@@ -40,9 +40,12 @@ result.
 ```
 
 `code` is from the table below, `message` is one line, `hint` is an
-optional one-line fix, and `details` holds structured extras (an error
-list, a log path, the known ids). Without `--json`, a failure prints its
-message (and hint, when there is one) to stderr instead of JSON.
+optional fix, and `details` holds structured extras (an error list, a log
+path, the known ids). A piece that fails validation carries one
+`<field>: <rule>` (or `<field>: <problem>`) line per error in `hint`, so
+that hint can be several lines; every other hint is one line. Without
+`--json`, a failure prints its message (and hint, when there is one) to
+stderr instead of JSON.
 
 An unhealthy `facet doctor` is the one envelope that reports `ok:false`
 **with** `data` and no `error`: `data.healthy` is `false`, and the exit
