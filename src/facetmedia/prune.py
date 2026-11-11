@@ -339,11 +339,11 @@ def _server_items(home: Home, registry: Registry) -> list[GcItem]:
 
 def _server_reason(home: Home, package: Package | None, version_dir: Path) -> str | None:
     """Why one ``servers/<package>/<version>`` directory is garbage, or ``None``."""
-    if package is None or package.server is None:
+    if package is None or (package.server is None and package.source is None):
         return ORPHAN_PACKAGE
     if version_dir.name != package.version:
         return STALE_VERSION
-    if not env_module.server_present(package, home):
+    if not env_module.server_present(package, home) or not env_module.source_present(package, home):
         return INCOMPLETE_SERVER
     return None
 

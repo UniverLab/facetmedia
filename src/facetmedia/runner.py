@@ -346,8 +346,12 @@ def make_request(
 
 def runner_env(home: Home, package: Package) -> dict[str, str]:
     """The runner's environment: uv's, plus the models dir and the GPU flag."""
+    from facetmedia import env as env_module  # noqa: PLC0415
+
     env_vars = uv_env(home)
     env_vars["FACET_MODELS"] = str(home.models_dir / "direct")
+    if package.source is not None:
+        env_vars["FACET_SOURCE_DIR"] = str(env_module.source_dir(package, home))
     if package.node is not None:
         node_bin, _entry_dir = _node_paths(package, home)
         env_vars["FACET_NODE"] = str(node_bin)

@@ -65,6 +65,7 @@ from facetmedia.env.package_marker import (
     package_fingerprint,
     package_stale,
 )
+from facetmedia.env.source import fetch_source, source_dir, source_present
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
 from facetmedia.registry_types import (
     Browser,
@@ -94,10 +95,13 @@ __all__ = [
     "package_fingerprint",
     "package_stale",
     "pull",
+    "fetch_source",
     "server_dir",
     "server_present",
     "server_root",
     "server_venv",
+    "source_dir",
+    "source_present",
 ]
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
@@ -143,7 +147,11 @@ def is_installed(package: Package, home: Home) -> bool:
     marker holds this package's ``uv.lock`` hash needs no network, and a
     server package additionally needs its verified checkout.
     """
-    return client_env_present(package, home) and server_present(package, home)
+    return (
+        client_env_present(package, home)
+        and server_present(package, home)
+        and source_present(package, home)
+    )
 
 
 def pull(
@@ -163,10 +171,11 @@ def pull(
     if package.browser is not None:
         _fetch_browser(package.browser, home)
     up_to_date = _is_current(package, env_dir) and not package_stale(package, home)
-    server_ready = server_present(package, home)
+    server_ready = server_present(package, home) and source_present(package, home)
     if not up_to_date:
         _rebuild(package, home, env_dir)
     _fetch_server(package, home)
+    fetch_source(package, home)
     records, downloaded = _fetch_models(package, home, verify_models)
     if not up_to_date:
         atomic_write_text(env_dir / COMPLETE, package.lock_sha256, home.tmp_dir)
@@ -279,6 +288,8 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
         lines = env_binary.plan_lines(package, home)
     else:
         lines = [f"python {package.python}", f"environment {env_dir}"]
+    if package.source is not None:
+        lines.append(f"source {package.source.repo} @ {package.source.rev[:SHORT_REV]}")
     total = 0
     for model in package.models:
         if is_backend(model):
@@ -708,7 +719,7 @@ def _fetch_server(package: Package, home: Home) -> None:
     target = server_dir(package, home)
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        _git_checkout(target, server, uv_env(home))
+        git_checkout(target, server.repo, server.rev, uv_env(home))
         _server_build(home, target, package, server)
     except BaseException:
         shutil.rmtree(target, ignore_errors=True)
@@ -717,12 +728,12 @@ def _fetch_server(package: Package, home: Home) -> None:
     atomic_write_text(target / COMPLETE, _server_fingerprint(server, digest), home.tmp_dir)
 
 
-def _git_checkout(target: Path, server: Server, env_vars: dict[str, str]) -> None:
+def git_checkout(target: Path, repo: str, rev: str, env_vars: dict[str, str]) -> None:
     """A branchless shallow fetch of exactly ``rev``, then a detached checkout."""
     target.mkdir(parents=True)
     _git(target, ["init", "--quiet"], env_vars)
-    _git(target, ["remote", "add", "origin", server.repo], env_vars)
-    _git(target, ["fetch", "--quiet", "--depth", "1", "origin", server.rev], env_vars)
+    _git(target, ["remote", "add", "origin", repo], env_vars)
+    _git(target, ["fetch", "--quiet", "--depth", "1", "origin", rev], env_vars)
     _git(target, ["checkout", "--quiet", "--detach", "FETCH_HEAD"], env_vars)
 
 

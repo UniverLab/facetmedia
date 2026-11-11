@@ -376,6 +376,42 @@ always kills the server's whole process group afterwards. A launch that never
 turns healthy fails `runner_failed` with its last output lines. The client
 reads `FACET_SERVER_URL`; it never starts, stops or holds the tool.
 
+## Source engine
+
+Some tools ship Python code that is not pip-installable and serves no API:
+it is imported, not launched. A package like that keeps the ordinary
+`python-env` engine with `transport = "cli"` and adds an `[engine.source]`
+table:
+
+```toml
+[engine]
+type = "python-env"                   # the only engine that carries a source
+python = "3.12"
+
+[engine.source]
+repo = "https://github.com/example/tool"   # https only
+rev = "<40 lowercase hex>"                 # the exact commit
+```
+
+`facet registry validate` rejects `[engine.source]` on any engine or
+transport but `python-env` + `cli`, a non-https `repo`, a `rev` that is not
+40 lowercase hex characters, and a package that declares both
+`[engine.server]` and `[engine.source]`: a package clones either a server
+or a source checkout, never both.
+
+`facet pull` clones the repo once per home at
+`<home>/servers/<package>/<version>/<shortrev>/` — a shallow, branchless
+fetch of exactly `rev`, skipped when that directory already holds a verified
+checkout. A `.complete` marker holding the rev is written last, so an
+interrupted pull is redone by the next one. `installed` means both the
+client environment and the source checkout are complete; `facet remove` and
+`facet clean` free the checkout tree like a server checkout.
+
+The runner finds the checkout in `FACET_SOURCE_DIR` and puts it on
+`sys.path` itself; facet never imports the tool. The tool's own
+third-party dependencies go in the package's `pyproject.toml`, as for any
+other `python-env` package.
+
 ## Node engine
 
 Some tools are Node CLIs, not Python packages. A package like that declares

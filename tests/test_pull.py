@@ -913,11 +913,11 @@ def test_pull_of_a_uv_lock_server_writes_the_lock_marker(
     monkeypatch.setattr(env_module, "_stream_output", lambda argv, env: calls.append((argv, env)))
     lock = b"the upstream uv.lock\n"
 
-    def _fake_checkout(target: Path, server: Server, env_vars: dict[str, str]) -> None:
+    def _fake_checkout(target: Path, repo: str, rev: str, env_vars: dict[str, str]) -> None:
         target.mkdir(parents=True, exist_ok=True)
         (target / "uv.lock").write_bytes(lock)
 
-    monkeypatch.setattr(env_module, "_git_checkout", _fake_checkout)
+    monkeypatch.setattr(env_module, "git_checkout", _fake_checkout)
     rev = "a" * 40
     package = dataclasses.replace(
         load_registry(FIXTURES).packages["echo"],

@@ -42,7 +42,7 @@ def package_doctor(
         return [node_entry], None
     if package.browser is not None and not env_module.browser_present(package.browser, home):
         return [_browser_doctor_check(package, home)], None
-    if not env_module.server_present(package, home):
+    if not env_module.server_present(package, home) or not env_module.source_present(package, home):
         return [_server_doctor_check(package, home)], None
     temp_dir = home.tmp_dir / f".facet-doctor-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -67,15 +67,20 @@ def _browser_doctor_check(package: Package, home: Home) -> dict[str, object]:
 
 
 def _server_doctor_check(package: Package, home: Home) -> dict[str, object]:
-    """The doctor entry for a declared server whose checkout is not verified.
+    """The doctor entry for a declared server or source whose checkout is not verified.
 
     The server is probed, never started: a doctor reports, the pull repairs.
     """
     from facetmedia import env as env_module  # noqa: PLC0415
 
-    target = env_module.server_dir(package, home)
+    if package.server is not None:
+        target = env_module.server_dir(package, home)
+        name = "server"
+    else:
+        target = env_module.source_dir(package, home)
+        name = "source"
     return {
-        "name": "server",
+        "name": name,
         "ok": False,
         "detail": f"{target}: the checkout is not verified",
         "fix": f"facet pull {package.name}",

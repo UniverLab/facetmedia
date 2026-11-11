@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlsplit
 
-from facetmedia.registry_types import Server
+from facetmedia.registry_types import Server, Source
 
 if TYPE_CHECKING:
     from facetmedia.manifest import RegistryLoader
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 SERVER_KEYS: Final[frozenset[str]] = frozenset(
     {"repo", "rev", "requirements", "launch", "health_url", "timeout_s", "env"}
 )
+SOURCE_KEYS: Final[frozenset[str]] = frozenset({"repo", "rev"})
 #: The manifest's port token, substituted with the free port facet picked.
 PORT_TOKEN: Final[str] = "{{port}}"
 #: The manifest's data token, substituted with the package's persistent dir.
@@ -40,9 +41,19 @@ def _relative(value: str) -> bool:
     return bool(value) and not path.is_absolute() and ".." not in path.parts
 
 
+def _repo_ok(value: str) -> bool:
+    """True for an https repo URL, the only scheme facet clones."""
+    return value.startswith("https://")
+
+
+def _rev_ok(value: str) -> bool:
+    """True for a 40-character lowercase hex commit."""
+    return bool(_REVISION_RE.fullmatch(value))
+
+
 _CHECKS: Final[Mapping[str, Callable[[str], bool]]] = {
-    "repo": lambda value: value.startswith("https://"),
-    "rev": lambda value: bool(_REVISION_RE.fullmatch(value)),
+    "repo": _repo_ok,
+    "rev": _rev_ok,
     "requirements": _relative,
     "health_url": lambda value: bool(urlsplit(value).scheme),
 }
@@ -88,6 +99,36 @@ def read_server(
         timeout_s=timeout_s or DEFAULT_TIMEOUT_S,
         env=env,
     )
+
+
+def read_source(
+    loader: RegistryLoader,
+    engine_table: Mapping[str, Any],
+    file: str,
+    engine_type: str,
+    transport_type: str,
+) -> Source | None:
+    """The optional ``[engine.source]`` table, or ``None`` when it is absent."""
+    if engine_table.get("source") is None:
+        return None
+    before = len(loader.problems)
+    table = loader.table(engine_table, "source", file, "engine.", required=False)
+    if table is None:
+        return None
+    if engine_table.get("server") is not None:
+        loader.add(file, "engine.source", "a package declares either a server or a source checkout")
+    if (engine_type, transport_type) != ("python-env", "cli"):
+        loader.add(file, "engine.source", "requires python-env with transport cli")
+    loader.unknown(table, SOURCE_KEYS, file, "engine.source.")
+    repo = loader.string(table, "repo", file, "engine.source.", required=True) or ""
+    rev = loader.string(table, "rev", file, "engine.source.", required=True) or ""
+    if repo and not _repo_ok(repo):
+        loader.add(file, "engine.source.repo", "value")
+    if rev and not _rev_ok(rev):
+        loader.add(file, "engine.source.rev", "value")
+    if len(loader.problems) != before:
+        return None
+    return Source(repo=repo, rev=rev)
 
 
 def read_env(

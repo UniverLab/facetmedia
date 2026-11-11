@@ -151,6 +151,14 @@ class Server:
 
 
 @dataclass(frozen=True)
+class Source:
+    """The repo-based source checkout a package declares in ``[engine.source]``."""
+
+    repo: str
+    rev: str
+
+
+@dataclass(frozen=True)
 class NodePackage:
     """One pinned npm tarball a ``node`` engine package declares."""
 
@@ -236,6 +244,7 @@ class Package:
     uses: tuple[str, ...] = ()
     browser: Browser | None = None
     server: Server | None = None
+    source: Source | None = None
     node: Node | None = None
     host_app: HostApp | None = None
     binary: Binary | None = None

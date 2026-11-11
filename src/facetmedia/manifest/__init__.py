@@ -20,7 +20,7 @@ from facetmedia.manifest.binary import read_binary
 from facetmedia.manifest.host import read_host_app
 from facetmedia.manifest.model import read_models
 from facetmedia.manifest.node import read_node
-from facetmedia.manifest.server import read_server
+from facetmedia.manifest.server import read_server, read_source
 from facetmedia.registry_types import (
     CAPABILITY_KINDS,
     DEFAULT_INVOCATION_TEMPLATE,
@@ -39,6 +39,7 @@ from facetmedia.registry_types import (
     Registry,
     Requirements,
     Server,
+    Source,
 )
 
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
@@ -165,7 +166,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
 _BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "sha256"})
 _BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
 _ENGINE_KEYS: Final[frozenset[str]] = frozenset(
-    {"type", "python", "node", "server", "host_app", "binary"}
+    {"type", "python", "node", "server", "source", "host_app", "binary"}
 )
 _ENGINE_TYPES: Final[frozenset[str]] = frozenset({"python-env", "node", "host-app", "binary"})
 _TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
@@ -387,7 +388,7 @@ class RegistryLoader:
         description = self.string(data, "description", file, "", required=True)
         facet = self.facet(data, file)
         transport_type, entry, template = self.transport(data, file)
-        engine_type, python, node, server, host_app, binary = self.engine(
+        engine_type, python, node, server, source, host_app, binary = self.engine(
             data, file, transport_type, template
         )
         requirements = self.requirements(data, file)
@@ -431,6 +432,7 @@ class RegistryLoader:
             uses=uses,
             browser=browser,
             server=server,
+            source=source,
             node=node,
             host_app=host_app,
             binary=binary,
@@ -521,10 +523,10 @@ class RegistryLoader:
 
     def engine(
         self, data: Mapping[str, Any], file: str, transport_type: str, template: str
-    ) -> tuple[str, str, Node | None, Server | None, HostApp | None, Binary | None]:
+    ) -> tuple[str, str, Node | None, Server | None, Source | None, HostApp | None, Binary | None]:
         table = self.table(data, "engine", file, "", required=True)
         if table is None:
-            return "", "", None, None, None, None
+            return "", "", None, None, None, None, None
         self.unknown(table, _ENGINE_KEYS, file, "engine.")
         engine_type = self.string(table, "type", file, "engine.", required=True)
         if engine_type is not None and engine_type not in _ENGINE_TYPES:
@@ -532,9 +534,10 @@ class RegistryLoader:
         python = self.engine_python(table, file, engine_type)
         node = read_node(self, table, file, engine_type or "", transport_type)
         server = read_server(self, table, file, engine_type or "", transport_type)
+        source = read_source(self, table, file, engine_type or "", transport_type)
         host_app = read_host_app(self, table, file, engine_type or "", transport_type)
         binary = read_binary(self, table, file, engine_type or "", transport_type, template)
-        return engine_type or "", python, node, server, host_app, binary
+        return engine_type or "", python, node, server, source, host_app, binary
 
     def engine_python(self, table: Mapping[str, Any], file: str, engine_type: str | None) -> str:
         """``engine.python``: required for ``python-env``, forbidden for the rest.
