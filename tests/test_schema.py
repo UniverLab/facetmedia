@@ -103,6 +103,7 @@ def test_validate_pattern_constraint() -> None:
         name="test",
         type="string",
         pattern=r"^[a-z]+$",
+        description="no capitals",
     )
     cap_with_pattern = type(cap)(
         id=cap.id,
@@ -118,6 +119,24 @@ def test_validate_pattern_constraint() -> None:
     assert exc.value.code == "invalid_input"
     errors = exc.value.details["errors"]
     assert any(e["field"] == "test" and e["problem"] == "pattern" for e in errors)
+    assert errors[0]["rule"] == "no capitals"
+    assert exc.value.hint == "test: no capitals"
+
+
+def test_validate_pattern_without_description() -> None:
+    cap = _capability(Field(name="test", type="string", pattern=r"^[a-z]+$"))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"test": "ABC123"}, Path.cwd())
+    errors = exc.value.details["errors"]
+    assert "rule" not in errors[0]
+    assert exc.value.hint == "test: pattern"
+
+
+def test_validate_required_hint() -> None:
+    cap = _capability(Field(name="test", type="string", required=True))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {}, Path.cwd())
+    assert exc.value.hint == "test: required"
 
 
 def test_validate_path_field_resolves() -> None:

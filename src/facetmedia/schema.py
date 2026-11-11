@@ -29,9 +29,11 @@ def validate(cap: Capability, piece: Mapping[str, Any], piece_dir: Path) -> dict
     errors: list[dict[str, str]] = []
     values = _validate_object(cap.inputs, piece, "", Path(piece_dir), errors)
     if errors:
+        hint = "\n".join(f"{e['field']}: {e.get('rule', e['problem'])}" for e in errors)
         raise FacetError(
             "invalid_input",
             f"invalid inputs for {cap.id}",
+            hint=hint,
             details={"errors": errors},
         )
     return values
@@ -123,7 +125,10 @@ def _check_scalar(
         and isinstance(value, str)
         and re.fullmatch(field.pattern, value) is None
     ):
-        errors.append({"field": path, "problem": "pattern"})
+        entry = {"field": path, "problem": "pattern"}
+        if field.description:
+            entry["rule"] = field.description
+        errors.append(entry)
         return _INVALID
     return value
 

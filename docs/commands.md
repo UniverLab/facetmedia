@@ -474,9 +474,15 @@ at once:
 ```console
 $ facet run ffmpeg.normalize empty.toml
 invalid inputs for ffmpeg.normalize
+clip: required
 $ facet run ffmpeg.normalize empty.toml --json
-{"contract": 1, "error": {"code": "invalid_input", "details": {"errors": [{"field": "clip", "problem": "required"}]}, "hint": null, "message": "invalid inputs for ffmpeg.normalize"}, "facet": "0.1.0b1", "ok": false}
+{"contract": 1, "error": {"code": "invalid_input", "details": {"errors": [{"field": "clip", "problem": "required"}]}, "hint": "clip: required", "message": "invalid inputs for ffmpeg.normalize"}, "facet": "0.1.0b1", "ok": false}
 ```
+
+Each entry in `details.errors` carries `field` and `problem`; a `pattern`
+failure also carries the field's manifest `description` as `rule` when it is
+non-empty, and the hint repeats one `<field>: <rule>` (or `<field>:
+<problem>`) line per error.
 
 With `--json` on success, `data` carries `capability`, `out_dir`,
 `pulled`, `downloaded_bytes` and one full record per asset. Failed assets
