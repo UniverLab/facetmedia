@@ -1,6 +1,6 @@
 ---
 title: Adding a package
-description: How to write a registry package: its manifest, runner, skill and tests.
+description: "How to write a registry package: its manifest, runner, skill and tests."
 order: 6
 ---
 
