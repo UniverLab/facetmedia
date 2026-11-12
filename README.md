@@ -43,7 +43,7 @@ packages, the first run, and how an agent starts with `facet skill`.
 | Command | Purpose |
 |---------|---------|
 | `facet update` | download the registry at a pinned commit |
-| `facet pull` | install a tool into its own pinned environment |
+| `facet pull` | install a facet or a package, choosing what this machine can run |
 | `facet list` | list installed and available tools |
 | `facet describe` | show a capability's inputs, verification and licences |
 | `facet skill` | print the skill for facet or one package |

@@ -23,7 +23,7 @@ The two verbs that look similar answer two different questions:
 | Verb | Purpose | Lock |
 |------|---------|------|
 | `facet update` | download the registry at a pinned commit | exclusive |
-| `facet pull` | install a tool into its own pinned environment | exclusive |
+| `facet pull` | install a facet or a package, choosing what this machine can run | exclusive |
 | `facet list` | list installed and available tools | none |
 | `facet describe` | show a capability's full contract | none |
 | `facet skill` | print the skill for facet or one package | none |
@@ -204,9 +204,14 @@ is repaired by the next pull; the markers written last —
 built from — are what a later pull compares against.
 Lock: exclusive.
 
-Exit codes: `0` (`already installed` is also `0`); `2` unknown package;
-`4` a model's terms are not accepted; `5` a readiness check fails; `8`
-the environment build, a model download or its hash failed.
+Exit codes: `0` (`already installed` is also `0`, and a declined
+confirmation installs nothing with `0`); `2` a name neither a facet nor a
+package carries, mixing positional names with `--package`, or naming
+nothing; `4` a model's terms are not accepted; `5` a readiness check
+fails, or the packages to install need more disk than is free under the
+facet home; `8` the environment build, a model download or its hash
+failed; `11` a multi-package plan without a terminal to confirm it and no
+`--yes` or `--plan`.
 
 ## `facet list`
 
