@@ -287,7 +287,8 @@ def test_pull_skips_the_backend_owned_model(
     home, _registry = backend_home
     shutil.rmtree(home / "models" / "direct", ignore_errors=True)
 
-    code = main(["pull", "echo", "--json"])
+    # The plan is the detailed log: it is echoed on stderr only with --verbose.
+    code = main(["pull", "echo", "--json", "--verbose"])
     envelope, err = _envelope(capsys)
     assert code == 0
     assert envelope["ok"] is True

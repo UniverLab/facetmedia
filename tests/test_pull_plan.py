@@ -129,7 +129,7 @@ def set_machine(monkeypatch: pytest.MonkeyPatch, gpu_mib: int | None, ram_gb: fl
 def fake_pull(monkeypatch: pytest.MonkeyPatch, calls: list[str], fail: str = "") -> None:
     """Record each pull and return a report shaped like ``env.pull``'s."""
 
-    def pull(package, home, verify_models=False, run_id=""):
+    def pull(package, home, verify_models=False, run_id="", progress=None):
         calls.append(package.name)
         if package.name == fail:
             raise FacetError("download_failed", f"{package.name} broke")

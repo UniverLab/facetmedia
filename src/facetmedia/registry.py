@@ -11,14 +11,17 @@ Nothing here touches the network: fetching the registry is ``feat(update)``.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Final
 
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.manifest import RegistryLoader
+from facetmedia.progress import verbose
 from facetmedia.registry_types import (
     PROTOCOL_VERSION,
     Capability,
@@ -50,6 +53,8 @@ __all__ = [
     "snapshot_identity",
     "validate_registry",
 ]
+
+logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
 #: The runner verb registrations the validator looks for in an entry file.
 DOCTOR_VERB_RE: re.Pattern[str] = re.compile(r"""@runner\.verb\(\s*['"]doctor['"]\s*\)""")
@@ -264,7 +269,10 @@ def _first_use(home: Home) -> str:
     No lock is taken: a caller such as ``facet update`` already holds the
     exclusive lock, and a second descriptor on the same file would deadlock.
     """
-    print("fetching the registry (first use)", file=sys.stderr)
+    message = "fetching the registry (first use)"
+    logger.info("%s", message)
+    if verbose():
+        print(message, file=sys.stderr)
     # Imported here because facetmedia.update imports this module: a top-level
     # import would be a cycle.
     from facetmedia import update  # noqa: PLC0415

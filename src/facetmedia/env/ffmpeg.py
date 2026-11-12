@@ -21,6 +21,7 @@ import secrets
 import shutil
 import sys
 import tarfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -81,7 +82,12 @@ def require_host() -> None:
         )
 
 
-def fetch_ffmpeg(ffmpeg: FFmpeg, home: Home) -> int:
+def fetch_ffmpeg(
+    ffmpeg: FFmpeg,
+    home: Home,
+    on_bytes: Callable[[int], None] | None = None,
+    on_total: Callable[[int], None] | None = None,
+) -> int:
     """Download, verify and extract the declared FFmpeg build, once per home.
 
     The archive holds one top directory with ``bin/ffmpeg`` and
@@ -92,7 +98,9 @@ def fetch_ffmpeg(ffmpeg: FFmpeg, home: Home) -> int:
     if ffmpeg_present(ffmpeg, home):
         return 0
     part = _part_path(home, f"ffmpeg-{ffmpeg.version}")
-    digest, size = _download_with_retries(part, lambda: _stream_to_part(ffmpeg.url, part))
+    digest, size = _download_with_retries(
+        part, lambda: _stream_to_part(ffmpeg.url, part, on_bytes, on_total)
+    )
     if digest != ffmpeg.sha256:
         part.unlink(missing_ok=True)
         raise FacetError(

@@ -21,6 +21,7 @@ import secrets
 import shutil
 import sys
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -69,7 +70,12 @@ def require_host() -> None:
         )
 
 
-def fetch_browser(browser: Browser, home: Home) -> int:
+def fetch_browser(
+    browser: Browser,
+    home: Home,
+    on_bytes: Callable[[int], None] | None = None,
+    on_total: Callable[[int], None] | None = None,
+) -> int:
     """Download, verify and extract the declared browser, once per home.
 
     The archive lands at Playwright's ``<name>-<revision>`` layout under
@@ -81,7 +87,9 @@ def fetch_browser(browser: Browser, home: Home) -> int:
         return 0
     url = f"{PLAYWRIGHT_CDN}/builds/cft/{browser.version}/linux64/chrome-linux64.zip"
     part = _part_path(home, f"{browser.channel}-{browser.revision}")
-    digest, size = _download_with_retries(part, lambda: _stream_to_part(url, part))
+    digest, size = _download_with_retries(
+        part, lambda: _stream_to_part(url, part, on_bytes, on_total)
+    )
     if digest != browser.sha256:
         part.unlink(missing_ok=True)
         raise FacetError(

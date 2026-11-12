@@ -24,9 +24,13 @@ Error codes and exit codes (exhaustive for v0.1):
 from __future__ import annotations
 
 import json
+import logging
 import sys
+from typing import Final
 
 from facetmedia import __version__
+
+logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
 CONTRACT_VERSION: int = 1
 
@@ -100,7 +104,9 @@ def emit(envelope: dict[str, object], as_json: bool) -> None:
         return
     message = error.get("message")
     if isinstance(message, str) and message:
+        logger.info("%s", message)
         print(message, file=sys.stderr)
     hint = error.get("hint")
     if isinstance(hint, str) and hint:
+        logger.info("%s", hint)
         print(hint, file=sys.stderr)

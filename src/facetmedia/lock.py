@@ -12,16 +12,19 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import logging
 import os
 import sys
 import time
 from collections.abc import Iterator
-from typing import Literal
+from typing import Final, Literal
 
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_json, read_json
+from facetmedia.progress import verbose
 
 LockMode = Literal["exclusive", "shared"]
+logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
 #: How long a waiter sleeps between two non-blocking attempts.
 POLL_S = 0.5
@@ -126,14 +129,17 @@ def holder_info(home: Home) -> tuple[str | None, str | None]:
 
 
 def _announce_wait(home: Home) -> None:
-    """Print the one waiting line — or the stale-info report — to stderr."""
+    """Record the one waiting line, and show it before any progress line."""
     holder, stale = holder_info(home)
     if holder is not None:
-        print(f"waiting for the facet lock, held by {holder}", file=sys.stderr)
+        message = f"waiting for the facet lock, held by {holder}"
     elif stale is not None:
-        print(f"waiting for the facet lock ({stale}, the flock is the truth)", file=sys.stderr)
+        message = f"waiting for the facet lock ({stale}, the flock is the truth)"
     else:
-        print("waiting for the facet lock, held by another process", file=sys.stderr)
+        message = "waiting for the facet lock, held by another process"
+    logger.info("%s", message)
+    if verbose():
+        print(message, file=sys.stderr)
 
 
 def _busy_error(home: Home) -> FacetError:

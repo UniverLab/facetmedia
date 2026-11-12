@@ -19,8 +19,8 @@ import secrets
 import shlex
 import shutil
 import subprocess
-import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -105,13 +105,20 @@ def _version_problem(binary: Binary, resolved: Path) -> str | None:
     return None
 
 
-def fetch_binary(binary: Binary, home: Home) -> int:
+def fetch_binary(
+    binary: Binary,
+    home: Home,
+    on_bytes: Callable[[int], None] | None = None,
+    on_total: Callable[[int], None] | None = None,
+) -> int:
     """Download, verify and extract the declared zip; returns the bytes fetched."""
     if binary_present(binary, home):
         return 0
     label = f"{binary.name}-{binary.version}"
     part = _part_path(home, label)
-    digest, size = _download_with_retries(part, lambda: _stream_to_part(binary.url, part))
+    digest, size = _download_with_retries(
+        part, lambda: _stream_to_part(binary.url, part, on_bytes, on_total)
+    )
     if digest != binary.sha256:
         part.unlink(missing_ok=True)
         raise FacetError(
@@ -160,34 +167,6 @@ def _extract_zip(archive: Path, staging: Path, binary: Binary, label: str) -> No
             f"{label}: the archive has no {binary.bin}",
             details={"binary": label, "bin": binary.bin},
         )
-
-
-def pull_report(
-    package: Package,
-    home: Home,
-    env_dir: Path,
-    started: float,
-    verify_models: bool,
-) -> dict[str, object]:
-    """The ``binary`` engine's pull: verified extraction, no python environment."""
-    from facetmedia import env as env_module  # noqa: PLC0415
-
-    binary = package.binary
-    assert binary is not None
-    up_to_date = binary_present(binary, home)
-    downloaded = fetch_binary(binary, home)
-    records, model_bytes = env_module._fetch_models(package, home, verify_models)
-    downloaded += model_bytes
-    return {
-        "package": package.name,
-        "version": package.version,
-        "env": str(env_dir),
-        "python": package.python,
-        "already_installed": up_to_date,
-        "downloaded_bytes": downloaded,
-        "seconds": round(time.monotonic() - started, 3),
-        "models": records,
-    }
 
 
 def plan_lines(package: Package, home: Home) -> list[str]:

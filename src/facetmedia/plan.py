@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Final
 from facetmedia import config, env, lock, probes
 from facetmedia.contract import FacetError, emit, ok
 from facetmedia.home import Home
+from facetmedia.progress import Progress, announce_failure
 from facetmedia.registry import load_active_registry
 from facetmedia.registry_types import FACETS, Package, Registry
 
@@ -258,12 +259,19 @@ def handle_pull(args: argparse.Namespace) -> int:
     packages = list(getattr(args, "package", ()) or ())
     selected = resolve(registry, names, packages)
     legacy = legacy_package(args, selected, names)
+    reporter = _reporter(args)
     wait = bool(getattr(args, "wait", True))
     timeout_s = float(getattr(args, "wait_timeout", 3600.0))
     with lock.hold("exclusive", "facet pull", wait, timeout_s):
         if legacy is not None:
-            return _legacy_pull(args, home, legacy)
-        return _planned_pull(args, home, selected)
+            return _legacy_pull(args, home, legacy, reporter)
+        return _planned_pull(args, home, selected, reporter)
+
+
+def _reporter(args: argparse.Namespace) -> Progress | None:
+    """The progress line the CLI configured, or ``None`` for a direct call."""
+    reporter = getattr(args, "progress", None)
+    return reporter if isinstance(reporter, Progress) else None
 
 
 def legacy_package(
@@ -286,10 +294,20 @@ def legacy_package(
     return selected[0]
 
 
-def _legacy_pull(args: argparse.Namespace, home: Home, package: Package) -> int:
-    report = env.pull(
-        package, home, verify_models=args.verify_models, run_id=getattr(args, "run_id", "")
-    )
+def _legacy_pull(
+    args: argparse.Namespace, home: Home, package: Package, reporter: Progress | None = None
+) -> int:
+    try:
+        report = env.pull(
+            package,
+            home,
+            verify_models=args.verify_models,
+            run_id=getattr(args, "run_id", ""),
+            progress=reporter,
+        )
+    except FacetError:
+        announce_failure(getattr(args, "run_id", ""))
+        raise
     emit(ok(report), args.json)
     if not args.json:
         _announce_pull(report, bool(package.models))
@@ -314,6 +332,7 @@ def _planned_pull(
     args: argparse.Namespace,
     home: Home,
     selected: list[Package],
+    reporter: Progress | None = None,
 ) -> int:
     entries = build_plan(
         selected,
@@ -332,7 +351,7 @@ def _planned_pull(
         raise refusal
     if not _confirmed(args, entries, plan_data):
         return 0
-    return _install_all(args, home, entries)
+    return _install_all(args, home, entries, reporter)
 
 
 def _confirmed(
@@ -367,7 +386,12 @@ def _print_plan(entries: list[PlanEntry]) -> None:
         print(f"{entry.name} {entry.version} {size:.2f} GB {state}: {entry.reason}")
 
 
-def _install_all(args: argparse.Namespace, home: Home, entries: list[PlanEntry]) -> int:
+def _install_all(
+    args: argparse.Namespace,
+    home: Home,
+    entries: list[PlanEntry],
+    reporter: Progress | None = None,
+) -> int:
     installed: list[dict[str, object]] = []
     downloaded = 0
     skipped = _skipped(entries)
@@ -383,8 +407,10 @@ def _install_all(args: argparse.Namespace, home: Home, entries: list[PlanEntry])
                 home,
                 verify_models=args.verify_models,
                 run_id=getattr(args, "run_id", ""),
+                progress=reporter,
             )
         except FacetError as error:
+            announce_failure(getattr(args, "run_id", ""))
             if not args.json:
                 _announce_summary(installed, skipped, downloaded)
             raise _with_partial(error, entries, installed, skipped, downloaded) from error

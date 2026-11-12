@@ -22,6 +22,7 @@ from facetmedia import (
     lock,
     plan,
     preview,
+    progress,
     prune,
     record,
     registry,
@@ -152,10 +153,15 @@ _CONFIG_HANDLERS: dict[str, Handler] = {
 
 
 def _handle_update(args: argparse.Namespace) -> int:
+    _configure_output(args)
     ref = args.ref or update.default_ref()
     ref_source = _ref_source(args)
-    with lock.hold("exclusive", "facet update", *_lock_params(args)):
-        data = update.update_registry(Home.from_env(), ref, ref_source=ref_source)
+    try:
+        with lock.hold("exclusive", "facet update", *_lock_params(args)):
+            data = update.update_registry(Home.from_env(), ref, ref_source=ref_source)
+    except FacetError:
+        progress.announce_failure(getattr(args, "run_id", ""))
+        raise
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         print(f"registry {data['commit']} (ref {data['ref']})")
@@ -182,7 +188,19 @@ def _packages(data: dict[str, object]) -> list[dict[str, object]]:
 
 
 def _handle_pull(args: argparse.Namespace) -> int:
+    _configure_output(args)
     return plan.handle_pull(args)
+
+
+def _configure_output(args: argparse.Namespace) -> None:
+    """Make the detailed working log verbose-only and build the pull reporter."""
+    loud = bool(getattr(args, "verbose", False))
+    progress.set_verbose(loud)
+    args.progress = progress.Progress.for_cli(
+        as_json=bool(args.json),
+        verbose=loud,
+        stream=sys.stderr,
+    )
 
 
 def _handle_run(args: argparse.Namespace) -> int:
@@ -577,6 +595,16 @@ def _add_registry_group(subparsers: argparse._SubParsersAction[_P]) -> None:
     validate.set_defaults(handler=_handle_registry_validate)
 
 
+def _add_verbose_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="show the detailed working log on stderr instead of a progress line",
+    )
+
+
 def _add_update_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ref",
@@ -584,6 +612,7 @@ def _add_update_flags(parser: argparse.ArgumentParser) -> None:
         metavar="REF",
         help="branch, tag, or commit to pin (default: $FACET_REGISTRY_REF or main)",
     )
+    _add_verbose_flag(parser)
 
 
 def _add_list_flags(parser: argparse.ArgumentParser) -> None:
@@ -680,6 +709,7 @@ def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="recompute the sha256 of models that are already present",
     )
+    _add_verbose_flag(parser)
 
 
 def _add_check_flags(parser: argparse.ArgumentParser) -> None:
@@ -846,6 +876,7 @@ def build_parser() -> FacetParser:
 def main(argv: list[str] | None = None) -> int:
     run_id = new_run_id()
     as_json = "--json" in (argv if argv is not None else sys.argv)
+    was_verbose = progress.verbose()
     try:
         require_posix()
         Home.from_env()
@@ -860,6 +891,8 @@ def main(argv: list[str] | None = None) -> int:
         fallback = FacetError("internal", "internal error, see stderr", details={"log": "stderr"})
         contract.emit(contract.failure(fallback), as_json)
         return 1
+    finally:
+        progress.set_verbose(was_verbose)
 
 
 def _run_logged(argv: list[str] | None, run_id: str) -> int:

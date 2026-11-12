@@ -57,16 +57,42 @@ def _download_with_retries(part: Path, action: Callable[[], tuple[str, int]]) ->
     ) from last
 
 
-def _stream_to_part(url: str, part: Path) -> tuple[str, int]:
-    """Stream ``url`` into ``part`` while hashing; returns (sha256, bytes)."""
+def _stream_to_part(
+    url: str,
+    part: Path,
+    on_bytes: Callable[[int], None] | None = None,
+    on_total: Callable[[int], None] | None = None,
+) -> tuple[str, int]:
+    """Stream ``url`` into ``part`` while hashing; returns (sha256, bytes).
+
+    ``on_bytes`` receives each chunk's length, so a progress line can move; a
+    response that declares its ``Content-Length`` reports it once through
+    ``on_total``, which is how an artifact without a declared size still gets
+    a bar.
+    """
     digest = hashlib.sha256()
     size = 0
     with _opened(url) as source, part.open("wb") as sink:
+        total = _content_length(source)
+        if on_total is not None and total is not None:
+            on_total(total)
         while chunk := source.read(CHUNK_BYTES):
             digest.update(chunk)
             size += len(chunk)
             sink.write(chunk)
+            if on_bytes is not None:
+                on_bytes(len(chunk))
     return digest.hexdigest(), size
+
+
+def _content_length(source: object) -> int | None:
+    """The response's declared length, or ``None`` for a file or a chunked body."""
+    headers = getattr(source, "headers", None)
+    raw = headers.get("Content-Length") if headers is not None else None
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 @contextmanager

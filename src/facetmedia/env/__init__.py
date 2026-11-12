@@ -13,21 +13,18 @@ repair command.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
 import os
-import secrets
 import shutil
 import subprocess
 import sys
-import tarfile
 import time
 import urllib.parse
 import urllib.request
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Final
 
@@ -47,7 +44,6 @@ from facetmedia.env.download import (
     TIMEOUT_S,
     USER_AGENT,
     _download_with_retries,
-    _opened,
     _part_path,
     _stream_to_part,
 )
@@ -60,6 +56,8 @@ from facetmedia.env.ffmpeg import (
 )
 from facetmedia.env.node import (
     NODE_MARKER,
+    _fetch_package,
+    _fetch_runtime,
     node_package_present,
     node_present,
     node_problem,
@@ -76,10 +74,9 @@ from facetmedia.env.package_marker import (
 )
 from facetmedia.env.source import fetch_source, source_dir, source_present
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
+from facetmedia.progress import Progress, verbose
 from facetmedia.registry_types import (
     Model,
-    Node,
-    NodePackage,
     Package,
     Server,
     is_backend,
@@ -87,6 +84,7 @@ from facetmedia.registry_types import (
 
 __all__ = [
     "COMPLETE",
+    "NODE_MARKER",
     "binary_dir",
     "binary_present",
     "binary_problem",
@@ -122,8 +120,6 @@ logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
 UV_TAIL_LINES: Final[int] = 40
 HF_API: Final[str] = "https://huggingface.co"
-#: The official Node.js distribution root the ``node`` engine downloads from.
-NODE_DIST: Final[str] = "https://nodejs.org/dist"
 SKIPPED_HF_FILES: Final[frozenset[str]] = frozenset({".gitattributes", "README.md"})
 #: feat(run) ships the runner SDK; until then there is nothing to copy.
 #: ``runner_sdk.py`` stays at the package root, one level above ``env``.
@@ -165,36 +161,170 @@ def is_installed(package: Package, home: Home) -> bool:
 
 
 def pull(
-    package: Package, home: Home, verify_models: bool = False, run_id: str = ""
+    package: Package,
+    home: Home,
+    verify_models: bool = False,
+    run_id: str = "",
+    progress: Progress | None = None,
 ) -> dict[str, object]:
-    """Install ``package`` into ``home``; returns the ``facet pull`` result."""
+    """Install ``package`` into ``home``; returns the ``facet pull`` result.
+
+    ``progress`` draws one line per phase. ``None`` keeps the historical
+    behaviour for a caller such as ``facet run``: the plan and uv's output are
+    echoed and no phase line is drawn.
+    """
     started = time.monotonic()
     _preflight(package, home, run_id)
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
-    artifact_bytes = _fetch_artifacts(package, home)
     if package.host_app is not None:
-        report = _pull_host_app(package, home, env_dir, started)
-    elif package.node is not None:
-        report = _pull_node(package, home, env_dir, started, verify_models)
-    elif package.binary is not None:
-        report = env_binary.pull_report(package, home, env_dir, started, verify_models)
-    else:
-        report = _pull_python_env(package, home, env_dir, started, verify_models)
+        return _pull_host_app(package, home, env_dir, started)
+    reporter = progress if progress is not None else Progress.off()
+    already, environment_bytes = _environment_phase(package, home, env_dir, reporter)
+    records, model_bytes = _models_phase(package, home, verify_models, reporter)
+    artifact_bytes = _artifacts_phase(package, home, reporter)
+    report: dict[str, object] = {
+        "package": package.name,
+        "version": package.version,
+        "env": str(env_dir),
+        "python": package.python,
+        "already_installed": already,
+        "downloaded_bytes": environment_bytes + model_bytes,
+        "seconds": round(time.monotonic() - started, 3),
+        "models": records,
+    }
     return _with_artifacts(report, artifact_bytes)
 
 
-def _fetch_artifacts(package: Package, home: Home) -> int:
+def _environment_phase(
+    package: Package, home: Home, env_dir: Path, reporter: Progress
+) -> tuple[bool, int]:
+    """Build what the engine runs on; returns ``already_installed`` and the bytes."""
+    reporter.phase_start("environment")
+    try:
+        already, downloaded = _environment(package, home, env_dir, reporter)
+    except BaseException as exc:
+        reporter.phase_end(ok=False, err=_one_line(exc))
+        raise
+    reporter.phase_end(ok=True)
+    return already, downloaded
+
+
+def _environment(
+    package: Package, home: Home, env_dir: Path, reporter: Progress
+) -> tuple[bool, int]:
+    """The engine's own install step, under the ``environment`` phase."""
+    if package.node is not None:
+        return _environment_node(package, home, env_dir, reporter)
+    if package.binary is not None:
+        return env_binary.binary_present(package.binary, home), 0
+    return _environment_python(package, home, env_dir), 0
+
+
+def _environment_python(package: Package, home: Home, env_dir: Path) -> bool:
+    """The ``python-env`` engine: the environment, server and source."""
+    up_to_date = _is_current(package, env_dir) and not package_stale(package, home)
+    server_ready = server_present(package, home) and source_present(package, home)
+    if not up_to_date:
+        _rebuild(package, home, env_dir)
+    _fetch_server(package, home)
+    fetch_source(package, home)
+    if not up_to_date:
+        atomic_write_text(env_dir / COMPLETE, package.lock_sha256, home.tmp_dir)
+        atomic_write_text(env_dir / PACKAGE_MARKER, package_fingerprint(package), home.tmp_dir)
+        if package.uses:
+            atomic_write_text(env_dir / shared.MARKER, shared.fingerprint(package), home.tmp_dir)
+    return up_to_date and server_ready
+
+
+def _environment_node(
+    package: Package, home: Home, env_dir: Path, reporter: Progress
+) -> tuple[bool, int]:
+    """The ``node`` engine: the verified runtime, then the staged entry."""
+    node = package.node
+    assert node is not None
+    stale = package_stale(package, home)
+    up_to_date = node_present(package, home) and node_staged_current(package, home) and not stale
+    downloaded = _fetch_runtime(node, home, reporter.advance, reporter.phase_total)
+    if not node_staged_current(package, home) or stale:
+        stage_node(package, home, env_dir)
+    return up_to_date, downloaded
+
+
+def _models_phase(
+    package: Package, home: Home, verify: bool, reporter: Progress
+) -> tuple[list[dict[str, object]], int]:
+    """Download the missing models as one bar over the bytes they declare."""
+    total = _missing_model_bytes(package, home, verify)
+    reporter.phase_start("models", total)
+    try:
+        records, downloaded = _fetch_models(package, home, verify, reporter.advance)
+    except BaseException as exc:
+        reporter.phase_end(ok=False, err=_one_line(exc))
+        raise
+    reporter.phase_end(ok=True)
+    return records, downloaded
+
+
+def _missing_model_bytes(package: Package, home: Home, verify: bool) -> int:
+    """The declared bytes of every model this pull has to download."""
+    return sum(
+        model.bytes
+        for model in package.models
+        if not is_backend(model) and not model_present(model, home, verify)
+    )
+
+
+def _artifacts_phase(package: Package, home: Home, reporter: Progress) -> int:
+    """Fetch the browser, FFmpeg and engine tarballs; returns the bytes."""
+    reporter.phase_start("artifacts")
+    try:
+        downloaded = _fetch_artifacts(package, home, reporter.advance, reporter.phase_total)
+        downloaded += _fetch_engine_artifacts(package, home, reporter)
+    except BaseException as exc:
+        reporter.phase_end(ok=False, err=_one_line(exc))
+        raise
+    reporter.phase_end(ok=True)
+    return downloaded
+
+
+def _fetch_engine_artifacts(package: Package, home: Home, reporter: Progress) -> int:
+    """The binary zip and the node package tarballs, all under ``artifacts``."""
+    downloaded = 0
+    if package.binary is not None:
+        downloaded += env_binary.fetch_binary(
+            package.binary, home, reporter.advance, reporter.phase_total
+        )
+    node = package.node
+    if node is not None:
+        for spec in node.packages:
+            if not node_package_present(spec, home):
+                downloaded += _fetch_package(spec, home, reporter.advance, reporter.phase_total)
+    return downloaded
+
+
+def _one_line(exc: BaseException) -> str:
+    """The first line of a failure, for the ``✗`` progress line."""
+    text = exc.message if isinstance(exc, FacetError) else str(exc)
+    return text.splitlines()[0] if text else type(exc).__name__
+
+
+def _fetch_artifacts(
+    package: Package,
+    home: Home,
+    on_bytes: Callable[[int], None] | None = None,
+    on_total: Callable[[int], None] | None = None,
+) -> int:
     """Fetch the shared, engine-independent artifacts; returns the bytes downloaded.
 
     The browser and the FFmpeg build serve every engine: node packages render
-    and encode with them too, so they are fetched before the engine step.
+    and encode with them too.
     """
     downloaded = 0
     if package.browser is not None:
-        downloaded += env_browser.fetch_browser(package.browser, home)
+        downloaded += env_browser.fetch_browser(package.browser, home, on_bytes, on_total)
     if package.ffmpeg is not None:
-        downloaded += env_ffmpeg.fetch_ffmpeg(package.ffmpeg, home)
+        downloaded += env_ffmpeg.fetch_ffmpeg(package.ffmpeg, home, on_bytes, on_total)
     return downloaded
 
 
@@ -206,59 +336,6 @@ def _with_artifacts(report: dict[str, object], artifact_bytes: int) -> dict[str,
     report["downloaded_bytes"] = (previous if isinstance(previous, int) else 0) + artifact_bytes
     report["already_installed"] = False
     return report
-
-
-def _pull_python_env(
-    package: Package, home: Home, env_dir: Path, started: float, verify_models: bool
-) -> dict[str, object]:
-    """The ``python-env`` engine's pull: the environment, server, source and models."""
-    up_to_date = _is_current(package, env_dir) and not package_stale(package, home)
-    server_ready = server_present(package, home) and source_present(package, home)
-    if not up_to_date:
-        _rebuild(package, home, env_dir)
-    _fetch_server(package, home)
-    fetch_source(package, home)
-    records, downloaded = _fetch_models(package, home, verify_models)
-    if not up_to_date:
-        atomic_write_text(env_dir / COMPLETE, package.lock_sha256, home.tmp_dir)
-        atomic_write_text(env_dir / PACKAGE_MARKER, package_fingerprint(package), home.tmp_dir)
-        if package.uses:
-            atomic_write_text(env_dir / shared.MARKER, shared.fingerprint(package), home.tmp_dir)
-    return {
-        "package": package.name,
-        "version": package.version,
-        "env": str(env_dir),
-        "python": package.python,
-        "already_installed": up_to_date and server_ready,
-        "downloaded_bytes": downloaded,
-        "seconds": round(time.monotonic() - started, 3),
-        "models": records,
-    }
-
-
-def _pull_node(
-    package: Package, home: Home, env_dir: Path, started: float, verify_models: bool
-) -> dict[str, object]:
-    """The ``node`` engine's pull: verified extractions, then a staged entry."""
-    node = package.node
-    assert node is not None
-    stale = package_stale(package, home)
-    up_to_date = node_present(package, home) and node_staged_current(package, home) and not stale
-    downloaded = _fetch_node(node, home)
-    if not node_staged_current(package, home) or stale:
-        stage_node(package, home, env_dir)
-    records, model_bytes = _fetch_models(package, home, verify_models)
-    downloaded += model_bytes
-    return {
-        "package": package.name,
-        "version": package.version,
-        "env": str(env_dir),
-        "python": package.python,
-        "already_installed": up_to_date,
-        "downloaded_bytes": downloaded,
-        "seconds": round(time.monotonic() - started, 3),
-        "models": records,
-    }
 
 
 def _pull_host_app(
@@ -350,8 +427,9 @@ def _print_plan(package: Package, home: Home, env_dir: Path, verify: bool) -> No
         lines.append(f"model {model.id} {model.bytes} bytes {state}")
     lines.append(f"total to download {total} bytes")
     for line in lines:
-        print(line, file=sys.stderr)
         logger.info("%s", line)
+        if verbose():
+            print(line, file=sys.stderr)
 
 
 # --- FR3: the environment at <home>/envs/<package>/<version>/.
@@ -418,8 +496,9 @@ def _stream_output(argv: list[str], env_vars: dict[str, str]) -> None:
     with process.stdout:
         for line in process.stdout:
             tail.append(line)
-            sys.stderr.write(line)
             logger.info("%s", line.rstrip("\n"))
+            if verbose():
+                sys.stderr.write(line)
         returncode = process.wait()
     if returncode != 0:
         raise FacetError(
@@ -462,7 +541,10 @@ def _purelib(env_dir: Path) -> Path:
 
 
 def _fetch_models(
-    package: Package, home: Home, verify: bool
+    package: Package,
+    home: Home,
+    verify: bool,
+    on_bytes: Callable[[int], None] | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     """Download what is missing; returns the records and the bytes fetched."""
     records: list[dict[str, object]] = []
@@ -475,9 +557,9 @@ def _fetch_models(
             records.append(_model_record(model, "present"))
             continue
         if model.url:
-            downloaded += _model_url(model, home)
+            downloaded += _model_url(model, home, on_bytes)
         else:
-            downloaded += _model_hf(model, home)
+            downloaded += _model_hf(model, home, on_bytes)
         records.append(_model_record(model, "downloaded"))
     return records, downloaded
 
@@ -547,11 +629,11 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _model_url(model: Model, home: Home) -> int:
+def _model_url(model: Model, home: Home, on_bytes: Callable[[int], None] | None = None) -> int:
     """Stream one ``url`` model into place; returns the bytes downloaded."""
     target = home.models_dir / "direct" / model.path
     part = _part_path(home, model.id)
-    digest, size = _download_with_retries(part, lambda: _stream_to_part(model.url, part))
+    digest, size = _download_with_retries(part, lambda: _stream_to_part(model.url, part, on_bytes))
     if digest != model.sha256:
         part.unlink(missing_ok=True)
         raise FacetError(
@@ -564,7 +646,7 @@ def _model_url(model: Model, home: Home) -> int:
     return size
 
 
-def _model_hf(model: Model, home: Home) -> int:
+def _model_hf(model: Model, home: Home, on_bytes: Callable[[int], None] | None = None) -> int:
     """Fetch every file of the pinned revision into ``models/direct/<id>/``."""
     listing = _hf_listing(model)
     root = home.models_dir / "direct" / model.id
@@ -575,17 +657,22 @@ def _model_hf(model: Model, home: Home) -> int:
         target = root / name
         if _hf_file_ok(target, expected_sha, expected_size):
             continue
-        downloaded += _model_hf_file(model, name, home, expected_sha, expected_size)
+        downloaded += _model_hf_file(model, name, home, expected_sha, expected_size, on_bytes)
     return downloaded
 
 
 def _model_hf_file(
-    model: Model, name: str, home: Home, expected_sha: str, expected_size: int | None
+    model: Model,
+    name: str,
+    home: Home,
+    expected_sha: str,
+    expected_size: int | None,
+    on_bytes: Callable[[int], None] | None = None,
 ) -> int:
     """Stream one repository file into place; returns the bytes downloaded."""
     url = f"{HF_API}/{model.hf_repo}/resolve/{model.revision}/{urllib.parse.quote(name, safe='/')}"
     part = _part_path(home, model.id)
-    digest, size = _download_with_retries(part, lambda: _stream_to_part(url, part))
+    digest, size = _download_with_retries(part, lambda: _stream_to_part(url, part, on_bytes))
     target = home.models_dir / "direct" / model.id / name
     if expected_sha and digest != expected_sha:
         part.unlink(missing_ok=True)
@@ -785,128 +872,3 @@ def _server_pip_install(home: Home, target: Path, package: Package, server: Serv
         ],
         uv_env(home),
     )
-
-
-# --- The node engine: one verified runtime and npm tarballs per home.
-#
-# The node queries live in ``facetmedia.env.node`` beside ``stage_node`` and
-# are re-exported here; this module keeps the downloads that fill them.
-
-
-def _fetch_node(node: Node, home: Home) -> int:
-    """Download and extract what is missing; returns the bytes fetched."""
-    downloaded = 0
-    if not node_runtime_present(node, home):
-        downloaded += _fetch_runtime(node, home)
-    for spec in node.packages:
-        if not node_package_present(spec, home):
-            downloaded += _fetch_package(spec, home)
-    return downloaded
-
-
-def _fetch_runtime(node: Node, home: Home) -> int:
-    """The official linux-x64 tarball, sha256-verified, extracted once."""
-    url = f"{NODE_DIST}/v{node.runtime}/node-v{node.runtime}-linux-x64.tar.gz"
-    part = _part_path(home, f"node-{node.runtime}")
-    digest, size = _download_with_retries(part, lambda: _stream_to_part(url, part))
-    if digest != node.runtime_sha256:
-        part.unlink(missing_ok=True)
-        raise FacetError(
-            "download_failed",
-            f"node {node.runtime}: sha256 mismatch: expected {node.runtime_sha256}, got {digest}",
-            details={
-                "runtime": node.runtime,
-                "expected": node.runtime_sha256,
-                "actual": digest,
-            },
-        )
-    target = home.node_runtime_dir(node.runtime)
-    _install_tarball(part, target, node.runtime_sha256, home, f"node-{node.runtime}")
-    return size
-
-
-def _fetch_package(spec: NodePackage, home: Home) -> int:
-    """One npm tarball, integrity-verified, extracted once per name+version."""
-    algo, _sep, expected = spec.integrity.partition("-")
-    # The part and staging paths are flat files: a scoped name's "/" cannot
-    # appear in them, so it is folded to "-" (the extraction path keeps it).
-    label = f"{spec.name.replace('/', '-')}-{spec.version}"
-    part = _part_path(home, label)
-    digest, size = _download_with_retries(
-        part, lambda: _stream_with_digest(part, spec.tarball, algo)
-    )
-    if digest != expected:
-        part.unlink(missing_ok=True)
-        raise FacetError(
-            "download_failed",
-            f"{spec.name}@{spec.version}: integrity mismatch: "
-            f"expected {spec.integrity}, got {algo}-{digest}",
-            details={
-                "package": spec.name,
-                "version": spec.version,
-                "expected": spec.integrity,
-                "actual": f"{algo}-{digest}",
-            },
-        )
-    target = home.node_pkg_dir(spec.name, spec.version)
-    _install_tarball(part, target, spec.integrity, home, label)
-    return size
-
-
-def _stream_with_digest(part: Path, url: str, algo: str) -> tuple[str, int]:
-    """Stream ``url`` into ``part`` while hashing with ``algo``.
-
-    Returns the digest base64-encoded — the spelling npm's ``integrity``
-    field uses — plus the byte count.
-    """
-    digest = hashlib.new(algo)
-    size = 0
-    with _opened(url) as source, part.open("wb") as sink:
-        while chunk := source.read(CHUNK_BYTES):
-            digest.update(chunk)
-            size += len(chunk)
-            sink.write(chunk)
-    return base64.b64encode(digest.digest()).decode("ascii"), size
-
-
-def _install_tarball(archive: Path, target: Path, marker: str, home: Home, label: str) -> None:
-    """Extract a verified tarball into ``target``; the marker lands last.
-
-    The archive's single top-level directory becomes the extraction root —
-    ``node-v<ver>-linux-x64/`` for the runtime, ``package/`` for npm — so
-    ``<target>/bin/node`` and ``<target>/<entry>`` resolve as documented.
-    """
-    staging = home.tmp_dir / f"{label}.{secrets.token_hex(4)}"
-    try:
-        payload = _extract_tarball(archive, staging)
-    finally:
-        archive.unlink(missing_ok=True)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.is_dir():
-        shutil.rmtree(target)
-    elif target.exists():
-        target.unlink()
-    if payload == staging:
-        os.replace(staging, target)
-    else:
-        os.replace(payload, target)
-        shutil.rmtree(staging, ignore_errors=True)
-    atomic_write_text(target / NODE_MARKER, marker, home.tmp_dir)
-
-
-def _extract_tarball(archive: Path, staging: Path) -> Path:
-    """Unpack ``archive`` into ``staging``; returns the payload directory."""
-    staging.mkdir(parents=True, exist_ok=False)
-    try:
-        with tarfile.open(archive, "r:gz") as bundle:
-            if hasattr(tarfile, "data_filter"):
-                bundle.extractall(staging, filter="data")
-            else:
-                bundle.extractall(staging)
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
-    entries = list(staging.iterdir())
-    if len(entries) == 1 and entries[0].is_dir():
-        return entries[0]
-    return staging

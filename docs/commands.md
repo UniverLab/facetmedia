@@ -51,7 +51,8 @@ keeps that commit as an immutable snapshot — package runners are code from
 the network, so the commit is pinned and never moves silently.
 
 Flags: `--ref REF` (a branch, a tag, or a 40-hex commit; wins over
-`$FACET_REGISTRY_REF`, which wins over `main`).
+`$FACET_REGISTRY_REF`, which wins over `main`), and `-v`/`--verbose`, which
+echoes the detailed working log on stderr instead of a progress line.
 
 ```console
 $ facet update --ref feature/v0.1
@@ -117,8 +118,22 @@ there.
 Flags: `--package NAME` (repeatable, installs that package explicitly and
 cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
 `--plan` (print the plan and install nothing; with `--json` it returns
-`data.plan`), and `--verify-models` (recompute the sha256 of models already
-present).
+`data.plan`), `--verify-models` (recompute the sha256 of models already
+present), and `-v`/`--verbose`.
+
+At a terminal, each package shows one progress line per phase:
+`environment` (the uv or node install, an indeterminate spinner with the
+elapsed time), `models` (bytes downloaded out of the total the manifest
+declares, as a bar with the percentage and MB/s) and `artifacts` (the
+browser, FFmpeg and engine downloads, a bar once a size is known and a
+spinner before). Every line ends with `✓` and the elapsed time when the
+phase completes, or `✗` and the one-line error when it fails. Without a
+terminal — a pipe or a CI log — stderr gets one plain `start`/`end` line
+per phase and no carriage-return animation. The detailed working log, the
+plan and uv's resolution included, still goes to the run log under
+`logs/`; on stderr it appears only with `-v`/`--verbose`, which replaces
+the progress lines. When a pull fails, its last 20 log lines and the log
+path are printed to stderr even without `--verbose`.
 
 When the packages to install need more disk than is free under the facet
 home, the pull fails before any download with `machine_cannot` (exit 5)

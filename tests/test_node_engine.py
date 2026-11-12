@@ -555,7 +555,9 @@ def test_pull_fetches_a_declared_browser_for_a_node_package(
     )
     fetched: list[str] = []
     monkeypatch.setattr(
-        env_browser, "fetch_browser", lambda browser, home: fetched.append(browser.revision) or 0
+        env_browser,
+        "fetch_browser",
+        lambda browser, home, *rest: fetched.append(browser.revision) or 0,
     )
 
     code, _envelope = _pull(capsys, "pull", "nodepkg")
@@ -577,7 +579,9 @@ def test_pull_fetches_a_declared_ffmpeg_for_a_node_package(
     )
     fetched: list[str] = []
     monkeypatch.setattr(
-        env_ffmpeg, "fetch_ffmpeg", lambda ffmpeg, home: fetched.append(ffmpeg.version) or 0
+        env_ffmpeg,
+        "fetch_ffmpeg",
+        lambda ffmpeg, home, *rest: fetched.append(ffmpeg.version) or 0,
     )
 
     code, _envelope = _pull(capsys, "pull", "nodepkg")
