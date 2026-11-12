@@ -164,6 +164,8 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "uses",
         "browser",
         "ffmpeg",
+        "tier_group",
+        "tier",
     }
 )
 _BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "version", "sha256"})
@@ -336,7 +338,20 @@ class RegistryLoader:
             package = self.package(name, file, data)
             if package is not None:
                 packages[name] = package
+        self.duplicate_tiers(packages)
         return Registry(self.root, version, packages)
+
+    def duplicate_tiers(self, packages: Mapping[str, Package]) -> None:
+        """Every ``tier`` is unique within its ``tier_group``."""
+        seen: dict[tuple[str, str], str] = {}
+        for name, package in packages.items():
+            if not package.tier_group:
+                continue
+            key = (package.tier_group, package.tier)
+            if key in seen:
+                self.add(f"packages/{name}/package.toml", "tier", "duplicate")
+                continue
+            seen[key] = name
 
     def index_version(self, index: Mapping[str, Any]) -> int:
         self.unknown(index, frozenset({"version", "packages"}), "index.toml", "")
@@ -402,6 +417,7 @@ class RegistryLoader:
         uses = self.uses(data.get("uses"), file, dependencies)
         browser = self.browser(data, file)
         ffmpeg = read_ffmpeg(self, data, file)
+        tier_group, tier = self.tier(data, file)
         if len(self.problems) != before:
             return None
         if (
@@ -441,7 +457,17 @@ class RegistryLoader:
             node=node,
             host_app=host_app,
             binary=binary,
+            tier_group=tier_group,
+            tier=tier,
         )
+
+    def tier(self, data: dict[str, Any], file: str) -> tuple[str, str]:
+        """The optional ``tier_group`` and ``tier``: both or neither."""
+        group = self.string(data, "tier_group", file, "", required=False) or ""
+        tier = self.string(data, "tier", file, "", required=False) or ""
+        if bool(group) != bool(tier):
+            self.add(file, "tier" if tier else "tier_group", "value")
+        return group, tier
 
     def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
         """The shared modules this package declares, validated against ``lib/``."""

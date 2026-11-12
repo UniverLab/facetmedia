@@ -260,6 +260,8 @@ class Package:
     node: Node | None = None
     host_app: HostApp | None = None
     binary: Binary | None = None
+    tier_group: str = ""
+    tier: str = ""
 
     @property
     def dir(self) -> Path:

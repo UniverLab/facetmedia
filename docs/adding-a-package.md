@@ -122,6 +122,21 @@ check prints, and `exclusive = false` is what lets several light runs
 overlap. `vram_gb` above 0 needs `gpu = true`; `doctor`, `pull` and `run`
 refuse a machine whose GPU reports less VRAM than the package needs.
 
+### Tier groups
+
+Two optional top-level keys mark packages that are alternatives of one
+tool:
+
+```toml
+tier_group = "comfy"  # packages sharing it are alternatives
+tier = "standard"     # unique within the group, e.g. "standard" or "xl"
+```
+
+Both keys are given together or neither is, and `facet registry validate`
+rejects a duplicate `tier` in one group. `facet pull` includes exactly one
+member of each group: the one with the highest declared `vram_gb` that
+fits, and `--tier NAME` prefers that tier even when it does not fit.
+
 ### `[[licenses]]`
 
 One entry for the tool and each notable dependency in its environment:

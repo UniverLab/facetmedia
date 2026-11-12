@@ -84,6 +84,8 @@ never take the lock and work offline from the registry snapshot in use.
 
 `facet skill <package>` prints that package's skill: when to use it, one
 complete piece per capability, what `verify` measures, and the pitfalls.
-Start there before writing a piece. `facet license accept` and `facet pull`
-are per model and per package; the skill's `## On this machine` section
+Start there before writing a piece. `facet license accept` is per model and
+`facet pull image` installs a whole facet, choosing the packages this
+machine can run (`facet pull --package NAME` names one); the skill's
+`## On this machine` section
 says what is true here right now.

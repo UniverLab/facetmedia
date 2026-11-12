@@ -29,6 +29,7 @@ EXPECTED_EXIT_MAP = {
     "download_failed": 8,
     "runner_failed": 9,
     "license_needs_person": 10,
+    "confirmation_required": 11,
 }
 
 
@@ -121,7 +122,7 @@ def test_main_json_single_doc_on_error(
     assert envelope["ok"] is False
     assert envelope["contract"] == 1
     assert envelope["error"]["code"] == "invalid_input"
-    assert "unknown package: nope" in envelope["error"]["message"]
+    assert "unknown facet or package: nope" in envelope["error"]["message"]
     assert "contract" not in captured.err
 
 
@@ -200,7 +201,7 @@ def test_a_facet_error_in_human_form_prints_one_line_on_stderr(
     assert main(["pull", "nope"]) == EXIT_CODES["invalid_input"]
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err.startswith("unknown package: nope\n")
+    assert captured.err.startswith("unknown facet or package: nope\n")
 
 
 def test_unexpected_exception_becomes_internal(

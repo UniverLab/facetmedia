@@ -17,10 +17,10 @@ from facetmedia import (
     config,
     contract,
     doctor,
-    env,
     introspect,
     licenses,
     lock,
+    plan,
     preview,
     prune,
     record,
@@ -182,36 +182,7 @@ def _packages(data: dict[str, object]) -> list[dict[str, object]]:
 
 
 def _handle_pull(args: argparse.Namespace) -> int:
-    with lock.hold("exclusive", "facet pull", *_lock_params(args)):
-        active = load_active_registry()
-        package = active.package(args.package)
-        if package is None:
-            raise FacetError(
-                "invalid_input",
-                f"unknown package: {args.package}",
-                details={"known": sorted(active.packages)},
-            )
-        report = env.pull(
-            package, Home.from_env(), verify_models=args.verify_models, run_id=args.run_id
-        )
-    contract.emit(contract.ok(report), args.json)
-    if not args.json:
-        _announce_pull(report, bool(package.models))
-    return 0
-
-
-def _announce_pull(report: dict[str, object], has_models: bool) -> None:
-    name = f"{report['package']} {report['version']}"
-    if report["already_installed"] is True:
-        print(f"{name} already installed at {report['env']}")
-        return
-    if not has_models:
-        print(f"{name} installed at {report['env']} (no model downloads in {report['seconds']} s)")
-        return
-    print(
-        f"{name} installed at {report['env']} "
-        f"({report['downloaded_bytes']} bytes downloaded in {report['seconds']} s)"
-    )
+    return plan.handle_pull(args)
 
 
 def _handle_run(args: argparse.Namespace) -> int:
@@ -671,7 +642,39 @@ def _add_config_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
 
 
 def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("package", help="registry package to install")
+    parser.add_argument(
+        "names",
+        nargs="*",
+        metavar="NAME",
+        help="facets or packages to install (a name that is both means the facet)",
+    )
+    parser.add_argument(
+        "--package",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="install this package explicitly (repeatable; cannot mix with names)",
+    )
+    parser.add_argument(
+        "--tier",
+        metavar="NAME",
+        help="prefer this tier within every tier group",
+    )
+    parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="plan for a machine without a GPU",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="install a multi-package plan without asking",
+    )
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="print the plan and install nothing",
+    )
     parser.add_argument(
         "--verify-models",
         action="store_true",

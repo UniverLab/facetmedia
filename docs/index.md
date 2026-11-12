@@ -67,6 +67,15 @@ runs the tool inside that environment, verifies the asset, and writes the
 record `<asset>.facet.json` beside it. Print the same run as one JSON
 document with `--json`.
 
+## Install a facet
+
+`facet pull image` installs the packages of a facet that this machine can
+run: it reads each package's declared platform, GPU, VRAM, RAM, disk and
+host application, shows the plan with one reason per package, and asks
+before installing more than one. `facet pull --package rembg` names a
+single package when you want fine control. Use `--plan` to see what a pull
+would do without installing anything.
+
 ## Where things live
 
 Everything facet installs or remembers lives under one directory, `~/.facet`;

@@ -81,15 +81,59 @@ the builtin `main` default), the validation problem (for example a missing
 
 ## `facet pull`
 
-Installs one package into `~/.facet/envs/<package>/<version>/`: a
+Installs a facet, choosing the packages of it that this machine can run.
+Name one or more facets or packages; a name that is both (today `cad`)
+means the facet.
+
+```console
+$ facet pull image
+rembg 0.1.0 0.52 GB install: fits this machine
+comfy-xl 0.1.0 8.40 GB install: fits this machine
+install 2 packages? [y/N] y
+installed rembg 0.1.0
+installed comfy-xl 0.1.0
+0 bytes downloaded
+```
+
+Each package gets one line with its include or skip reason, decided in this
+order: the platform, `--cpu` against a GPU package, a missing NVIDIA GPU,
+declared VRAM and RAM, a missing host application (with the exact `facet
+config set <key> <path>` fix), and finally its tier group. Packages sharing
+a `tier_group` are alternatives of one tool; `--tier NAME` prefers that
+tier, even when it does not fit, and warns on the line when it does not.
+Without `--tier`, facet picks the member with the highest declared VRAM
+that fits, or the lowest one, skipped with its reason.
+
+A plan that installs more than one package is shown and confirmed with `y`
+at a terminal; any other answer installs nothing and exits 0. `--yes`
+skips the question. Without a terminal, or with `--json`, such a plan
+fails with `confirmation_required` (exit 11) unless `--yes` or `--plan` is
+given. A single package installs as before, with no question: naming it
+positionally or with `--package` keeps today's output and the same `--json`
+keys (`package`, `version`, `env`, `python`, `already_installed`,
+`downloaded_bytes`, `seconds`, `models`), and `--yes` changes nothing
+there.
+
+Flags: `--package NAME` (repeatable, installs that package explicitly and
+cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
+`--plan` (print the plan and install nothing; with `--json` it returns
+`data.plan`), and `--verify-models` (recompute the sha256 of models already
+present).
+
+When the packages to install need more disk than is free under the facet
+home, the pull fails before any download with `machine_cannot` (exit 5)
+and details naming the needed and free GB and each package's size. The
+`--json` result carries `data.plan`, `data.installed`, `data.skipped` and
+`data.downloaded_bytes`; when one package fails, the pull stops there and
+the summary lists what was installed before the failure.
+
+Each package installs into `~/.facet/envs/<package>/<version>/`: a
 uv-managed Python, the exact dependency set of the package's `uv.lock`,
 and its models, downloaded once into `~/.facet/models/direct/` (or the
 `hf/` cache) and checked by sha256. Nothing goes global.
 
-Flags: `--verify-models` (recompute the sha256 of models already present).
-
 ```console
-$ facet pull ffmpeg
+$ facet pull --package ffmpeg
 ffmpeg 0.1.0 installed at /tmp/opencode/facet-docs/envs/ffmpeg/0.1.0 (no model downloads in 5.898 s)
 ```
 

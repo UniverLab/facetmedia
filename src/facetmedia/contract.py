@@ -18,6 +18,7 @@ Error codes and exit codes (exhaustive for v0.1):
 | ``download_failed``  | 8    | a download failed or its sha256 did not match               |
 | ``runner_failed``    | 9    | the package runner crashed or broke the runner protocol     |
 | ``license_needs_person`` | 10 | ``license accept`` run without an interactive terminal     |
+| ``confirmation_required`` | 11 | a multi-package pull needs a person's ``y``, none can be asked |
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ EXIT_CODES: dict[str, int] = {
     "download_failed": 8,
     "runner_failed": 9,
     "license_needs_person": 10,
+    "confirmation_required": 11,
 }
 
 
