@@ -39,8 +39,10 @@ The two verbs that look similar answer two different questions:
 
 Verbs that lock accept `--no-wait` (fail at once with `lock_busy`, exit 6)
 and `--wait-timeout SECONDS` (default 3600); while waiting, facet prints
-one line to stderr naming the holder. `run` and `check` follow the package
-manifest's `requirements.exclusive` (the default): exclusive when set,
+one line to stderr naming the holder — except `pull` and `update`, which
+keep that line for their run log and print it with `-v`/`--verbose`.
+`run` and `check` follow the package manifest's
+`requirements.exclusive` (the default): exclusive when set,
 shared otherwise, so several light runs overlap. The asset form of `check`
 always waits with the defaults.
 
@@ -52,7 +54,9 @@ the network, so the commit is pinned and never moves silently.
 
 Flags: `--ref REF` (a branch, a tag, or a 40-hex commit; wins over
 `$FACET_REGISTRY_REF`, which wins over `main`), and `-v`/`--verbose`, which
-echoes the detailed working log on stderr instead of a progress line.
+echoes the detailed working log on stderr — the first-use registry fetch and
+the lock wait. Without it, a successful update says nothing on stderr and
+that log goes to the run log only.
 
 ```console
 $ facet update --ref feature/v0.1
@@ -121,19 +125,25 @@ cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
 `data.plan`), `--verify-models` (recompute the sha256 of models already
 present), and `-v`/`--verbose`.
 
-At a terminal, each package shows one progress line per phase:
-`environment` (the uv or node install, an indeterminate spinner with the
-elapsed time), `models` (bytes downloaded out of the total the manifest
-declares, as a bar with the percentage and MB/s) and `artifacts` (the
-browser, FFmpeg and engine downloads, a bar once a size is known and a
-spinner before). Every line ends with `✓` and the elapsed time when the
-phase completes, or `✗` and the one-line error when it fails. Without a
-terminal — a pipe or a CI log — stderr gets one plain `start`/`end` line
-per phase and no carriage-return animation. The detailed working log, the
-plan and uv's resolution included, still goes to the run log under
-`logs/`; on stderr it appears only with `-v`/`--verbose`, which replaces
-the progress lines. When a pull fails, its last 20 log lines and the log
-path are printed to stderr even without `--verbose`.
+At a terminal, each package that installs shows one progress line per
+phase, in this order: `environment` (the uv build, the server and source
+checkouts, the node runtime — a spinner with the elapsed time that becomes
+a bar once the download declares its length), `models` (bytes downloaded
+out of the declared bytes it still has to fetch, a bar with the percentage
+and MB/s) and `artifacts` (the browser, FFmpeg, binary and npm tarballs, a
+bar once a size is known and a spinner before). A phase with nothing to do
+still closes its line, so an already installed package shows three `✓`
+lines and no download. A host-application package downloads nothing and
+draws no phase line. Each line ends with `✓` and the elapsed time when
+the phase completes, or `✗` and the one-line error when it fails. Without
+a terminal — a pipe or a CI log — stderr gets one plain `start phase` /
+`end ✓ phase (X.Xs)` line per phase and no carriage-return animation.
+`--json` draws no progress line at all; its envelope is unchanged. The
+detailed working log, the plan and uv's resolution included, still goes to
+the run log under `logs/<YYYY-MM-DD>/<run-id>.log`; on stderr it appears
+only with `-v`/`--verbose`, which replaces the progress lines. When a pull
+fails, its last 20 log lines and the `log: <path>` line are printed to
+stderr even without `--verbose`.
 
 When the packages to install need more disk than is free under the facet
 home, the pull fails before any download with `machine_cannot` (exit 5)
