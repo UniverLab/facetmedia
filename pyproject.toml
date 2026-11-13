@@ -35,7 +35,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/facetmedia/skill/SKILL.md" = "facetmedia/skill/SKILL.md"
-"src/facetmedia/banner.txt" = "facetmedia/banner.txt"
+"src/facetmedia/banner-dos-rebel.txt" = "facetmedia/banner-dos-rebel.txt"
+"src/facetmedia/banner-ansiltr4.txt" = "facetmedia/banner-ansiltr4.txt"
 
 [tool.ruff]
 target-version = "py311"

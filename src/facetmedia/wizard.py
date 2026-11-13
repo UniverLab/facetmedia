@@ -13,10 +13,9 @@ from __future__ import annotations
 import shutil
 import sys
 from dataclasses import dataclass
-from importlib import resources
 from typing import TYPE_CHECKING, Final
 
-from facetmedia import config, plan, probes
+from facetmedia import banner, config, plan, probes
 from facetmedia.registry_types import FACETS
 
 if TYPE_CHECKING:
@@ -50,7 +49,7 @@ def offered(args: argparse.Namespace) -> bool:
 
 def choose(registry: Registry, home: Home) -> list[str] | None:
     """Run the wizard; the chosen facet names, or ``None`` to install nothing."""
-    print(_banner_text(), end="")
+    banner.print_text()
     _machine(registry, home)
     choices: list[Choice] = []
     for name in FACETS:
@@ -58,11 +57,6 @@ def choose(registry: Registry, home: Home) -> list[str] | None:
         choices.append(Choice(name, entries, selected=any(entry.install for entry in entries)))
     _show(choices)
     return _ask(choices)
-
-
-def _banner_text() -> str:
-    """The core README's ASCII banner, stored once as a package resource."""
-    return (resources.files("facetmedia") / "banner.txt").read_text(encoding="utf-8")
 
 
 def _machine(registry: Registry, home: Home) -> None:
