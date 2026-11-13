@@ -18,6 +18,7 @@ from facetmedia import (
     contract,
     doctor,
     introspect,
+    license_accept,
     licenses,
     lock,
     plan,
@@ -96,20 +97,6 @@ def _not_implemented(_args: argparse.Namespace) -> int:
     raise FacetError("internal", "not implemented yet")
 
 
-def _handle_license_accept(args: argparse.Namespace) -> int:
-    with lock.hold("exclusive", "facet license accept", *_lock_params(args)):
-        record = licenses.accept(args.model, assume_yes=bool(args.yes))
-    if record is None:
-        contract.emit(contract.ok({"model": args.model, "accepted": False}), args.json)
-        if not args.json:
-            print("nothing to accept")
-        return 0
-    contract.emit(contract.ok(record), args.json)
-    if not args.json:
-        print(f"{args.model} accepted")
-    return 0
-
-
 def _handle_license_list(args: argparse.Namespace) -> int:
     rows = licenses.list_status()
     contract.emit(contract.ok({"models": rows}), args.json)
@@ -121,7 +108,7 @@ def _handle_license_list(args: argparse.Namespace) -> int:
 
 
 _LICENSE_HANDLERS: dict[str, Handler] = {
-    "accept": _handle_license_accept,
+    "accept": license_accept.handle,
     "list": _handle_license_list,
 }
 
@@ -656,7 +643,16 @@ def _add_skill_flags(parser: argparse.ArgumentParser) -> None:
 
 def _add_license_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
     accept = parsers["accept"]
-    accept.add_argument("model", help="registry model id to accept")
+    accept.add_argument(
+        "model",
+        nargs="?",
+        default=None,
+        metavar="<model-id>",
+        help=(
+            "a model id from `facet license list`; omit it at a terminal "
+            "to choose from the pending ones"
+        ),
+    )
     accept.add_argument(
         "--yes",
         action="store_true",

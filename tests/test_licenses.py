@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from facetmedia import licenses as licenses_module
-from facetmedia.cli import main
+from facetmedia.cli import build_parser, main
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
@@ -105,11 +105,42 @@ def test_accept_tty_with_right_id_records_interactive(
     _use_fixture_registry(monkeypatch)
     prompts = _terminal_with_answer(monkeypatch, MODEL_ID)
     assert main(["license", "accept", MODEL_ID]) == 0
-    capsys.readouterr()
-    assert prompts == ["Type the model id to accept: "]
+    out = capsys.readouterr().out
+    assert prompts == [licenses_module.prompt_text(MODEL_ID)]
+    assert prompts[0] == (f'Type "{MODEL_ID}" to accept, or press Enter to cancel: ')
+    assert f"{MODEL_ID} accepted" in out
     records = _acceptance_records()
     assert len(records) == 1
     assert records[0]["method"] == "interactive"
+
+
+def test_accept_tty_with_enter_cancels_recording_nothing(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    prompts = _terminal_with_answer(monkeypatch, "")
+    assert main(["license", "accept", MODEL_ID]) == 0
+    captured = capsys.readouterr()
+    assert prompts == [licenses_module.prompt_text(MODEL_ID)]
+    assert licenses_module.CANCELLED_LINE in captured.out
+    assert _acceptance_records() == []
+
+
+def test_accept_tty_with_enter_and_json_reports_cancel_in_the_envelope(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    prompts = _terminal_with_answer(monkeypatch, "")
+    assert main(["license", "accept", MODEL_ID, "--json"]) == 0
+    captured = capsys.readouterr()
+    assert prompts == [licenses_module.prompt_text(MODEL_ID)]
+    assert json.loads(captured.out)["data"] == {
+        "model": MODEL_ID,
+        "accepted": False,
+        "cancelled": True,
+    }
+    assert licenses_module.CANCELLED_LINE not in captured.out
+    assert _acceptance_records() == []
 
 
 def test_accept_tty_with_wrong_id_records_nothing(
@@ -119,7 +150,54 @@ def test_accept_tty_with_wrong_id_records_nothing(
     _terminal_with_answer(monkeypatch, "not-the-model")
     assert main(["license", "accept", MODEL_ID, "--json"]) == EXIT_INVALID_INPUT
     captured = capsys.readouterr()
-    assert json.loads(captured.out)["error"]["code"] == "invalid_input"
+    error = json.loads(captured.out)["error"]
+    assert error["code"] == "invalid_input"
+    assert MODEL_ID in error["message"]
+    assert "nothing was recorded" in error["message"]
+    assert _acceptance_records() == []
+
+
+def test_accept_without_model_and_off_terminal_fails_invalid_input(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    _not_a_terminal(monkeypatch)
+    assert main(["license", "accept", "--json"]) == EXIT_INVALID_INPUT
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["code"] == "invalid_input"
+    assert "facet license accept <model-id>" in error["message"]
+    assert MODEL_ID in error["message"]
+
+
+def test_accept_without_model_off_terminal_names_the_direct_form(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    _not_a_terminal(monkeypatch)
+    assert main(["license", "accept"]) == EXIT_INVALID_INPUT
+    captured = capsys.readouterr()
+    message = captured.err
+    assert "facet license accept <model-id>" in message
+    assert MODEL_ID in message
+    assert _acceptance_records() == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["license", "accept", "--yes"], ["license", "accept", "--json"]],
+)
+def test_accept_without_model_with_yes_or_json_fails_invalid_input(
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    _terminal_with_answer(monkeypatch, MODEL_ID)
+    assert main(argv) == EXIT_INVALID_INPUT
+    captured = capsys.readouterr()
+    shown = captured.out + captured.err
+    assert MODEL_ID in shown
+    assert "facet license accept <model-id>" in shown
     assert _acceptance_records() == []
 
 
@@ -182,6 +260,22 @@ def test_require_passes_after_acceptance_and_fails_on_spdx_change(
     with pytest.raises(FacetError) as after:
         licenses_module.require([changed])
     assert after.value.code == "license_not_accepted"
+
+
+def test_license_accept_help_shows_an_optional_model_id(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = build_parser().parse_args(["license", "accept"])
+    assert args.model is None
+    assert args.yes is False
+    with pytest.raises(SystemExit) as exit_info:
+        main(["license", "accept", "--help"])
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    # argparse wraps the help column, so check the optional positional
+    # itself and a fragment that stays on one line of help.
+    assert "[<model-id>]" in out
+    assert "terminal to choose from the pending ones" in out
 
 
 def test_license_list_json_shape(

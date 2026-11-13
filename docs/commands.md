@@ -628,15 +628,24 @@ $ facet license list
 termsy-weights CC-BY-NC-4.0 not accepted
 ```
 
-- `facet license accept <model-id>` — accepts in the terminal; the
-  `--yes` flag accepts without asking, for an agent a person directs.
+- `facet license accept [<model-id>]` — accepts in the terminal. With an id,
+  facet asks for that exact id back; with no id at a terminal it lists the
+  pending models, takes a number (or `q`), shows the chosen terms and asks
+  for the id. Enter cancels, recording nothing. The positional is optional
+  and shown as `<model-id>`; off a terminal, with `--json` or with `--yes`
+  it must be given.
+- `facet license accept <model-id> --yes` — accepts without asking, for an
+  agent a person directs.
 - `facet license list` — every model requiring acceptance, with status.
   `list` takes no lock and prints nothing when none does.
 
-`accept` holds the lock exclusively. Exit codes: `0`; `2` an unknown model
-(lists the known ones in `details.known`); `10` `license_needs_person`
-when `accept` runs not on a terminal and without `--yes` (exit 2 when the
-typed confirmation does not match — nothing is recorded).
+`accept` holds the lock exclusively, once per acceptance. Exit codes: `0`
+(recorded, cancelled at the prompt, or nothing to accept); `2` an unknown
+model (lists the known ones in `details.known`), a mistyped confirmation
+(nothing is recorded, and the message names the expected id), or no model
+with `--yes`, `--json` or no terminal (the message names the pending ids
+and `facet license accept <model-id>`); `10` `license_needs_person` when a
+named model is accepted not on a terminal and without `--yes`.
 
 ## `facet remove`
 

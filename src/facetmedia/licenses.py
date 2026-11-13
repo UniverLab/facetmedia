@@ -9,6 +9,7 @@ record lives in ``<home>/state/licenses.json`` and carries who accepted
 
 from __future__ import annotations
 
+import dataclasses
 import getpass
 import sys
 from collections.abc import Iterable
@@ -26,8 +27,30 @@ RESPONSIBILITY_LINE = (
     "Accepting makes the person who runs facet responsible for complying with these terms."
 )
 NON_COMMERCIAL_LINE = "Commercial use is not allowed."
-PROMPT = "Type the model id to accept: "
+CANCELLED_LINE = "cancelled; nothing was recorded"
 NEEDS_PERSON_HINT = "run it in a terminal, or pass --yes"
+
+ACCEPTED = "accepted"
+CANCELLED = "cancelled"
+MOOT = "moot"
+
+
+@dataclasses.dataclass(frozen=True)
+class Acceptance:
+    """What one :func:`accept` call did, and the record it wrote when it did.
+
+    ``state`` is ``accepted`` (the record is there), ``cancelled`` (the
+    person pressed Enter) or ``moot`` (the model carries no terms). Nothing
+    is recorded unless it is ``accepted``.
+    """
+
+    state: str
+    record: dict[str, Any] | None = None
+
+
+def prompt_text(model_id: str) -> str:
+    """The confirmation prompt, naming the exact text that records acceptance."""
+    return f'Type "{model_id}" to accept, or press Enter to cancel: '
 
 
 def find_model(model_id: str) -> tuple[Package, Model] | None:
@@ -95,8 +118,8 @@ def _matching_record(model: Model, records: list[dict[str, Any]]) -> dict[str, A
     return None
 
 
-def accept(model_id: str, assume_yes: bool) -> dict[str, Any] | None:
-    """Accept ``model_id``; returns the record, or ``None`` when moot.
+def accept(model_id: str, assume_yes: bool) -> Acceptance:
+    """Accept ``model_id``; returns what happened, with the record when accepted.
 
     Raises ``invalid_input`` for an unknown id or a mistyped confirmation,
     and ``license_needs_person`` when no ``--yes`` flag is given off-terminal.
@@ -110,7 +133,7 @@ def accept(model_id: str, assume_yes: bool) -> dict[str, Any] | None:
         )
     package, model = found
     if not model.requires_acceptance:
-        return None
+        return Acceptance(MOOT)
     warn(package, model)
     if assume_yes:
         method = "flag"
@@ -121,11 +144,13 @@ def accept(model_id: str, assume_yes: bool) -> dict[str, Any] | None:
                 "license accept needs a person at a terminal",
                 hint=NEEDS_PERSON_HINT,
             )
-        answer = input(PROMPT)
+        answer = input(prompt_text(model_id))
+        if answer == "":
+            return Acceptance(CANCELLED)
         if answer != model_id:
             raise FacetError(
                 "invalid_input",
-                "confirmation did not match the model id; nothing was recorded",
+                f'confirmation did not match; nothing was recorded (expected "{model_id}")',
                 details={"model": model_id},
             )
         method = "interactive"
@@ -146,7 +171,7 @@ def accept(model_id: str, assume_yes: bool) -> dict[str, Any] | None:
     atomic_write_json(
         home.licenses_file, {"version": STATE_VERSION, "accepted": kept}, home.tmp_dir
     )
-    return record
+    return Acceptance(ACCEPTED, record)
 
 
 def list_status() -> list[dict[str, Any]]:

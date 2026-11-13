@@ -15,13 +15,14 @@ the command to run. No environment variable accepts licences.
 ## Accepting
 
 ```bash
-facet license accept <model>     # facet asks in the terminal
+facet license accept            # at a terminal: pick from the pending ones
+facet license accept <model>    # name one; facet asks in the terminal
 facet license accept <model> --yes   # an agent the person directs
-facet license list               # every model that requires acceptance
+facet license list              # every model that requires acceptance
 ```
 
-Each form of `accept` runs the flow below. For an unaccepted model
-`termsy-weights` under CC-BY-NC-4.0, the listing reads:
+`facet license accept <model>` runs the flow below. For an unaccepted
+model `termsy-weights` under CC-BY-NC-4.0, the listing reads:
 
     termsy-weights CC-BY-NC-4.0 not accepted
 
@@ -36,11 +37,18 @@ id, its package, its `spdx`, `commercial_use`, `terms_url`, and a line
 saying that accepting makes the person who runs facet responsible for
 complying with these terms.
 
-- Without `--yes`, both stdin and stdout must be a terminal. facet asks
-  `Type the model id to accept: ` and records the acceptance only on an
-  exact match; anything else exits 2 and records nothing. Off a terminal
-  it fails with `license_needs_person` (exit 10) and the hint `run it in a
-  terminal, or pass --yes`.
+The confirmation names the exact text to type, quoted, so the person never
+has to guess the id. For `termsy-weights` it reads:
+
+    Type "termsy-weights" to accept, or press Enter to cancel:
+
+- The exact model id records the acceptance. Anything else records
+  nothing and exits 2 with a message naming what was expected.
+- Enter cancels: nothing is recorded, facet prints
+  `cancelled; nothing was recorded`, and exits 0.
+- Without `--yes`, a named model needs both stdin and stdout to be a
+  terminal. Off a terminal it fails with `license_needs_person` (exit 10)
+  and the hint `run it in a terminal, or pass --yes`.
 - With `--yes`, the acceptance is recorded at once — no question is asked.
   This is the agent path: a person who directs an agent to pass `--yes` is
   the person accepting, and the same responsibility applies. The record
@@ -49,6 +57,31 @@ complying with these terms.
 Accepting again replaces the earlier record for that model. A licence
 change asks again: a record matches only while its `spdx` equals the
 manifest's current `spdx`.
+
+## Choosing from the pending ones
+
+`facet license accept` with no model id is the wizard, for a person. It
+runs when stdin and stdout are terminals and neither `--json` nor `--yes`
+is given; in every other case the verb fails with `invalid_input` (exit 2)
+naming the pending ids and the form `facet license accept <model-id>`.
+`--yes` never accepts more than the one model named.
+
+The wizard lists every model that needs acceptance and has none recorded,
+whether or not its package is installed — `pull` demands acceptance before
+downloading, so a pending model of a package that is not installed is
+exactly the case a person must handle. Each numbered line shows the model
+id, its package, whether that package is installed, its SPDX and whether
+commercial use is allowed:
+
+    1) omnivoice  omnivoice (not installed)  CC-BY-NC-4.0  commercial use not allowed
+
+Pick one by its number, or `q` to quit. Any other answer prints
+`enter a number from the list, or q` and asks again. Picking a model shows
+its full terms block and then the confirmation above; after an acceptance,
+a cancel or a mismatch it returns to the list, which is re-read on every
+pass, so an accepted model no longer appears. When nothing is pending the
+wizard says `no model needs acceptance` in one line. It exits 0 when
+nothing is pending or the person quits.
 
 ## Backend-owned models
 
