@@ -81,7 +81,8 @@ at `viewers/_kit/`. Facet serves them on 127.0.0.1 — a free port, or
 directory, `/kit/...` from the kit, and `/asset/<name>` for the asset, its
 record, its preview file and its images — nothing else beside the asset,
 and no directory listing. Any other path is 404, and so is any path with
-`..`.
+`..`. A failure while serving answers 500 with a short plain-text body
+and is logged to the run log; nothing is printed to the terminal.
 
 The viewer opens at `http://127.0.0.1:<port>/viewer/index.html?asset=<name>`,
 which is always the first line facet prints to stdout; it then opens that
@@ -169,6 +170,10 @@ writes nothing but the preview a card builds on `/open/<n>`:
 | `/open/<n>` | makes the card the current asset and answers 302 to `/viewer/index.html?asset=<name>` — a `document` is served as the PDF itself — building the preview first when it is `stale` or `missing` and its package is installed; a failed build answers 500 with a plain-text body naming the asset and the runner's error, and leaves the card; otherwise 404 |
 | `/viewer/…` | the current asset's viewer, as for one asset |
 | `/asset/<name>` | the current asset's own files, as for one asset |
+
+A failure while serving — any route, any cause — answers 500 with a short
+plain-text body and is logged to the run log; nothing is printed to the
+terminal.
 
 A card carries the `--json` fields without `preview`, plus `n` (the index
 the routes use), `name` and `package` (from the record), `thumb` and

@@ -100,6 +100,10 @@ class PreviewServer(ThreadingHTTPServer):
         self.last_activity = time.monotonic()
         super().__init__(address, _PreviewHandler)
 
+    def handle_error(self, request: object, client_address: object) -> None:
+        """Log a request failure to the run log; never print to stderr."""
+        logger.exception("serving %s for %s failed", request, client_address)
+
 
 class GalleryServer(ThreadingHTTPServer):
     """One folder's gallery server, bound to 127.0.0.1, read-only.
@@ -117,6 +121,10 @@ class GalleryServer(ThreadingHTTPServer):
         self.build_lock = threading.Lock()
         self.run_id = f"gallery-{time.monotonic_ns()}"
         super().__init__(address, _GalleryHandler)
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        """Log a request failure to the run log; never print to stderr."""
+        logger.exception("serving %s for %s failed", request, client_address)
 
 
 def make_server(port: int | None, site: Site) -> PreviewServer:
@@ -146,7 +154,20 @@ def serve(server: PreviewServer | GalleryServer, idle_timeout: float) -> None:
 class _FileHandler(BaseHTTPRequestHandler):
     """The GET plumbing both servers share: read-only, no directory listing."""
 
+    _responded: bool
+
+    def _guard(self, route: str, serve: Callable[[], None]) -> None:
+        """Run ``serve``; an escape answers 500 and is logged, never printed."""
+        self._responded = False
+        try:
+            serve()
+        except Exception:
+            logger.exception("GET %s failed", route)
+        if not self._responded:
+            self._server_error(f"internal error: {route}")
+
     def _send(self, payload: bytes, content_type: str) -> None:
+        self._responded = True
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
@@ -163,6 +184,7 @@ class _FileHandler(BaseHTTPRequestHandler):
         return True
 
     def _not_found(self) -> None:
+        self._responded = True
         self.send_response(404)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", "9")
@@ -171,6 +193,7 @@ class _FileHandler(BaseHTTPRequestHandler):
 
     def _server_error(self, message: str) -> None:
         """Answer 500 with a plain-text message: a preview build failed."""
+        self._responded = True
         payload = message.encode("utf-8")
         self.send_response(500)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -186,6 +209,9 @@ class _PreviewHandler(_FileHandler):
     """One read-only GET route per root; everything else is 404."""
 
     def do_GET(self) -> None:
+        self._guard("GET " + self.path, self._serve)
+
+    def _serve(self) -> None:
         server = cast("PreviewServer", self.server)
         server.last_activity = time.monotonic()
         target = _resolve(server.site, urlsplit(self.path).path)
@@ -197,6 +223,9 @@ class _GalleryHandler(_FileHandler):
     """The gallery's routes, then the current asset's three roots."""
 
     def do_GET(self) -> None:
+        self._guard("GET " + self.path, self._serve_route)
+
+    def _serve_route(self) -> None:
         server = cast("GalleryServer", self.server)
         server.last_activity = time.monotonic()
         decoded = unquote(urlsplit(self.path).path)
@@ -309,6 +338,7 @@ class _GalleryHandler(_FileHandler):
         return self._file(entry.path.parent, name)
 
     def _redirect(self, location: str) -> None:
+        self._responded = True
         self.send_response(302)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")

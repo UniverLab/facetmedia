@@ -640,6 +640,9 @@ def parse_verify_result(
 @contextmanager
 def _trapped() -> Iterator[None]:
     """Turn SIGINT/SIGTERM into an exception in this thread while inside."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
 
     def interrupted(signum: int, _frame: object) -> None:
         raise RunnerInterruptedError(signum)

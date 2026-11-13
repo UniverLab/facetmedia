@@ -18,6 +18,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -1371,3 +1372,32 @@ def test_relative_out_sends_absolute_request_paths(
     assert Path(lines[0]).is_absolute()
     assert Path(lines[1]).is_absolute()
     assert lines[1] == str(tmp_path)
+
+
+def test_trapped_from_a_worker_thread_is_a_noop() -> None:
+    """A worker thread may not touch signal handlers; ``_trapped`` just yields."""
+    before = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM))
+    errors: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            with runner._trapped():
+                pass
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert errors == []
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
+
+
+def test_trapped_main_thread_installs_and_restores() -> None:
+    """On the main thread ``_trapped`` replaces the handlers, then restores them."""
+    before = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM))
+    with runner._trapped():
+        during = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM))
+        assert during != before
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before

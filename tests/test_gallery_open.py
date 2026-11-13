@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -15,7 +16,7 @@ from facetmedia import runner as runner_module
 from facetmedia.cli import main
 from facetmedia.contract import FacetError
 from facetmedia.preview_folder import collect
-from facetmedia.preview_server import GallerySite
+from facetmedia.preview_server import GallerySite, make_gallery_server
 from tests import test_preview as _preview_tests
 from tests.test_preview_folder import _get, _running
 
@@ -313,3 +314,76 @@ def test_folder_json_runs_no_runner(
         "missing",
         "fresh",
     ]
+
+
+def test_open_build_enters_trapped_on_a_worker_thread(
+    facet_home: Path, gallery: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The build runs ``_trapped`` on the server's worker thread and still redirects.
+
+    The real ``runner.call`` wraps the run in ``_trapped``; before the fix,
+    ``signal.signal`` raised ``ValueError`` off the main thread and the card
+    answered 500 instead of redirecting.
+    """
+    assert facet_home.is_dir()
+
+    def _stub(invocation: object, verb: str, request: dict[str, object]) -> object:
+        with runner_module._trapped():
+            raw_assets = request["assets"]
+            assert isinstance(raw_assets, list) and raw_assets
+            asset = Path(str(raw_assets[0]))
+            (asset.parent / (asset.name + ".preview.json")).write_text(
+                json.dumps({"kind": "image", "images": ["shot.png"]}), encoding="utf-8"
+            )
+            (asset.parent / "shot.png").write_bytes(b"shot")
+            return runner_module.Outcome({}, "")
+
+    monkeypatch.setattr(runner_module, "call", _stub)
+    with _running(_site(gallery)) as port:
+        status, headers, _body = _get(port, "/open/1")
+        assert status == HTTP_FOUND
+        assert headers["Location"] == "/viewer/index.html?asset=two.png"
+
+
+def test_unexpected_build_error_is_500(
+    facet_home: Path,
+    gallery: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A non-``FacetError`` from the runner answers 500, logged, stderr silent."""
+    assert facet_home.is_dir()
+
+    def _boom(invocation: object, verb: str, request: dict[str, object]) -> object:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(runner_module, "call", _boom)
+    with caplog.at_level(logging.DEBUG, logger="facetmedia"), _running(_site(gallery)) as port:
+        status, headers, body = _get(port, "/open/1")
+    assert status == HTTP_SERVER_ERROR
+    assert headers["Content-Type"] == "text/plain; charset=utf-8"
+    assert "open" in body.decode("utf-8")
+    assert capsys.readouterr().err == ""
+    assert "boom" in caplog.text
+    assert any(entry.exc_info is not None for entry in caplog.records)
+
+
+def test_handle_error_logs_not_stderr(
+    gallery: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failure escaping the handler is logged to the run log, never stderr."""
+    server = make_gallery_server(0, _site(gallery))
+    try:
+        with caplog.at_level(logging.DEBUG, logger="facetmedia"):
+            try:
+                raise RuntimeError("boom")
+            except RuntimeError:
+                server.handle_error("r", ("127.0.0.1", 1))
+        assert capsys.readouterr().err == ""
+        assert "boom" in caplog.text
+        assert any(entry.exc_info is not None for entry in caplog.records)
+    finally:
+        server.server_close()

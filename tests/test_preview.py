@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import socket
@@ -19,6 +20,7 @@ import pytest
 import facetmedia.cli as cli_module
 from facetmedia import preview as preview_module
 from facetmedia import preview_build as preview_build_module
+from facetmedia import preview_server as preview_server_module
 from facetmedia import record as record_module
 from facetmedia import runner as runner_module
 from facetmedia.cli import build_parser, main
@@ -33,6 +35,7 @@ EXIT_INVALID_INPUT = 2
 VIEWERS = FIXTURES / "viewers"
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
+HTTP_SERVER_ERROR = 500
 DEFAULT_IDLE_TIMEOUT_S = 600.0
 
 
@@ -649,3 +652,33 @@ def test_preview_request_carries_absolute_paths(
     )
     assert captured["out_dir"] == str(tmp_path)
     assert captured["piece_dir"] == str(tmp_path)
+
+
+def test_unexpected_error_is_500(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A resolver failure answers 500, logged to the run log, stderr silent."""
+
+    def _boom(site: Site, raw_path: str) -> Path | None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(preview_server_module, "_resolve", _boom)
+    server = make_server(0, _trio_site(tmp_path / "assets"))
+    port = server.server_address[1]
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
+    thread.start()
+    try:
+        with caplog.at_level(logging.DEBUG, logger="facetmedia"):
+            assert _get(port, "/viewer/index.html") == HTTP_SERVER_ERROR
+    finally:
+        server.shutdown()
+        thread.join(timeout=10)
+        server.server_close()
+    assert capsys.readouterr().err == ""
+    assert "boom" in caplog.text
+    assert any(entry.exc_info is not None for entry in caplog.records)
