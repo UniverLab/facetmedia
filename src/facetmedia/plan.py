@@ -87,9 +87,12 @@ def resolve(registry: Registry, names: list[str], packages: list[str]) -> list[P
             hint="drop --package or drop the positional names",
         )
     if not names and not packages:
+        facets = ", ".join(FACETS)
         raise FacetError(
             "invalid_input",
-            "name a facet or a package to pull",
+            "name a facet or a package to pull: "
+            "facet pull <facet> or facet pull --package <name> "
+            f"(facets: {facets})",
             details=_known(registry),
         )
     selected: list[Package] = []
@@ -257,6 +260,14 @@ def handle_pull(args: argparse.Namespace) -> int:
     home = Home.from_env()
     names = list(getattr(args, "names", ()) or ())
     packages = list(getattr(args, "package", ()) or ())
+    if not names and not packages:
+        from facetmedia import wizard  # noqa: PLC0415
+
+        if wizard.offered(args):
+            chosen = wizard.choose(registry, home)
+            if chosen is None:
+                return 0
+            names = chosen
     selected = resolve(registry, names, packages)
     legacy = legacy_package(args, selected, names)
     reporter = _reporter(args)

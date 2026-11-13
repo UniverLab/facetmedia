@@ -119,6 +119,18 @@ keys (`package`, `version`, `env`, `python`, `already_installed`,
 `downloaded_bytes`, `seconds`, `models`), and `--yes` changes nothing
 there.
 
+With no facet and no `--package` at a terminal, `facet pull` opens a
+wizard instead of failing: it prints facet's banner, the detected machine
+(GPU and VRAM, RAM, free disk under the facet home, and each host app),
+and every facet with its package count and this machine's plan for it.
+Facets with at least one installable package start selected; already
+installed packages are marked. Type facet numbers to toggle them, `a` for
+all, Enter to accept, or `q` to quit without installing. Accepting shows
+the combined plan, asks once, and installs with the same progress and
+summary as `facet pull <facet>`. Without a terminal, or with `--json`, the
+bare pull fails with `invalid_input` (exit 2), naming the facets and the
+two forms `facet pull <facet>` and `facet pull --package <name>`.
+
 Flags: `--package NAME` (repeatable, installs that package explicitly and
 cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
 `--plan` (print the plan and install nothing; with `--json` it returns
