@@ -1,10 +1,11 @@
 """``facet preview <folder>``: every recorded asset below one folder, as data.
 
-Folder mode never runs a runner. It walks the folder, keeps each file that
-has a sibling ``.facet.json`` record, and classifies the asset's preview
-file as ``fresh``, ``stale`` (older than the asset) or ``missing``. The
-person form serves those cards through the gallery (``facetmedia.
-preview_server``); the agent form returns them as ``--json`` data.
+Folder mode starts no runner until a card is opened. It walks the folder,
+keeps each file that has a sibling ``.facet.json`` record, and classifies
+the asset's preview file as ``fresh``, ``stale`` (older than the asset) or
+``missing``. The person form serves those cards through the gallery
+(``facetmedia.preview_server``), which builds a card's preview when it is
+opened; the agent form returns them as ``--json`` data.
 
 The preview-file questions live here so the single-asset form answers "is
 this preview fresh?" with the same code as the folder form.
@@ -35,6 +36,7 @@ __all__ = [
     "load_preview",
     "preview_images",
     "preview_state",
+    "refreshed",
     "text_table",
 ]
 
@@ -100,20 +102,45 @@ def entry_data(entry: FolderAsset) -> dict[str, object]:
     return data
 
 
-def card(entry: FolderAsset) -> dict[str, object]:
-    """One gallery card: the ``--json`` fields except ``preview``, plus routes."""
+def card(entry: FolderAsset, *, openable: frozenset[str]) -> dict[str, object]:
+    """One gallery card: the ``--json`` fields except ``preview``, plus routes.
+
+    A ``fresh`` card always opens. A ``stale`` or ``missing`` card opens when
+    its package is installed — opening it builds the preview first — and has
+    ``open: null`` otherwise.
+    """
     data = _fields(entry)
     data["n"] = entry.n
     data["name"] = entry.name
     data["package"] = entry.package
     data["thumb"] = f"/thumb/{entry.n}" if entry.thumb is not None else None
-    data["open"] = f"/open/{entry.n}" if entry.state == FRESH else None
+    data["open"] = (
+        f"/open/{entry.n}"
+        if entry.state == FRESH or (entry.package is not None and entry.package in openable)
+        else None
+    )
     return data
 
 
-def gallery_data(entries: Sequence[FolderAsset], folder_name: str) -> dict[str, object]:
+def gallery_data(
+    entries: Sequence[FolderAsset], folder_name: str, *, openable: frozenset[str]
+) -> dict[str, object]:
     """The document ``/gallery.json`` serves and the envelope carries."""
-    return {"folder": folder_name, "assets": [card(entry) for entry in entries]}
+    return {"folder": folder_name, "assets": [card(entry, openable=openable) for entry in entries]}
+
+
+def refreshed(entry: FolderAsset) -> FolderAsset:
+    """``entry`` reread from its asset: the state after a preview was built."""
+    preview_file = entry.path.parent / (entry.path.name + PREVIEW_SUFFIX)
+    state = preview_state(entry.path, preview_file)
+    preview = load_preview(preview_file) if state == FRESH else None
+    return replace(
+        entry,
+        state=state,
+        preview=preview,
+        asset_names=_asset_names(entry.path, preview_file, preview),
+        thumb=_thumb(entry.kind, state, entry.path, preview),
+    )
 
 
 def text_table(entries: Sequence[FolderAsset], folder_name: str) -> str:

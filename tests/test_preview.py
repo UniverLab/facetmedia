@@ -18,6 +18,7 @@ import pytest
 
 import facetmedia.cli as cli_module
 from facetmedia import preview as preview_module
+from facetmedia import preview_build as preview_build_module
 from facetmedia import record as record_module
 from facetmedia import runner as runner_module
 from facetmedia.cli import build_parser, main
@@ -170,7 +171,7 @@ def test_regeneration_never_starts_the_package_server(
 
     monkeypatch.setattr(runner_module, "call", fake_call)
     assert (
-        preview_module._ensure_preview(package, home, "run-1", "echo.text", {}, asset, preview_file)
+        preview_build_module.ensure(package, home, "run-1", "echo.text", {}, asset, preview_file)
         == {}
     )
     assert captured == {"start_server": False, "verb": "preview"}
@@ -643,7 +644,7 @@ def test_preview_request_carries_absolute_paths(
         return runner_module.Outcome({}, "")
 
     monkeypatch.setattr(runner_module, "call", fake_call)
-    preview_module._ensure_preview(
+    preview_build_module.ensure(
         package, home, "run-1", "echo.text", {}, Path("asset.txt"), preview_file
     )
     assert captured["out_dir"] == str(tmp_path)

@@ -8,9 +8,9 @@ app from the registry's ``viewers/`` directory), served by facet on
 
 A folder — or no argument, meaning the current directory — is previewed as
 one gallery over every asset below it that has a sibling record. Folder
-mode never runs a runner: an asset whose preview is fresh is shown without
-its package, and one whose preview must be rebuilt is a card that names
-the command which fixes it.
+mode starts no runner until a card is opened: an asset whose preview is
+fresh is shown without its package, and one whose preview must be rebuilt
+is a card that builds it when opened, when its package is installed.
 
 The preview file is written by the package runner's ``preview`` verb and
 refreshed whenever it is missing or older than the asset. The core carries
@@ -32,9 +32,10 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
-from facetmedia import env, record, registry, runner
+from facetmedia import record, registry
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
+from facetmedia.preview_build import installed_packages, rebuild
 from facetmedia.preview_folder import (
     FRESH,
     KINDS,
@@ -55,7 +56,7 @@ from facetmedia.preview_server import (
     make_server,
     serve,
 )
-from facetmedia.registry import Capability, Package
+from facetmedia.registry import Capability
 
 __all__ = [
     "KINDS",
@@ -97,9 +98,7 @@ def _single_mode(args: argparse.Namespace, run_id: str) -> tuple[dict[str, objec
     if preview_state(asset_path, preview_file) == FRESH:
         preview_data = _load_preview(preview_file)
     else:
-        preview_data = _rebuilt_preview(
-            home, run_id, capability_id, stored, asset_path, preview_file
-        )
+        preview_data = rebuild(home, run_id, capability_id, stored, asset_path)
     images = _images(preview_data, asset_path.parent)
     _mark_truncated(preview_data)
     shown = images[:PAGE_LIMIT] if isinstance(preview_data.get("pages"), list) else images
@@ -115,27 +114,6 @@ def _single_mode(args: argparse.Namespace, run_id: str) -> tuple[dict[str, objec
     return data, 0
 
 
-def _rebuilt_preview(
-    home: Home,
-    run_id: str,
-    capability_id: str,
-    stored: Mapping[str, object],
-    asset_path: Path,
-    preview_file: Path,
-) -> dict[str, object]:
-    """The runner's fresh preview: the package must be installed to rebuild."""
-    _capability_record, package = _resolve(capability_id)
-    if not env.is_installed(package, home):
-        raise FacetError(
-            "not_installed",
-            f"{package.name} {package.version} is not installed",
-            hint=f"facet pull {package.name}",
-            details={"package": package.name, "version": package.version},
-        )
-    params = _params_of(stored, str(asset_path))
-    return _ensure_preview(package, home, run_id, capability_id, params, asset_path, preview_file)
-
-
 def _folder_mode(args: argparse.Namespace, folder: Path) -> tuple[dict[str, object], int]:
     """Every recorded asset below ``folder``, as data, a table or a gallery."""
     kinds = _kind_filter(getattr(args, "kind", None))
@@ -143,15 +121,16 @@ def _folder_mode(args: argparse.Namespace, folder: Path) -> tuple[dict[str, obje
     name = folder.name
     if bool(getattr(args, "json", False)):
         return {"folder": name, "assets": [entry_data(entry) for entry in entries]}, 0
+    openable = installed_packages(entry.package for entry in entries)
     gallery_root = registry.registry_dir() / "viewers" / "gallery"
     if not (gallery_root / "index.html").is_file():
         print(text_table(entries, name))
-        return gallery_data(entries, name), 0
+        return gallery_data(entries, name, openable=openable), 0
     if not _is_tty():
-        print(json.dumps(gallery_data(entries, name), indent=2, sort_keys=True))
-        return gallery_data(entries, name), 0
+        print(json.dumps(gallery_data(entries, name, openable=openable), indent=2, sort_keys=True))
+        return gallery_data(entries, name, openable=openable), 0
     _serve_gallery(args, entries, gallery_root, name)
-    return gallery_data(entries, name), 0
+    return gallery_data(entries, name, openable=openable), 0
 
 
 def _kind_filter(kind: object) -> frozenset[str] | None:
@@ -191,19 +170,6 @@ def _serve_gallery(
         serve(server, float(getattr(args, "idle_timeout", 600.0)))
 
 
-def _resolve(capability_id: str) -> tuple[Capability, Package]:
-    """The capability and its package; an unknown id lists the known ids."""
-    active = registry.load_active_registry()
-    capability = active.capability(capability_id)
-    package = active.package(capability.package)
-    if package is None:
-        raise FacetError(
-            "internal",
-            f"{capability_id}: its package {capability.package} is not in the registry",
-        )
-    return capability, package
-
-
 def _capability(capability_id: str) -> Capability:
     """The capability alone: showing a fresh preview needs no package."""
     return registry.load_active_registry().capability(capability_id)
@@ -220,17 +186,6 @@ def _capability_of(stored: Mapping[str, object], asset: str) -> str:
     return capability
 
 
-def _params_of(stored: Mapping[str, object], asset: str) -> dict[str, object]:
-    """The record's params for the runner's ``preview`` verb."""
-    provenance = stored.get("provenance")
-    if not isinstance(provenance, dict):
-        raise FacetError("invalid_input", f"{asset}: the record has no provenance")
-    params = provenance.get("params")
-    if not isinstance(params, dict):
-        raise FacetError("invalid_input", f"{asset}: the record has no params")
-    return {str(key): value for key, value in params.items()}
-
-
 def _asset_path(asset: str) -> Path:
     """The asset an argument names, whether it is the asset or its record."""
     given = Path(asset)
@@ -244,55 +199,6 @@ def _asset_path(asset: str) -> Path:
 def _relative_asset(asset_path: Path) -> str:
     """The asset's path relative to the working directory, never absolute."""
     return Path(os.path.relpath(asset_path, Path.cwd())).as_posix()
-
-
-def _ensure_preview(
-    package: Package,
-    home: Home,
-    run_id: str,
-    capability_id: str,
-    params: dict[str, object],
-    asset_path: Path,
-    preview_file: Path,
-) -> dict[str, object]:
-    """The parsed preview file, regenerated when missing or older than asset."""
-    try:
-        asset_mtime = asset_path.stat().st_mtime
-    except OSError as exc:
-        raise FacetError("invalid_input", f"{asset_path}: cannot read asset") from exc
-    try:
-        preview_mtime = preview_file.stat().st_mtime
-    except OSError:
-        preview_mtime = None
-    if preview_mtime is not None and preview_mtime >= asset_mtime:
-        return _load_preview(preview_file)
-    preview_file.unlink(missing_ok=True)
-    temp_dir = home.tmp_dir / f".facet-preview-{run_id}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        invocation = runner.Invocation(
-            package,
-            home,
-            home.env_dir(package.name, package.version),
-            temp_dir,
-            run_id,
-            None,
-            False,
-        )
-        request = runner.make_request(
-            "preview",
-            capability_id,
-            params,
-            asset_path.parent,
-            asset_path.parent,
-            runner.model_paths(package, home),
-            [asset_path],
-        )
-        runner.call(invocation, "preview", request)
-        preview_data = _load_preview(preview_file)
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    return preview_data
 
 
 def _mark_truncated(preview: dict[str, object]) -> None:

@@ -670,8 +670,10 @@ it gone fails with `not_installed` and the hint `facet pull <package>`.
 
 The argument is optional. A folder, or no argument at all (the current
 directory), previews every asset below it that has a sibling record as one
-gallery, sorted by path; no runner ever starts in that form and each asset
-is `fresh`, `stale` or `missing`.
+gallery, sorted by path; starting the gallery starts no runner and each
+asset is `fresh`, `stale` or `missing`. Opening a `stale` or `missing`
+card whose package is still installed builds its preview through the
+runner's `preview` verb; a failed build answers 500 and leaves the card.
 
 Flags: `--no-open` (print the viewer URL only), `--port PORT`,
 `--idle-timeout SECONDS` (stop the server after idle; default 600),

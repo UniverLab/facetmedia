@@ -120,7 +120,7 @@ file:///home/facet/out/thesis.pdf
 `facet preview <folder>`, or `facet preview` in the folder you are in,
 collects every asset below the folder, recursively, that has a sibling
 `.facet.json` record, and sorts them by their path relative to the folder.
-No runner ever starts in this form: each asset's `.preview.json` is
+No runner starts until a card is opened: each asset's `.preview.json` is
 classified, and nothing else runs.
 
 - `fresh` — the preview file is not older than the asset;
@@ -165,15 +165,17 @@ routes:
 | `/kit/…` | the shared kit, as for one asset |
 | `/gallery.json` | `{"folder", "assets"}`: one card per asset, in order |
 | `/thumb/<n>` | the asset itself for an image, otherwise the first image of its fresh preview, otherwise 404 |
-| `/open/<n>` | for a fresh card, makes it the current asset and answers 302 to `/viewer/index.html?asset=<name>`; a `document` is served as the PDF itself; otherwise 404 |
+| `/open/<n>` | makes the card the current asset and answers 302 to `/viewer/index.html?asset=<name>` — a `document` is served as the PDF itself — building the preview first when it is `stale` or `missing` and its package is installed; a failed build answers 500 and leaves the card; otherwise 404 |
 | `/viewer/…` | the current asset's viewer, as for one asset |
 | `/asset/<name>` | the current asset's own files, as for one asset |
 
 A card carries the `--json` fields without `preview`, plus `n` (the index
 the routes use), `name` and `package` (from the record), `thumb` and
-`open` (a route, or null). A stale or missing card has `open: null`, and
-the page shows the command that fixes it — `facet preview <asset path>` —
-which rebuilds the preview when the package is installed.
+`open` (a route, or null). A fresh card always has an `open` route; a
+stale or missing card has one when its package is installed — opening it
+builds the preview first, through the same runner call
+`facet preview <asset path>` makes, and the card turns fresh. A card
+whose package is not installed has `open: null`.
 
 One asset is current at a time: opening a second card replaces it, so a
 tab left on the earlier asset stops loading its files, and both `/viewer/`

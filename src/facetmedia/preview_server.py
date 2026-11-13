@@ -18,17 +18,21 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Final, TypeAlias, cast
 from urllib.parse import quote, unquote, urlsplit
 
-from facetmedia import registry
+from facetmedia import env, record, registry
 from facetmedia.contract import FacetError
-from facetmedia.preview_folder import FRESH, FolderAsset, gallery_data
+from facetmedia.home import Home
+from facetmedia.preview_build import installed_packages, rebuild
+from facetmedia.preview_folder import FRESH, FolderAsset, gallery_data, refreshed
+from facetmedia.registry import Package
 
 __all__ = [
     "POLL_S",
@@ -110,6 +114,8 @@ class GalleryServer(ThreadingHTTPServer):
         self.site = site
         self.current: tuple[FolderAsset, Path] | None = None
         self.last_activity = time.monotonic()
+        self.build_lock = threading.Lock()
+        self.run_id = f"gallery-{time.monotonic_ns()}"
         super().__init__(address, _GalleryHandler)
 
 
@@ -163,6 +169,15 @@ class _FileHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"not found")
 
+    def _server_error(self, message: str) -> None:
+        """Answer 500 with a plain-text message: a preview build failed."""
+        payload = message.encode("utf-8")
+        self.send_response(500)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def log_message(self, format: str, *args: object) -> None:
         logger.debug("%s - %s", self.address_string(), format % args)
 
@@ -191,7 +206,7 @@ class _GalleryHandler(_FileHandler):
     def _route(self, server: GalleryServer, decoded: str) -> bool:
         """Answer one path, or ``False`` so the caller sends 404."""
         if decoded == "/gallery.json":
-            return self._json(gallery_data(server.site.assets, server.site.folder_name))
+            return self._json(self._cards(server))
         head, rest = _split_route(decoded)
         route = _ROUTES.get(head)
         return route is not None and route(self, server, rest)
@@ -218,10 +233,22 @@ class _GalleryHandler(_FileHandler):
         return self._send_file(entry.thumb)
 
     def _open(self, server: GalleryServer, raw: str) -> bool:
-        """Make one fresh card current, or serve a document's own file."""
+        """Make one card current, building its preview first when stale.
+
+        A ``document`` is served as its own file; every other kind redirects
+        to its viewer. A failed build answers 500 and leaves the card as it
+        was; an uninstallable card is 404.
+        """
         entry = _entry_at(server.site.assets, raw)
-        if entry is None or entry.state != FRESH:
+        if entry is None:
             return False
+        if entry.state != FRESH:
+            built, failed = self._build(server, raw)
+            if failed:
+                return True
+            if built is None:
+                return False
+            entry = built
         if entry.kind == "document":
             return self._send_file(entry.path)
         viewer_root = _viewer_root(entry.capability)
@@ -230,6 +257,43 @@ class _GalleryHandler(_FileHandler):
         server.current = (entry, viewer_root)
         self._redirect(f"/viewer/index.html?asset={quote(entry.path.name)}")
         return True
+
+    def _cards(self, server: GalleryServer) -> dict[str, object]:
+        """The ``/gallery.json`` document, with open routes for installed cards."""
+        openable = installed_packages(entry.package for entry in server.site.assets)
+        return gallery_data(server.site.assets, server.site.folder_name, openable=openable)
+
+    def _build(self, server: GalleryServer, raw: str) -> tuple[FolderAsset | None, bool]:
+        """Build one card's preview, serialised with every other build.
+
+        Returns the fresh card and ``False``; a failed build answers 500 and
+        returns ``(None, True)``; a card that cannot be built is
+        ``(None, False)`` so the caller sends 404.
+        """
+        with server.build_lock:
+            entry = _entry_at(server.site.assets, raw)
+            if entry is None or entry.state == FRESH:
+                return entry, False
+            if _installed_package(entry) is None:
+                return None, False
+            try:
+                return self._built(server, entry), False
+            except FacetError as exc:
+                self._server_error(f"{entry.asset}: {exc}")
+                return None, True
+
+    def _built(self, server: GalleryServer, entry: FolderAsset) -> FolderAsset:
+        """Run one card's ``preview`` verb, then store the card it produced."""
+        stored = record.read_record(entry.path)
+        rebuild(Home.from_env(), server.run_id, entry.capability, stored, entry.path)
+        return self._store(server, entry)
+
+    def _store(self, server: GalleryServer, entry: FolderAsset) -> FolderAsset:
+        """Replace ``entry`` with its freshly built card and return the card."""
+        fresh = refreshed(entry)
+        assets = tuple(fresh if item.n == entry.n else item for item in server.site.assets)
+        server.site = replace(server.site, assets=assets)
+        return fresh
 
     def _viewer(self, server: GalleryServer, relative: str) -> bool:
         if server.current is None:
@@ -268,6 +332,20 @@ def _split_route(decoded: str) -> tuple[str, str]:
     """``/open/0`` -> ``("open", "0")``; a path without a second slash is no route."""
     head, slash, rest = decoded.removeprefix("/").partition("/")
     return (head, rest) if slash else ("", decoded)
+
+
+def _installed_package(entry: FolderAsset) -> Package | None:
+    """The card's package when it resolves and is installed, else ``None``."""
+    if entry.package is None:
+        return None
+    try:
+        home = Home.from_env()
+        package = registry.load_active_registry().package(entry.package)
+    except FacetError:
+        return None
+    if package is None or not env.is_installed(package, home):
+        return None
+    return package
 
 
 def _entry_at(assets: tuple[FolderAsset, ...], raw: str) -> FolderAsset | None:
