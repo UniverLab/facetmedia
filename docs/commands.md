@@ -252,8 +252,10 @@ failed; `11` a multi-package plan without a terminal to confirm it and no
 
 ## `facet list`
 
-Packages grouped by facet, each with its weight (`light`, `cpu-heavy`,
-`gpu`).
+Packages grouped by facet. Each package line carries its name, its weight
+(`light`, `cpu-heavy`, `gpu`) and its version in the current snapshot; an
+installed package adds `installed <version>` and, when the snapshot's
+version is newer, `update: <installed> → <snapshot>`.
 
 Flags: `--available` (also list packages not installed; incompatible ones
 appear only in this form), `--facet NAME` (one facet's packages).
@@ -261,21 +263,21 @@ appear only in this form), `--facet NAME` (one facet's packages).
 ```console
 $ facet list --available
 voice:
-  kokoro  cpu-heavy
+  kokoro  cpu-heavy  0.1.0
     kokoro.speak  audio  Narration from text on CPU (Spanish and English), checked by transcription
-  whisper  cpu-heavy
+  whisper  cpu-heavy  0.1.0
     whisper.transcribe  text  Transcript, subtitles and timed words from an audio file on CPU, checked by confidence and optional reference text
 audio:
-  ffmpeg  light
+  ffmpeg  light  0.1.0
     ffmpeg.convert  audio  Convert, resample or cut a clip
     ffmpeg.mix  audio  Lay voice layers over a music or ambience bed, with the bed ducked under the voice
     ffmpeg.normalize  audio  Bring clips to a loudness target (EBU R128, two-pass) without clipping
 cad:
-  cad  light
+  cad  light  0.1.0
     cad.drawing  cad  2D plan from an ezdxf script: DXF with an audit, SVG and PNG views
     cad.solid  cad  3D part from a CadQuery script: STEP, STL and a line view
 text:
-  ascii  light
+  ascii  light  0.1.0
     ascii.banner  text  A text banner in the lab's figlet font (DOS Rebel by default).
     ascii.image  text  Image to ASCII art (density, stroke, braille or shape matching), checked by re-rendering.
 ```
@@ -284,6 +286,7 @@ Without `--available` and nothing installed, facet names the answer instead
 of printing nothing: ``no packages installed; `facet list --available`
 shows the registry's``. `--json` adds the machine data: per package
 `name`, `version`, `facet`, `weight`, `vram_gb`, `compatible`, `installed`,
+`installed_version` (string or null), `update_available`,
 sizes and its capabilities; an `available` summary of the registry's package,
 capability and facet counts; and the registry it read. Lock: none.
 
