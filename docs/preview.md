@@ -133,8 +133,9 @@ message names the folder.
 
 ### Agent form: `facet preview <folder> --json`
 
-Nothing is opened and no server starts. The data is `{"folder", "assets"}`:
-the folder's name and one entry per asset, in order:
+Nothing is opened, no server starts and no runner runs. The data is
+`{"folder", "assets"}`: the folder's name and one entry per asset, in
+order:
 
 ```json
 {"folder": "pieces",
@@ -156,8 +157,8 @@ file for a fresh asset and null otherwise.
 
 ### The gallery
 
-A person gets one server on 127.0.0.1, read-only, serving exactly these
-routes:
+A person gets one server on 127.0.0.1, serving exactly these routes. It
+writes nothing but the preview a card builds on `/open/<n>`:
 
 | route | what it serves |
 | --- | --- |
@@ -165,7 +166,7 @@ routes:
 | `/kit/…` | the shared kit, as for one asset |
 | `/gallery.json` | `{"folder", "assets"}`: one card per asset, in order |
 | `/thumb/<n>` | the asset itself for an image, otherwise the first image of its fresh preview, otherwise 404 |
-| `/open/<n>` | makes the card the current asset and answers 302 to `/viewer/index.html?asset=<name>` — a `document` is served as the PDF itself — building the preview first when it is `stale` or `missing` and its package is installed; a failed build answers 500 and leaves the card; otherwise 404 |
+| `/open/<n>` | makes the card the current asset and answers 302 to `/viewer/index.html?asset=<name>` — a `document` is served as the PDF itself — building the preview first when it is `stale` or `missing` and its package is installed; a failed build answers 500 with a plain-text body naming the asset and the runner's error, and leaves the card; otherwise 404 |
 | `/viewer/…` | the current asset's viewer, as for one asset |
 | `/asset/<name>` | the current asset's own files, as for one asset |
 
@@ -176,6 +177,10 @@ stale or missing card has one when its package is installed — opening it
 builds the preview first, through the same runner call
 `facet preview <asset path>` makes, and the card turns fresh. A card
 whose package is not installed has `open: null`.
+
+Builds run one at a time: a card opened while another is still building
+waits for that build, then starts its own. The route answers when the
+build is done — nothing is left running in the background.
 
 One asset is current at a time: opening a second card replaces it, so a
 tab left on the earlier asset stops loading its files, and both `/viewer/`
