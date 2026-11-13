@@ -646,7 +646,7 @@ passes through to the preview.
 
 When `--run` does not open the preview — no terminal, `--no-open`, or
 `--json` — the text output ends one line after `out <dir>`, naming the
-run's first asset as its record does:
+path `facet preview` takes for the run's first asset:
 
 ```console
 $ facet example kokoro.speak --run
