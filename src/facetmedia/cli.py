@@ -138,6 +138,7 @@ def _configure_output(args: argparse.Namespace) -> None:
 
 def _handle_run(args: argparse.Namespace) -> int:
     """The envelope carries every record; the exit code reports verification."""
+    _configure_output(args)
     data, exit_code = run.execute(args, args.run_id)
     contract.emit(contract.ok(data), args.json)
     if not args.json:

@@ -487,6 +487,7 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="install the package for this run only, then remove its environment",
     )
+    _add_verbose_flag(parser)
 
 
 def _add_preview_flags(parser: argparse.ArgumentParser) -> None:

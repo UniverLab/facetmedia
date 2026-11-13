@@ -20,6 +20,7 @@ from facetmedia import preview as preview_module
 from facetmedia import run as run_module
 from facetmedia import schema
 from facetmedia.contract import FacetError, emit, ok
+from facetmedia.progress import Progress, set_verbose
 from facetmedia.registry import Capability, Package, load_active_registry
 
 __all__ = ["Example", "add_flags", "execute", "find_examples", "handle"]
@@ -293,6 +294,9 @@ def _run_after(
 ) -> tuple[dict[str, object], int]:
     """Run the copied piece through ``facet run``, then preview on a TTY."""
     out = _out_dir(args, dest)
+    # An install here is the run's own business: it draws the same phase lines
+    # as `facet pull`, and the detailed transcript stays in the run log.
+    set_verbose(False)
     run_args = argparse.Namespace(
         capability=capability.id,
         piece=str(dest / chosen.path.name),
@@ -303,14 +307,21 @@ def _run_after(
         ephemeral=False,
         wait=bool(getattr(args, "wait", True)),
         wait_timeout=float(getattr(args, "wait_timeout", 3600.0)),
+        progress=Progress.for_cli(as_json=bool(getattr(args, "json", False)), verbose=False),
     )
     run_data, code = run_module.execute(run_args, run_id)
     data["run"] = run_data
+    first = _first_asset(run_data)
+    if first is not None:
+        data["preview_command"] = f"facet preview {first}"
     if bool(getattr(args, "json", False)):
         return data, code
     _announce_run_assets(run_data)
-    if code == 0 and sys.stdout.isatty():
+    previewed = code == 0 and sys.stdout.isatty()
+    if previewed:
         _preview_first(run_data, args, run_id)
+    if not previewed or bool(getattr(args, "no_open", False)):
+        _announce_preview(run_data)
     return data, code
 
 
@@ -334,14 +345,42 @@ def _announce_run_assets(run_data: dict[str, object]) -> None:
     print(f"out {run_data.get('out_dir')}")
 
 
-def _preview_first(run_data: dict[str, object], args: argparse.Namespace, run_id: str) -> None:
-    """Preview the run's first asset, exactly as ``facet preview`` shows it."""
+def _first_asset(run_data: dict[str, object]) -> str | None:
+    """The first asset as a path ``facet preview`` resolves, or ``None``.
+
+    A record stores only the file name, relative to the record's own
+    directory; ``facet preview`` resolves its argument from the working
+    directory, so the name is joined onto the run's ``out_dir``.
+    """
     assets = run_data.get("assets")
     first = assets[0] if isinstance(assets, list) and assets else None
-    if not isinstance(first, dict) or not isinstance(first.get("path"), str):
+    if not isinstance(first, dict):
+        return None
+    path = first.get("path")
+    if not isinstance(path, str):
+        return None
+    if Path(path).is_absolute():
+        return path
+    out_dir = run_data.get("out_dir")
+    if isinstance(out_dir, str) and out_dir:
+        return str(Path(out_dir) / path)
+    return path
+
+
+def _announce_preview(run_data: dict[str, object]) -> None:
+    """Say exactly how to look at what the run made, after ``out <dir>``."""
+    path = _first_asset(run_data)
+    if path is not None:
+        print(f"preview: facet preview {path}")
+
+
+def _preview_first(run_data: dict[str, object], args: argparse.Namespace, run_id: str) -> None:
+    """Preview the run's first asset, exactly as ``facet preview`` shows it."""
+    path = _first_asset(run_data)
+    if path is None:
         return
     preview_args = argparse.Namespace(
-        asset=str(first["path"]),
+        asset=path,
         json=False,
         no_open=bool(getattr(args, "no_open", False)),
         port=None,

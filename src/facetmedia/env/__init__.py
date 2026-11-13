@@ -170,9 +170,9 @@ def pull(
 ) -> dict[str, object]:
     """Install ``package`` into ``home``; returns the ``facet pull`` result.
 
-    ``progress`` draws one line per phase. ``None`` keeps the historical
-    behaviour for a caller such as ``facet run``: the plan and uv's output are
-    echoed and no phase line is drawn.
+    ``progress`` draws one line per phase. ``None`` draws none; the plan
+    and uv's output still reach the run log, and stderr only with
+    ``--verbose``.
     """
     started = time.monotonic()
     _preflight(package, home, run_id)

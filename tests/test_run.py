@@ -573,9 +573,45 @@ def test_run_pulls_a_fresh_home_first(
     assert code == 0
     assert envelope["data"]["pulled"] is True
     assert envelope["data"]["downloaded_bytes"] == 0
-    # The pull plan is printed before anything runs, on stderr only.
-    assert "total to download 0 bytes" in captured.err
+    # With --json nothing extra reaches stdout, and stderr draws no line either.
+    assert "total to download 0 bytes" not in captured.err
     assert (out / "echo.txt").is_file()
+
+
+def test_run_install_draws_progress_lines_instead_of_the_transcript(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    piece = _piece(tmp_path)
+    out = tmp_path / "out"
+
+    code = main(["run", "echo.text", str(piece), "--out", str(out)])
+    err = capsys.readouterr().err
+    assert code == 0
+    # The same phase lines `facet pull` draws for a pipe, and no transcript.
+    assert "start environment" in err
+    assert "end ✓ environment" in err
+    assert "total to download" not in err
+
+
+def test_run_install_transcript_is_back_with_verbose(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    piece = _piece(tmp_path)
+    out = tmp_path / "out"
+
+    code = main(["run", "echo.text", str(piece), "--out", str(out), "--verbose"])
+    err = capsys.readouterr().err
+    assert code == 0
+    assert "total to download" in err
+    assert "start " not in err
 
 
 def test_run_no_pull_on_a_fresh_home_is_not_installed(

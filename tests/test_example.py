@@ -233,7 +233,8 @@ def _fake_run(
                 "out_dir": str(out),
                 "assets": [
                     {
-                        "path": str(asset),
+                        # A record stores the bare file name; out_dir locates it.
+                        "path": "echo.txt",
                         "name": "echo",
                         "kind": "text",
                         "verification": {"status": "passed"},
@@ -264,6 +265,7 @@ def test_json_run_adds_run_data_and_stops(
     data = _envelope(capsys)["data"]
     assert data["run"]["capability"] == "echo.text"
     assert data["run"]["assets"][0]["name"] == "echo"
+    assert data["preview_command"] == f"facet preview {dest}/out/echo.txt"
     assert calls["preview"] == []
 
 
@@ -278,7 +280,9 @@ def test_run_previews_first_asset_on_tty(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert calls["preview"][0]["no_open"] is True
 
 
-def test_run_skips_preview_without_tty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_skips_preview_without_tty(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _registry_with_examples(monkeypatch, tmp_path)
     calls = _fake_run(monkeypatch, tmp_path)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
@@ -286,6 +290,10 @@ def test_run_skips_preview_without_tty(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert main(["example", "echo.text", str(dest), "--run"]) == 0
     assert calls["run"] != []
     assert calls["preview"] == []
+    # The text output still says how to look at what the run made.
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"preview: facet preview {dest}/out/echo.txt"
+    )
 
 
 def test_run_prints_copy_before_run_output(

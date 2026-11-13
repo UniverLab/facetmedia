@@ -551,7 +551,14 @@ environment, verifies every asset, and writes the records.
 Flags: `--out DIR` (default: the piece's directory), `--no-verify`,
 `--no-pull` (fail `not_installed` instead of pulling an absent or changed
 package), `--timeout SECONDS` (kill the runner's process group),
-`--ephemeral` (install for this run, remove the environment after).
+`--ephemeral` (install for this run, remove the environment after), and
+`-v`/`--verbose`.
+
+An install this run does itself follows the `facet pull` rules: one
+progress line per phase at a terminal, one plain `start`/`end` line per
+phase without one, nothing extra on stderr with `--json`, and the
+detailed transcript — the plan and uv's resolution — on stderr only with
+`-v`/`--verbose`. The transcript always goes to the run log.
 
 An installed package whose files changed in the registry since the pull is
 rebuilt before the run, exactly as an absent one; with `--no-pull` it fails
@@ -637,10 +644,24 @@ the first asset exactly as `facet preview` shows it. `--out DIR` picks
 the asset directory for `--run` (default `<dest>/out`); `--no-open`
 passes through to the preview.
 
+When `--run` does not open the preview — no terminal, `--no-open`, or
+`--json` — the text output ends one line after `out <dir>`, naming the
+run's first asset as its record does:
+
+```console
+$ facet example kokoro.speak --run
+laboratorio.toml
+facet run kokoro.speak /home/you/work/kokoro-speak/laboratorio.toml --out /home/you/work/kokoro-speak/out
+laboratorio.wav laboratorio passed
+out /home/you/work/kokoro-speak/out
+preview: facet preview <first asset>
+```
+
 With `--json`, `data` carries `dest`, `piece` and `files`, and with
-`--run` it adds the run's data under `data.run` and stops there; a
-`--list` answer carries `capability` and `examples` instead, each example
-with its `piece` stem and registry `path`.
+`--run` it adds the run's data under `data.run`, the same command as
+`data.preview_command`, and stops there; a `--list` answer carries
+`capability` and `examples` instead, each example with its `piece` stem
+and registry `path`.
 
 Lock: none for the copy; with `--run` the run takes the lock per the
 package manifest, like `facet run` itself. The copy accepts the lock

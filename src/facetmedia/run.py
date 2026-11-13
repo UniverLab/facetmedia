@@ -27,6 +27,7 @@ from facetmedia import __version__, doctor, env, licenses, prune, record, runner
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
+from facetmedia.progress import Progress
 from facetmedia.record import RecordSpec
 from facetmedia.registry import Capability, Field, Package, load_active_registry
 from facetmedia.registry_types import Model, capability_models
@@ -235,9 +236,15 @@ def _ensure_installed(args: argparse.Namespace, package: Package, run_id: str) -
         raise _not_installed_error(package, home)
     wait, wait_timeout = _lock_params(args)
     with hold("exclusive", "facet run pull", wait, wait_timeout):
-        report = env.pull(package, home, run_id=run_id)
+        report = env.pull(package, home, run_id=run_id, progress=_reporter(args))
     downloaded = report.get("downloaded_bytes", 0)
     return True, downloaded if isinstance(downloaded, int) else 0
+
+
+def _reporter(args: argparse.Namespace) -> Progress | None:
+    """The progress line the CLI configured, or ``None`` for a direct call."""
+    reporter = getattr(args, "progress", None)
+    return reporter if isinstance(reporter, Progress) else None
 
 
 def _not_installed_error(package: Package, home: Home) -> FacetError:
