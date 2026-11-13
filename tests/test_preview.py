@@ -518,6 +518,51 @@ def test_package_gone_is_not_installed(
     assert envelope["error"]["hint"] == "facet pull echo"
 
 
+def _fresh_preview(asset: Path) -> dict[str, object]:
+    """A preview file newer than the asset, as a finished run leaves it."""
+    payload: dict[str, object] = {"preview": 1, "kind": "text", "summary": "hellohello"}
+    preview_file = _preview_path(asset)
+    preview_file.write_text(json.dumps(payload), encoding="utf-8")
+    newer = asset.stat().st_mtime + 5
+    os.utime(preview_file, (newer, newer))
+    return payload
+
+
+def test_a_fresh_preview_needs_no_installed_package(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Requirement 1: the package is only needed to rebuild the preview."""
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    asset = tmp_path / "echo.txt"
+    _write_echo_record(asset)
+    payload = _fresh_preview(asset)
+
+    assert main(["preview", str(asset), "--json"]) == 0
+    envelope = _envelope(capsys)
+    assert envelope["ok"] is True
+    assert envelope["data"]["preview"] == payload
+
+
+def test_a_stale_preview_without_the_package_is_not_installed(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An older preview must be rebuilt, so the package is required again."""
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    asset = tmp_path / "echo.txt"
+    _write_echo_record(asset)
+    _fresh_preview(asset)
+    preview_file = _preview_path(asset)
+    older = asset.stat().st_mtime - 5
+    os.utime(preview_file, (older, older))
+
+    assert main(["preview", str(asset), "--json"]) == EXIT_NOT_INSTALLED
+    envelope = _envelope(capsys)
+    assert envelope["error"]["code"] == "not_installed"
+    assert envelope["error"]["hint"] == "facet pull echo"
+
+
 # --- T7: without any viewer, the preview JSON is printed and nothing opens.
 
 
@@ -558,10 +603,18 @@ def test_preview_takes_no_lock(
 def test_preview_flags_default_to_the_spec() -> None:
     args = build_parser().parse_args(["preview", "echo.txt"])
     assert args.asset == "echo.txt"
+    assert args.kind is None
     assert args.no_open is False
     assert args.port is None
     assert args.idle_timeout == DEFAULT_IDLE_TIMEOUT_S
     assert args.json is False
+
+
+def test_preview_without_an_argument_names_no_asset() -> None:
+    """No argument is the current folder, so the positional may be absent."""
+    args = build_parser().parse_args(["preview"])
+    assert args.asset is None
+    assert args.kind is None
 
 
 def test_last_activity_starts_at_bind(tmp_path: Path) -> None:

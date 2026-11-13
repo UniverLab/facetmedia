@@ -644,8 +644,19 @@ its person preview is the PDF itself — the printed URL is the asset's
 `images` array carries the page PNGs, at most 10, with the `preview`
 object saying `page_count` and `truncated` one way or the other.
 
+A fresh preview — one whose file is not older than the asset — is shown
+without the package: the finished piece already holds what the viewer
+needs. Only a preview that must be rebuilt asks for the package, and with
+it gone fails with `not_installed` and the hint `facet pull <package>`.
+
+The argument is optional. A folder, or no argument at all (the current
+directory), previews every asset below it that has a sibling record as one
+gallery, sorted by path; no runner ever starts in that form and each asset
+is `fresh`, `stale` or `missing`.
+
 Flags: `--no-open` (print the viewer URL only), `--port PORT`,
-`--idle-timeout SECONDS` (stop the server after idle; default 600).
+`--idle-timeout SECONDS` (stop the server after idle; default 600),
+`--kind KIND` (folder mode only: keep one asset kind).
 
 ```console
 $ facet preview assets/canopy.txt --json
@@ -656,13 +667,18 @@ $ facet preview assets/canopy.txt --no-open
 http://127.0.0.1:39651/viewer/index.html?asset=canopy.txt
 $ facet preview out/thesis.pdf --no-open           # a document prints its file URL
 file:///home/facet/out/thesis.pdf
+$ facet preview pieces --kind image --json         # a folder: one entry per asset
+{"contract": 1, "data": {"assets": [{"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image", "created": "2026-11-12T10:04:11Z", "duration_s": null, "kind": "image", "preview": {"preview": 1, "…": "the parsed preview"}, "preview_state": "fresh", "verified": true}, "…"], "folder": "pieces"}, "facet": "0.1.0b1", "ok": true}
+$ facet preview pieces --no-open                    # the gallery page, one server
+http://127.0.0.1:39651/gallery/index.html
 ```
 
 Lock: none.
 
 Exit codes: `0` (data, or the server started and stopped cleanly again);
-`2` a missing asset, or a record whose capability is unknown; `7` the
-package is not installed; `9` its `preview` verb broke the protocol.
+`2` a missing asset, a folder with no assets left, or a record whose
+capability is unknown; `7` the package is not installed and the preview
+must be rebuilt; `9` its `preview` verb broke the protocol.
 
 ## `facet license`
 

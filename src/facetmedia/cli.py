@@ -761,7 +761,19 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_preview_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("asset", help="asset or record to preview")
+    parser.add_argument(
+        "asset",
+        nargs="?",
+        default=None,
+        metavar="ASSET",
+        help="asset, record or folder to preview (default: the current folder)",
+    )
+    parser.add_argument(
+        "--kind",
+        choices=sorted(preview.KINDS),
+        default=None,
+        help="folder mode only: keep the assets of this kind",
+    )
     parser.add_argument(
         "--no-open",
         action="store_true",

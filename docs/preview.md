@@ -7,27 +7,29 @@ order: 4
 # `facet preview`
 
 `facet preview` shows one asset facet made: to an agent as data, to a
-person through the capability's viewer. Both forms speak the same `--json`
-contract as everything else and take no lock.
+person through the capability's viewer. It also shows a whole folder —
+every asset below it that has a record — as one gallery. Both forms speak
+the same `--json` contract as everything else and take no lock.
 
 ```console
 $ facet preview out/take-voice.wav --json          # the record plus the preview file
 $ facet preview out/take-voice.wav                 # serve the viewer, open the browser
 $ facet preview out/take-voice.wav --no-open       # serve the viewer, print the URL only
 $ facet preview out/take-voice.wav --port 8901 --idle-timeout 60
+$ facet preview ~/facet-verify/pieces              # the whole folder, as a gallery
 ```
 
 One kind is different: for a `document` asset the person form opens the
 PDF itself — see [the document exception](#person-form-facet-preview-asset).
 
-The argument names the asset or its record. The record's provenance names
-the capability, whose package must still be installed: when its
-environment is gone facet fails with `not_installed` and the hint
-`facet pull <package>`.
-
-When `<asset>.preview.json` is missing or older than the asset, facet calls
-the runner's `preview` verb to write it; otherwise the file on disk is
-used. The images a preview lists are only ever files beside the asset.
+The argument names the asset, its record, or a folder. The record's
+provenance names the capability, whose package must still be installed
+**only when the preview must be rebuilt**: when `<asset>.preview.json` is
+missing or older than the asset, facet calls the runner's `preview` verb,
+and with the package gone it fails with `not_installed` and the hint
+`facet pull <package>`. A preview file that is not older than its asset is
+fresh: facet shows it as it is, installed package or not, because the
+finished piece already holds everything the viewer needs.
 
 ## Agent form: `facet preview <asset> --json`
 
@@ -112,3 +114,80 @@ URL only; `--port` and `--idle-timeout` do nothing for a document.
 $ facet preview out/thesis.pdf --no-open
 file:///home/facet/out/thesis.pdf
 ```
+
+## Folder form: `facet preview <folder>`
+
+`facet preview <folder>`, or `facet preview` in the folder you are in,
+collects every asset below the folder, recursively, that has a sibling
+`.facet.json` record, and sorts them by their path relative to the folder.
+No runner ever starts in this form: each asset's `.preview.json` is
+classified, and nothing else runs.
+
+- `fresh` — the preview file is not older than the asset;
+- `stale` — the preview file is older than the asset;
+- `missing` — there is no preview file.
+
+`--kind image|audio|video|document|text|cad` keeps one kind. A folder that
+holds no assets — after the filter — is `invalid_input`, exit 2, and the
+message names the folder.
+
+### Agent form: `facet preview <folder> --json`
+
+Nothing is opened and no server starts. The data is `{"folder", "assets"}`:
+the folder's name and one entry per asset, in order:
+
+```json
+{"folder": "pieces",
+ "assets": [
+   {"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image",
+    "created": "2026-11-12T10:04:11Z", "duration_s": null, "kind": "image",
+    "preview": {"preview": 1, "kind": "image", "summary": "a boxed product"},
+    "preview_state": "fresh", "verified": true},
+   {"asset": "voices/intro.wav", "bytes": 911020, "capability": "speak.voice",
+    "created": "2026-11-12T10:09:52Z", "duration_s": 4.25, "kind": "audio",
+    "preview": null, "preview_state": "stale", "verified": false}
+ ]}
+```
+
+`kind`, `capability`, `created`, `bytes` and `duration_s` come from the
+record (`duration_s` is null when the record states none); `verified` is
+true only when the record's check passed; `preview` is the parsed preview
+file for a fresh asset and null otherwise.
+
+### The gallery
+
+A person gets one server on 127.0.0.1, read-only, serving exactly these
+routes:
+
+| route | what it serves |
+| --- | --- |
+| `/gallery/…` | the registry snapshot's `viewers/gallery/`; the page printed is `/gallery/index.html` |
+| `/kit/…` | the shared kit, as for one asset |
+| `/gallery.json` | `{"folder", "assets"}`: one card per asset, in order |
+| `/thumb/<n>` | the asset itself for an image, otherwise the first image of its fresh preview, otherwise 404 |
+| `/open/<n>` | for a fresh card, makes it the current asset and answers 302 to `/viewer/index.html?asset=<name>`; a `document` is served as the PDF itself; otherwise 404 |
+| `/viewer/…` | the current asset's viewer, as for one asset |
+| `/asset/<name>` | the current asset's own files, as for one asset |
+
+A card carries the `--json` fields without `preview`, plus `n` (the index
+the routes use), `name` and `package` (from the record), `thumb` and
+`open` (a route, or null). A stale or missing card has `open: null`, and
+the page shows the command that fixes it — `facet preview <asset path>` —
+which rebuilds the preview when the package is installed.
+
+One asset is current at a time: opening a second card replaces it, so a
+tab left on the earlier asset stops loading its files, and both `/viewer/`
+and `/asset/` answer 404 before any `/open/<n>`.
+
+```console
+$ facet preview ~/facet-verify/pieces --no-open
+http://127.0.0.1:39651/gallery/index.html
+```
+
+Off a terminal — `facet preview <folder> | less`, or a script — the cards
+are printed as JSON and no server starts. When the snapshot has no
+`viewers/gallery/index.html` (an older snapshot) the person gets a plain
+table of the same list and facet exits 0.
+
+`--no-open`, `--port` and `--idle-timeout` mean what they mean for one
+asset: the same server, the same opener, the same idle stop.

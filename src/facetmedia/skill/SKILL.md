@@ -21,6 +21,7 @@ facet doctor <capability>               # can this machine run it
 facet license accept <model> --yes      # when the doctor asks for it
 facet run <capability> <piece> --json   # make the asset; the record judges it
 facet preview <asset> --json            # read a failed asset before fixing it
+facet preview <folder> --json           # every recorded asset below it, with its preview state
 facet check <asset>                     # re-judge one asset after a fix
 ```
 

@@ -1,10 +1,16 @@
-"""``facet preview``: show one asset through its viewer, or to an agent as data.
+"""``facet preview``: show one asset through its viewer, or a folder as a gallery.
 
 An agent asks with ``--json`` and gets the asset's record, its parsed
 ``<asset>.preview.json`` and the preview's image paths; nothing is opened
 and no server starts. A person gets the capability's viewer (a static web
 app from the registry's ``viewers/`` directory), served by facet on
 127.0.0.1 and opened in the system browser.
+
+A folder — or no argument, meaning the current directory — is previewed as
+one gallery over every asset below it that has a sibling record. Folder
+mode never runs a runner: an asset whose preview is fresh is shown without
+its package, and one whose preview must be rebuilt is a card that names
+the command which fixes it.
 
 The preview file is written by the package runner's ``preview`` verb and
 refreshed whenever it is missing or older than the asset. The core carries
@@ -29,10 +35,30 @@ from urllib.parse import quote
 from facetmedia import env, record, registry, runner
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
-from facetmedia.preview_server import Site, make_server, serve
+from facetmedia.preview_folder import (
+    FRESH,
+    KINDS,
+    PREVIEW_SUFFIX,
+    FolderAsset,
+    collect,
+    entry_data,
+    gallery_data,
+    load_preview,
+    preview_images,
+    preview_state,
+    text_table,
+)
+from facetmedia.preview_server import (
+    GallerySite,
+    Site,
+    make_gallery_server,
+    make_server,
+    serve,
+)
 from facetmedia.registry import Capability, Package
 
 __all__ = [
+    "KINDS",
     "PREVIEW_SUFFIX",
     "execute",
     "open_url",
@@ -41,32 +67,39 @@ __all__ = [
 
 logger = logging.getLogger("facetmedia")
 
-#: ``echo.txt`` -> ``echo.txt.preview.json``, beside the asset.
-PREVIEW_SUFFIX: Final[str] = ".preview.json"
-
 #: How many page images ``--json`` may carry before it truncates documents.
 PAGE_LIMIT: Final[int] = 10
 
+#: The preview's image files, kept as ``_images`` for this module's callers.
+_images = preview_images
+#: The parsed preview file, kept as ``_load_preview`` for this module's callers.
+_load_preview = load_preview
+
 
 def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], int]:
-    """Preview one asset; returns the ``--json`` data and the exit code."""
+    """Preview one asset or a folder; returns the ``--json`` data and the exit code."""
+    target = getattr(args, "asset", None)
+    if target is None:
+        return _folder_mode(args, Path.cwd())
+    given = Path(target)
+    if given.is_dir():
+        return _folder_mode(args, Path(os.path.abspath(given)))
+    return _single_mode(args, run_id)
+
+
+def _single_mode(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], int]:
+    """One asset: the fresh preview on disk, or a rebuilt one; then show it."""
     home = Home.from_env()
+    asset_path = _asset_path(args.asset)
     stored = record.read_record(args.asset)
     capability_id = _capability_of(stored, args.asset)
-    capability, package = _resolve(capability_id)
-    if not env.is_installed(package, home):
-        raise FacetError(
-            "not_installed",
-            f"{package.name} {package.version} is not installed",
-            hint=f"facet pull {package.name}",
-            details={"package": package.name, "version": package.version},
-        )
-    asset_path = _asset_path(args.asset)
-    params = _params_of(stored, args.asset)
     preview_file = asset_path.parent / (asset_path.name + PREVIEW_SUFFIX)
-    preview_data = _ensure_preview(
-        package, home, run_id, capability_id, params, asset_path, preview_file
-    )
+    if preview_state(asset_path, preview_file) == FRESH:
+        preview_data = _load_preview(preview_file)
+    else:
+        preview_data = _rebuilt_preview(
+            home, run_id, capability_id, stored, asset_path, preview_file
+        )
     images = _images(preview_data, asset_path.parent)
     _mark_truncated(preview_data)
     shown = images[:PAGE_LIMIT] if isinstance(preview_data.get("pages"), list) else images
@@ -78,8 +111,84 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     }
     if bool(getattr(args, "json", False)):
         return data, 0
-    _show(args, preview_data, capability, asset_path, preview_file, images)
+    _show(args, preview_data, _capability(capability_id), asset_path, preview_file, images)
     return data, 0
+
+
+def _rebuilt_preview(
+    home: Home,
+    run_id: str,
+    capability_id: str,
+    stored: Mapping[str, object],
+    asset_path: Path,
+    preview_file: Path,
+) -> dict[str, object]:
+    """The runner's fresh preview: the package must be installed to rebuild."""
+    _capability_record, package = _resolve(capability_id)
+    if not env.is_installed(package, home):
+        raise FacetError(
+            "not_installed",
+            f"{package.name} {package.version} is not installed",
+            hint=f"facet pull {package.name}",
+            details={"package": package.name, "version": package.version},
+        )
+    params = _params_of(stored, str(asset_path))
+    return _ensure_preview(package, home, run_id, capability_id, params, asset_path, preview_file)
+
+
+def _folder_mode(args: argparse.Namespace, folder: Path) -> tuple[dict[str, object], int]:
+    """Every recorded asset below ``folder``, as data, a table or a gallery."""
+    kinds = _kind_filter(getattr(args, "kind", None))
+    entries = collect(folder, kinds)
+    name = folder.name
+    if bool(getattr(args, "json", False)):
+        return {"folder": name, "assets": [entry_data(entry) for entry in entries]}, 0
+    gallery_root = registry.registry_dir() / "viewers" / "gallery"
+    if not (gallery_root / "index.html").is_file():
+        print(text_table(entries, name))
+        return gallery_data(entries, name), 0
+    if not _is_tty():
+        print(json.dumps(gallery_data(entries, name), indent=2, sort_keys=True))
+        return gallery_data(entries, name), 0
+    _serve_gallery(args, entries, gallery_root, name)
+    return gallery_data(entries, name), 0
+
+
+def _kind_filter(kind: object) -> frozenset[str] | None:
+    """The ``--kind`` value as a one-element filter, or ``None`` for every kind."""
+    return frozenset({str(kind)}) if isinstance(kind, str) and kind else None
+
+
+def _is_tty() -> bool:
+    """Whether a person is watching stdout."""
+    return sys.stdout.isatty()
+
+
+def _serve_gallery(
+    args: argparse.Namespace,
+    entries: tuple[FolderAsset, ...],
+    gallery_root: Path,
+    folder_name: str,
+) -> None:
+    """Serve the cards and their assets on 127.0.0.1 until Ctrl+C or idle."""
+    site = GallerySite(
+        gallery_root=gallery_root,
+        kit_root=gallery_root.parent / "_kit",
+        folder_name=folder_name,
+        assets=entries,
+    )
+    try:
+        server = make_gallery_server(getattr(args, "port", None), site)
+    except OSError as exc:
+        raise FacetError(
+            "invalid_input", f"cannot serve the preview: {exc}", details={"port": args.port}
+        ) from exc
+    url = f"http://127.0.0.1:{server.server_address[1]}/gallery/index.html"
+    print(url, flush=True)
+    if not bool(getattr(args, "no_open", False)):
+        open_url(url)
+    with contextlib.suppress(KeyboardInterrupt):
+        serve(server, float(getattr(args, "idle_timeout", 600.0)))
 
 
 def _resolve(capability_id: str) -> tuple[Capability, Package]:
@@ -93,6 +202,11 @@ def _resolve(capability_id: str) -> tuple[Capability, Package]:
             f"{capability_id}: its package {capability.package} is not in the registry",
         )
     return capability, package
+
+
+def _capability(capability_id: str) -> Capability:
+    """The capability alone: showing a fresh preview needs no package."""
+    return registry.load_active_registry().capability(capability_id)
 
 
 def _capability_of(stored: Mapping[str, object], asset: str) -> str:
@@ -181,46 +295,6 @@ def _ensure_preview(
     return preview_data
 
 
-def _load_preview(preview_file: Path) -> dict[str, object]:
-    """The parsed preview file, which must be a JSON object."""
-    try:
-        text = preview_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise FacetError(
-            "invalid_input", f"{preview_file}: the runner wrote no preview file"
-        ) from exc
-    try:
-        loaded: object = json.loads(text)
-    except ValueError as exc:
-        raise FacetError("invalid_input", f"{preview_file}: the preview is not JSON") from exc
-    if not isinstance(loaded, dict):
-        raise FacetError("invalid_input", f"{preview_file}: the preview is not a JSON object")
-    return {str(key): value for key, value in loaded.items()}
-
-
-def _images(preview: Mapping[str, object], asset_dir: Path) -> list[Path]:
-    """The preview's image files: absolute paths strictly inside ``asset_dir``.
-
-    The ``images`` entries, every view's ``file`` and the document ``pages``
-    count; anything outside the asset's directory, or not a file, is ignored.
-    """
-    names: list[str] = []
-    raw_images = preview.get("images")
-    if isinstance(raw_images, list):
-        names.extend(item for item in raw_images if isinstance(item, str))
-    raw_views = preview.get("views")
-    if isinstance(raw_views, list):
-        for view in raw_views:
-            if isinstance(view, Mapping):
-                file_value = view.get("file")
-                if isinstance(file_value, str):
-                    names.append(file_value)
-    raw_pages = preview.get("pages")
-    if isinstance(raw_pages, list):
-        names.extend(item for item in raw_pages if isinstance(item, str))
-    return _inside(names, asset_dir)
-
-
 def _mark_truncated(preview: dict[str, object]) -> None:
     """Flag a document preview whose pages exceed the ``--json`` page limit."""
     raw_pages = preview.get("pages")
@@ -230,34 +304,6 @@ def _mark_truncated(preview: dict[str, object]) -> None:
     if not isinstance(count, int):
         count = len(raw_pages)
     preview["truncated"] = bool(count > PAGE_LIMIT)
-
-
-def _inside(names: list[str], asset_dir: Path) -> list[Path]:
-    """The named files that resolve inside ``asset_dir``, deduplicated."""
-    try:
-        base = asset_dir.resolve()
-    except OSError:
-        return []
-    found: list[Path] = []
-    for name in names:
-        candidate = _resolve_image(name, asset_dir, base)
-        if candidate is not None and candidate not in found:
-            found.append(candidate)
-    return found
-
-
-def _resolve_image(name: str, asset_dir: Path, base: Path) -> Path | None:
-    """One image name as an absolute path, or ``None`` when unusable."""
-    if not name or name.startswith("/") or ".." in Path(name).parts:
-        return None
-    try:
-        resolved = (asset_dir / name).resolve()
-        resolved.relative_to(base)
-    except (OSError, ValueError):
-        return None
-    if not resolved.is_file():
-        return None
-    return resolved
 
 
 def _show(
