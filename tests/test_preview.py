@@ -213,7 +213,7 @@ def test_person_no_open_never_opens(
 
 
 def _trio_site(directory: Path) -> Site:
-    """An asset dir with the echo trio, two listed images and an unlisted file."""
+    """An asset dir with the echo trio, listed images (one nested) and an unlisted file."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "echo.txt").write_text("hellohello", encoding="utf-8")
     (directory / "echo.txt.facet.json").write_text('{"record": 1}', encoding="utf-8")
@@ -227,6 +227,8 @@ def _trio_site(directory: Path) -> Site:
     (directory / "echo.txt.preview.json").write_text(json.dumps(preview), encoding="utf-8")
     (directory / "shot.png").write_bytes(b"\x89PNG-shot")
     (directory / "plate.png").write_bytes(b"\x89PNG-plate")
+    (directory / "sub").mkdir(exist_ok=True)
+    (directory / "sub" / "page.png").write_bytes(b"\x89PNG-page")
     (directory / "other.txt").write_text("unlisted", encoding="utf-8")
     return Site(
         viewer_root=VIEWERS / "generic",
@@ -239,6 +241,7 @@ def _trio_site(directory: Path) -> Site:
                 "echo.txt.preview.json",
                 "shot.png",
                 "plate.png",
+                "sub/page.png",
             }
         ),
     )
@@ -281,6 +284,7 @@ def test_server_serves_only_its_three_roots(tmp_path: Path) -> None:
             "/asset/echo.txt.preview.json",
             "/asset/shot.png",
             "/asset/plate.png",
+            "/asset/sub/page.png",
         ):
             assert _get(port, path) == HTTP_OK, path
         assert _get_type(port, "/viewer/index.html") == "text/html; charset=utf-8"
@@ -288,6 +292,7 @@ def test_server_serves_only_its_three_roots(tmp_path: Path) -> None:
         for path in (
             "/asset/other.txt",
             "/asset/gone.png",
+            "/asset/page.png",
             "/asset/",
             "/asset",
             "/nope",
@@ -462,6 +467,23 @@ def test_preview_port_conflict_is_invalid_input(
     finally:
         blocker.close()
     assert "cannot serve" in capsys.readouterr().err
+
+
+def test_asset_names_keep_the_preview_subdirectory(tmp_path: Path) -> None:
+    """A page under ``preview/`` is served by that path, not by its basename."""
+    asset_dir = tmp_path / "assets"
+    (asset_dir / "preview").mkdir(parents=True)
+    asset = asset_dir / "doc.pdf"
+    asset.write_bytes(b"%PDF-1.4")
+    preview_file = asset_dir / "doc.pdf.preview.json"
+    preview_file.write_text('{"pages": ["preview/page-01.png"]}', encoding="utf-8")
+    (asset_dir / "preview" / "page-01.png").write_bytes(b"\x89PNG-page")
+    preview = {"pages": ["preview/page-01.png"]}
+
+    names = preview_module._asset_names(asset, preview_file, preview)
+
+    assert "preview/page-01.png" in names
+    assert "page-01.png" not in names
 
 
 def test_images_keeps_only_files_inside_the_asset_dir(tmp_path: Path) -> None:

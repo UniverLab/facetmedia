@@ -37,6 +37,7 @@ __all__ = [
     "preview_images",
     "preview_state",
     "refreshed",
+    "served_names",
     "text_table",
 ]
 
@@ -341,13 +342,33 @@ def _thumb(
     return images[0] if images else None
 
 
+def served_names(preview: Mapping[str, object], asset_dir: Path) -> list[str]:
+    """The preview's images as paths relative to ``asset_dir``, for the server.
+
+    A page image may live one directory down (a deck's ``preview/page-01.png``),
+    so the name the server serves keeps that subdirectory; one that cannot be
+    made relative to the asset's directory is skipped.
+    """
+    try:
+        base = asset_dir.resolve()
+    except OSError:
+        return []
+    names: list[str] = []
+    for path in preview_images(preview, asset_dir):
+        try:
+            names.append(path.relative_to(base).as_posix())
+        except ValueError:
+            continue
+    return names
+
+
 def _asset_names(
     asset_path: Path, preview_file: Path, preview: Mapping[str, object] | None
 ) -> frozenset[str]:
-    """The file names the viewer may fetch from this asset's directory."""
+    """The paths the viewer may fetch from this asset's directory."""
     names = [asset_path.name, record.record_path(asset_path).name, preview_file.name]
     if preview is not None:
-        names.extend(path.name for path in preview_images(preview, asset_path.parent))
+        names.extend(served_names(preview, asset_path.parent))
     return frozenset(names)
 
 

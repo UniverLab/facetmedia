@@ -4,7 +4,9 @@ An agent asks with ``--json`` and gets the asset's record, its parsed
 ``<asset>.preview.json`` and the preview's image paths; nothing is opened
 and no server starts. A person gets the capability's viewer (a static web
 app from the registry's ``viewers/`` directory), served by facet on
-127.0.0.1 and opened in the system browser.
+127.0.0.1 and opened in the system browser. Every kind takes that route,
+a ``document`` included: its PDF is served at ``/asset/<name>`` beside the
+page images, so a WSL browser reaches it as an http URL.
 
 A folder — or no argument, meaning the current directory — is previewed as
 one gallery over every asset below it that has a sibling record. Folder
@@ -47,6 +49,7 @@ from facetmedia.preview_folder import (
     load_preview,
     preview_images,
     preview_state,
+    served_names,
     text_table,
 )
 from facetmedia.preview_server import (
@@ -110,7 +113,7 @@ def _single_mode(args: argparse.Namespace, run_id: str) -> tuple[dict[str, objec
     }
     if bool(getattr(args, "json", False)):
         return data, 0
-    _show(args, preview_data, _capability(capability_id), asset_path, preview_file, images)
+    _show(args, preview_data, _capability(capability_id), asset_path, preview_file)
     return data, 0
 
 
@@ -218,16 +221,12 @@ def _show(
     capability: Capability,
     asset_path: Path,
     preview_file: Path,
-    images: list[Path],
 ) -> None:
-    """Show the asset to a person.
+    """Show the asset to a person through its capability's viewer, served by facet.
 
-    A document opens the PDF itself in the system browser; every other
-    kind gets the capability's viewer, served by facet.
+    Every kind, documents included, opens the same viewer URL on 127.0.0.1:
+    a ``file://`` URL to the asset is never handed to the system opener.
     """
-    if capability.kind == "document":
-        _show_document(args, asset_path)
-        return
     viewer_root = registry.registry_dir() / "viewers" / (capability.viewer or "generic")
     if not (viewer_root / "index.html").is_file():
         viewer_root = registry.registry_dir() / "viewers" / "generic"
@@ -238,7 +237,7 @@ def _show(
         viewer_root=viewer_root,
         kit_root=registry.registry_dir() / "viewers" / "_kit",
         asset_dir=asset_path.parent,
-        asset_names=_asset_names(asset_path, preview_file, images),
+        asset_names=_asset_names(asset_path, preview_file, preview_data),
     )
     try:
         server = make_server(getattr(args, "port", None), site)
@@ -257,22 +256,12 @@ def _show(
         serve(server, float(getattr(args, "idle_timeout", 600.0)))
 
 
-def _show_document(args: argparse.Namespace, asset_path: Path) -> None:
-    """Open the document asset itself in the system browser, not a viewer.
-
-    The PDF is the person's preview: the URL is on stdout even when no
-    opener can start.
-    """
-    url = asset_path.resolve().as_uri()
-    print(url, flush=True)
-    if not bool(getattr(args, "no_open", False)):
-        open_url(url)
-
-
-def _asset_names(asset_path: Path, preview_file: Path, images: list[Path]) -> frozenset[str]:
-    """The file names the viewer may fetch from the asset's directory."""
+def _asset_names(
+    asset_path: Path, preview_file: Path, preview: Mapping[str, object]
+) -> frozenset[str]:
+    """The paths, relative to the asset's directory, the viewer may fetch."""
     names = [asset_path.name, record.record_path(asset_path).name, preview_file.name]
-    names.extend(path.name for path in images)
+    names.extend(served_names(preview, asset_path.parent))
     return frozenset(names)
 
 

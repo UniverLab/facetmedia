@@ -276,19 +276,24 @@ def test_concurrent_opens_serialize(
     assert state == {"active": 0, "peak": 1, "calls": 2}
 
 
-def test_open_of_a_document_serves_the_pdf(
+def test_open_of_a_document_redirects_to_its_viewer(
     facet_home: Path, gallery: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A built document card serves the PDF itself, with no redirect."""
+    """A built document card redirects to its viewer like every other kind."""
     assert facet_home.is_dir()
     calls: list[dict[str, object]] = []
     _ok_calls(monkeypatch, calls)
     with _running(_site(gallery)) as port:
-        status, headers, body = _get(port, "/open/2")
-        assert status == HTTP_OK
-        assert headers["Content-Type"] == "application/pdf"
-        assert body == b"x" * 10
-        assert _get(port, "/viewer/index.html")[0] != HTTP_OK
+        status, headers, _body = _get(port, "/open/2")
+        viewer, _viewer_headers, viewer_body = _get(port, "/viewer/index.html")
+        pdf, pdf_headers, pdf_body = _get(port, "/asset/doc.pdf")
+        assert status == HTTP_FOUND
+        assert headers["Location"] == "/viewer/index.html?asset=doc.pdf"
+        assert viewer == HTTP_OK
+        assert b"generic viewer" in viewer_body
+        assert pdf == HTTP_OK
+        assert pdf_headers["Content-Type"] == "application/pdf"
+        assert pdf_body == b"x" * 10
         assert _cards(port)[2]["preview_state"] == "fresh"
 
 

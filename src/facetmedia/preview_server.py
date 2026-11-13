@@ -70,8 +70,9 @@ _JSON_TYPE: Final[str] = "application/json"
 class Site:
     """The three roots one preview server may read.
 
-    ``asset_names`` are the only file names served from ``asset_dir``: the
-    asset, its record, its preview file and the preview's images.
+    ``asset_names`` are the only paths served from ``asset_dir``, relative to
+    it: the asset, its record, its preview file and the preview's images,
+    which may sit one directory down (``preview/page-01.png``).
     """
 
     viewer_root: Path
@@ -264,9 +265,9 @@ class _GalleryHandler(_FileHandler):
     def _open(self, server: GalleryServer, raw: str) -> bool:
         """Make one card current, building its preview first when stale.
 
-        A ``document`` is served as its own file; every other kind redirects
-        to its viewer. A failed build answers 500 and leaves the card as it
-        was; an uninstallable card is 404.
+        Every kind, a ``document`` included, redirects to its viewer; the
+        asset's own bytes stay on ``/asset/<name>``. A failed build answers
+        500 and leaves the card as it was; an uninstallable card is 404.
         """
         entry = _entry_at(server.site.assets, raw)
         if entry is None:
@@ -278,8 +279,6 @@ class _GalleryHandler(_FileHandler):
             if built is None:
                 return False
             entry = built
-        if entry.kind == "document":
-            return self._send_file(entry.path)
         viewer_root = _viewer_root(entry.capability)
         if viewer_root is None:
             return False
@@ -333,7 +332,7 @@ class _GalleryHandler(_FileHandler):
         if server.current is None:
             return False
         entry = server.current[0]
-        if not name or "/" in name or name not in entry.asset_names:
+        if not name or name.startswith("/") or name not in entry.asset_names:
             return False
         return self._file(entry.path.parent, name)
 
@@ -410,7 +409,7 @@ def _resolve(site: Site, raw_path: str) -> Path | None:
         return _under(site.kit_root, decoded[len("/kit/") :])
     if decoded.startswith("/asset/"):
         name = decoded[len("/asset/") :]
-        if not name or "/" in name or name not in site.asset_names:
+        if not name or name.startswith("/") or name not in site.asset_names:
             return None
         return _under(site.asset_dir, name)
     return None

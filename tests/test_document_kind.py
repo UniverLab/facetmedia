@@ -2,15 +2,17 @@
 
 ``pull`` installs the stub bookbinder and fetches the shared browser it
 declares; ``run`` binds a stub PDF whose page count is one integer input;
-``preview`` renders page PNGs and the ``pages`` preview file (agent) and
-opens the PDF itself (person); ``check`` trusts the package's ``verify``
-verb to fail on a page-count mismatch.
+``preview`` renders page PNGs under ``preview/`` and the ``pages`` preview
+file (agent) and serves the viewer (person); ``check`` trusts the
+package's ``verify`` verb to fail on a page-count mismatch.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import shutil
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +29,8 @@ PAGE_COUNT = 11
 SHORT_PAGES = 2
 IMAGE_LIMIT = 10
 EXIT_VERIFICATION_FAILED = 3
+HTTP_OK = 200
+HTTP_NOT_FOUND = 404
 REVISION_REQUEST = f"/builds/cft/{BROWSER_VERSION}/linux64/chrome-linux64.zip"
 
 
@@ -202,8 +206,8 @@ PAGED_RUNNER = '''"""The paged fixture package's runner: the document-kind stub.
 `run` binds `doc.pdf`, a stub PDF whose last data line is its page
 count; `verify` counts rendered page PNGs beside the asset (falling
 back to the PDF's marker) and compares against the record; `preview`
-renders one stub page PNG per page and the `pages` preview file;
-`doctor` answers at both depths.
+renders one stub page PNG per page under `preview/` and the `pages`
+preview file; `doctor` answers at both depths.
 """
 
 from __future__ import annotations
@@ -262,7 +266,9 @@ def preview(req: Request) -> dict[str, Any]:
     entries = []
     for path in req.assets:
         pages = _marker_pages(path)
-        names = [f"page-{number:02d}.png" for number in range(1, pages + 1)]
+        pages_dir = req.out_dir / "preview"
+        pages_dir.mkdir(exist_ok=True)
+        names = [f"preview/page-{number:02d}.png" for number in range(1, pages + 1)]
         for name in names:
             (req.out_dir / name).write_bytes(b"\\x89PNG stub\\n")
         preview_file = f"{path.name}.preview.json"
@@ -310,7 +316,7 @@ def _pdf(pages: int) -> str:
 
 def _fresh_pages(path: Path) -> int:
     """The stub's page count: rendered page PNGs when there are any."""
-    rendered = sorted(path.parent.glob("page-*.png"))
+    rendered = sorted(path.parent.glob("preview/page-*.png"))
     if rendered:
         return len(rendered)
     return _marker_pages(path)
@@ -390,7 +396,7 @@ def test_preview_json_carries_pages_and_truncates(
     assert isinstance(preview, dict)
     assert preview["page_count"] == PAGE_COUNT
     assert len(preview["pages"]) == PAGE_COUNT
-    assert preview["pages"][0] == "page-01.png"
+    assert preview["pages"][0] == "preview/page-01.png"
     assert preview["truncated"] is True
     images = [Path(str(name)) for name in data["images"]]
     assert all(path.is_file() for path in images)
@@ -409,24 +415,67 @@ def test_preview_json_of_a_short_book_is_not_truncated(
     assert preview["truncated"] is False
 
 
-def test_person_preview_opens_the_pdf_itself(
+def _fetch(port: int, path: str) -> tuple[int, str, bytes]:
+    """One GET against the preview server: status, content type, body."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        content_type = response.getheader("Content-Type") or ""
+        return response.status, content_type, response.read()
+    finally:
+        connection.close()
+
+
+def test_person_preview_serves_the_viewer(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
     facet_home: Paged,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A document opens the asset's file URL; no viewer server starts."""
-    opened: list[str] = []
+    """A document is served like every other kind: an http URL, never a file URL.
 
-    def _fail_serve(*args: object, **kwargs: object) -> Any:
-        raise AssertionError("a document never starts a viewer server")
+    The viewer, the PDF and the pages under ``preview/`` answer from the
+    server the person was handed; a ``file:`` URL never reaches the opener.
+    """
+    opened: list[str] = []
+    served: dict[str, tuple[int, str, bytes]] = {}
+
+    def _serve_and_fetch(server: Any, _timeout: float) -> None:
+        thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        )
+        thread.start()
+        try:
+            for path in (
+                "/viewer/index.html",
+                "/asset/doc.pdf",
+                "/asset/preview/page-01.png",
+                "/asset/page-01.png",
+            ):
+                served[path] = _fetch(server.server_address[1], path)
+        finally:
+            server.shutdown()
+            thread.join(timeout=10)
+            server.server_close()
 
     monkeypatch.setattr(preview_module, "open_url", lambda url: opened.append(str(url)))
-    monkeypatch.setattr(preview_module, "serve", _fail_serve)
+    monkeypatch.setattr(preview_module, "serve", _serve_and_fetch)
     asset = _book(capsys, tmp_path, PAGE_COUNT, preview=True)
     assert main(["preview", str(asset)]) == 0
-    assert len(opened) == 1
-    assert opened[0].startswith("file://") and opened[0].endswith("/doc.pdf")
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert lines[0] == opened[0]
+    assert lines[0].startswith("http://127.0.0.1:")
+    assert "/viewer/index.html?asset=doc.pdf" in lines[0]
+    assert not any(url.startswith("file:") for url in opened)
+    assert served["/viewer/index.html"][0] == HTTP_OK
+    assert served["/asset/doc.pdf"][0] == HTTP_OK
+    assert served["/asset/doc.pdf"][1] == "application/pdf"
+    assert served["/asset/doc.pdf"][2].startswith(b"%PDF-1.4")
+    assert served["/asset/preview/page-01.png"][0] == HTTP_OK
+    assert served["/asset/preview/page-01.png"][1] == "image/png"
+    assert served["/asset/page-01.png"][0] == HTTP_NOT_FOUND
 
 
 def test_check_fails_after_a_page_goes_missing(
@@ -434,7 +483,7 @@ def test_check_fails_after_a_page_goes_missing(
 ) -> None:
     """Verify counts the rendered pages; a missing page fails the verdict."""
     asset = _book(capsys, tmp_path, PAGE_COUNT, preview=True)
-    (asset.parent / "page-11.png").unlink()
+    (asset.parent / "preview" / "page-11.png").unlink()
     code, data = _argv(capsys, "check", str(asset))
     assert code == EXIT_VERIFICATION_FAILED
     assert data["passed"] is False

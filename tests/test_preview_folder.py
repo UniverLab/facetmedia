@@ -117,11 +117,12 @@ def pieces(tmp_path: Path) -> Path:
     _preview(root / "a/first.png", {"preview": 1, "kind": "image", "summary": "a"}, 5)
     _record(root / "b/first.png", "image", status="failed", duration=DURATION_S)
     _preview(root / "b/first.png", {"preview": 1, "kind": "image", "summary": "b"}, -5)
-    (root / "c/page-01.png").write_bytes(b"\x89PNG-page")
+    (root / "c" / "preview").mkdir(parents=True, exist_ok=True)
+    (root / "c" / "preview" / "page-01.png").write_bytes(b"\x89PNG-page")
     _record(root / "c/doc.pdf", "document")
     _preview(
         root / "c/doc.pdf",
-        {"preview": 1, "kind": "document", "page_count": 1, "pages": ["page-01.png"]},
+        {"preview": 1, "kind": "document", "page_count": 1, "pages": ["preview/page-01.png"]},
         5,
     )
     _record(root / "d/notes.txt", "text")
@@ -225,7 +226,7 @@ def test_folder_json_lists_every_recorded_asset(
     assert all(set(entry) == ENTRY_KEYS for entry in entries)
     assert entries[0]["preview"] == {"preview": 1, "kind": "image", "summary": "a"}
     assert entries[1]["preview"] is None
-    assert entries[2]["preview"]["pages"] == ["page-01.png"]
+    assert entries[2]["preview"]["pages"] == ["preview/page-01.png"]
     assert entries[4]["preview"] is None
 
 
@@ -425,13 +426,29 @@ def test_open_and_thumb_reject_digits_they_cannot_read(
             assert _get(port, path)[0] == HTTP_NOT_FOUND, path
 
 
-def test_open_of_a_document_serves_the_pdf_itself(pieces: Path, gallery_registry: Path) -> None:
+def test_open_of_a_document_redirects_to_its_viewer(pieces: Path, gallery_registry: Path) -> None:
     with _running(_site(pieces, gallery_registry)) as port:
-        status, headers, body = _get(port, "/open/2")
-        assert _get(port, "/viewer/index.html")[0] == HTTP_NOT_FOUND
+        status, headers, _body = _get(port, "/open/2")
+        viewer, _viewer_headers, viewer_body = _get(port, "/viewer/index.html")
+        pdf_status, pdf_headers, pdf_body = _get(port, "/asset/doc.pdf")
+    assert status == HTTP_FOUND
+    assert headers["Location"] == "/viewer/index.html?asset=doc.pdf"
+    assert viewer == HTTP_OK
+    assert b"generic viewer" in viewer_body
+    assert pdf_status == HTTP_OK
+    assert pdf_headers["Content-Type"] == "application/pdf"
+    assert pdf_body == b"x" * 10
+
+
+def test_open_a_document_serves_pages_under_preview(pieces: Path, gallery_registry: Path) -> None:
+    """The deck runner writes its pages to ``preview/``: that path is served."""
+    with _running(_site(pieces, gallery_registry)) as port:
+        assert _get(port, "/open/2")[0] == HTTP_FOUND
+        status, headers, body = _get(port, "/asset/preview/page-01.png")
+        assert _get(port, "/asset/page-01.png")[0] == HTTP_NOT_FOUND
     assert status == HTTP_OK
-    assert headers["Content-Type"] == "application/pdf"
-    assert body == b"x" * 10
+    assert headers["Content-Type"] == "image/png"
+    assert body == b"\x89PNG-page"
 
 
 def test_gallery_path_traversal_is_not_found(pieces: Path, gallery_registry: Path) -> None:

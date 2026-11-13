@@ -19,8 +19,9 @@ $ facet preview out/take-voice.wav --port 8901 --idle-timeout 60
 $ facet preview ~/facet-verify/pieces              # the whole folder, as a gallery
 ```
 
-One kind is different: for a `document` asset the person form opens the
-PDF itself — see [the document exception](#person-form-facet-preview-asset).
+One kind needs its own words, not its own route: a `document` asset is
+previewed through its capability's viewer like everything else — see
+[documents](#documents).
 
 The argument names the asset, its record, or a folder. The record's
 provenance names the capability, whose package must still be installed
@@ -59,8 +60,10 @@ review blocker — see the [schemas README](https://github.com/UniverLab/facetme
 ### Document pages
 
 A `document` preview writes the PDF's page images, one PNG per page in
-page order, as its `pages` list plus a `page_count`. The agent form rides
-them on the same `images` array, at most
+page order, as its `pages` list plus a `page_count`. The names are paths
+relative to the asset's directory, so the deck runner's pages are
+`preview/page-01.png`, `preview/page-02.png`, and so on. The agent form
+rides them on the same `images` array, at most
 10 pages; past 10, the `preview` object carries `truncated: true` and the
 rest of the pages never reach the agent — it still sees them through
 `preview.pages`, so judging the text layout of a 300-page thesis means
@@ -68,8 +71,8 @@ asking the package for what pages matter, not facet for the whole book:
 
 ```json
 {"asset": "assets/thesis.pdf", "record": {"name": "thesis", "kind": "document", "…": "the full record"},
- "preview": {"kind": "document", "preview": 1, "page_count": 11, "pages": ["page-01.png", "…", "page-11.png"], "summary": "a footnoted draft", "truncated": true},
- "images": ["/abs/out/page-01.png", "…", "/abs/out/page-10.png"]}
+ "preview": {"kind": "document", "preview": 1, "page_count": 11, "pages": ["preview/page-01.png", "…", "preview/page-11.png"], "summary": "a footnoted draft", "truncated": true},
+ "images": ["/abs/out/preview/page-01.png", "…", "/abs/out/preview/page-10.png"]}
 ```
 
 ## Person form: `facet preview <asset>`
@@ -103,17 +106,22 @@ the viewers live in the registry's
 [`viewers/`](https://github.com/UniverLab/facetmedia-registry/blob/main/viewers/README.md),
 one directory per kind with a `_kit/` shared between them.
 
-### The document exception
+### Documents
 
-A `document` asset needs no viewer: the person preview is the PDF itself.
-Facet prints its `file://` URL — the asset's own path, not a local
-server — and opens it with the same platform opener; the `pages` PNGs are
-for agents, and no viewer starts for the person. `--no-open` prints the
-URL only; `--port` and `--idle-timeout` do nothing for a document.
+A `document` asset is served like every other kind: through the same
+single-asset server, with its capability's viewer — `generic` until a
+document viewer of its own exists. Facet prints and opens the server's
+`http://127.0.0.1:<port>/viewer/index.html?asset=<name>` URL; never a
+`file://` URL, which a WSL browser cannot open. The PDF itself is served
+beside it at `/asset/<name>` as `application/pdf`, so the browser renders
+it inline, and its page images are served at `/asset/preview/page-NN.png`
+for a package that writes them under `preview/`:
 
 ```console
 $ facet preview out/thesis.pdf --no-open
-file:///home/facet/out/thesis.pdf
+http://127.0.0.1:39651/viewer/index.html?asset=thesis.pdf
+$ curl -s -o /dev/null -D - http://127.0.0.1:39651/asset/thesis.pdf | grep -i content-type
+content-type: application/pdf
 ```
 
 ## Folder form: `facet preview <folder>`
@@ -167,7 +175,7 @@ writes nothing but the preview a card builds on `/open/<n>`:
 | `/kit/…` | the shared kit, as for one asset |
 | `/gallery.json` | `{"folder", "assets"}`: one card per asset, in order |
 | `/thumb/<n>` | the asset itself for an image, otherwise the first image of its fresh preview, otherwise 404 |
-| `/open/<n>` | makes the card the current asset and answers 302 to `/viewer/index.html?asset=<name>` — a `document` is served as the PDF itself — building the preview first when it is `stale` or `missing` and its package is installed; a failed build answers 500 with a plain-text body naming the asset and the runner's error, and leaves the card; otherwise 404 |
+| `/open/<n>` | makes the card the current asset and answers 302 to `/viewer/index.html?asset=<name>`, a `document` included, building the preview first when it is `stale` or `missing` and its package is installed; a failed build answers 500 with a plain-text body naming the asset and the runner's error, and leaves the card; otherwise 404 |
 | `/viewer/…` | the current asset's viewer, as for one asset |
 | `/asset/<name>` | the current asset's own files, as for one asset |
 

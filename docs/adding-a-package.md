@@ -383,10 +383,12 @@ document package needs all of it: the schema, `run`, `verify`, `preview`
 
 The agent preview is the schema's `document.preview.json`: the runner's
 `preview` verb produces one PNG per page, in page order, into the asset's
-directory, and writes `pages` (the list of PNG names) and `page_count`:
+directory — the deck runner writes them under `preview/` — and writes
+`pages` (the list of PNG names, relative to the asset's directory) and
+`page_count`:
 
 ```json
-{"preview": 1, "kind": "document", "summary": "…", "page_count": 12, "pages": ["page-01.png", "…", "page-12.png"]}
+{"preview": 1, "kind": "document", "summary": "…", "page_count": 12, "pages": ["preview/page-01.png", "…", "preview/page-12.png"]}
 ```
 
 The runner renders the pages itself: the reference mechanism is the
@@ -395,9 +397,10 @@ shared [browser artifact](#browser-artifact) this manifest declares via
 installs no renderer of its own — no system poppler, no PDF library in
 facet itself; the pages are the browser's work, produced by the package.
 
-To a person, `facet preview` of a document opens the PDF itself: facet
-prints the asset's `file://` URL and opens it with the platform opener,
-there is no viewer and no server (see
+To a person, `facet preview` of a document serves its viewer on
+127.0.0.1 like every other kind — the generic viewer until a document
+viewer exists — with the PDF at `/asset/<name>` as `application/pdf` and
+the pages at `/asset/preview/page-NN.png` (see
 [preview.md](preview.md)). To an agent, the page PNGs ride the `--json`
 `images` array, at most 10 pages, with `truncated` marking an 11+-page
 book.

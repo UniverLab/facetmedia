@@ -694,9 +694,10 @@ have examples.
 Shows one asset, or a whole folder as one gallery: to an agent as data, to
 a person through the capability's viewer — see [preview.md](preview.md).
 The preview never starts the package's server, even for a capability with
-`verify_uses_server = true`. A `document` asset is different: its person
-preview is the PDF itself — the printed URL is the asset's `file://` path
-and the browser opens exactly that — and its `--json`
+`verify_uses_server = true`. A `document` asset takes the same route: the
+viewer is served on 127.0.0.1, the printed URL is its
+`http://127.0.0.1:<port>/viewer/index.html?asset=<name>` page — never a
+`file://` URL — the PDF is served at `/asset/<name>`, and the `--json`
 `images` array carries the page PNGs, at most 10, with the `preview`
 object saying `page_count` and `truncated` one way or the other.
 
@@ -720,11 +721,11 @@ Flags: `--no-open` (print the viewer URL only), `--port PORT`,
 $ facet preview assets/canopy.txt --json
 {"contract": 1, "data": {"asset": "assets/canopy.txt", "images": [], "preview": {"fields": {"columns": 60, "font": "dos_rebel", "rows": 9}, "kind": "text", "preview": 1, "summary": "DOS Rebel · 60×9"}, "record": {"name": "canopy", "kind": "text", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
 $ facet preview out/thesis.pdf --json              # a document: pages ride on images
-{"contract": 1, "data": {"asset": "out/thesis.pdf", "images": ["/abs/out/page-01.png", "…", "/abs/out/page-10.png"], "preview": {"kind": "document", "page_count": 11, "pages": ["page-01.png", "…", "page-11.png"], "preview": 1, "summary": "a footnoted draft", "truncated": true}, "record": {"name": "thesis", "kind": "document", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"asset": "out/thesis.pdf", "images": ["/abs/out/preview/page-01.png", "…", "/abs/out/preview/page-10.png"], "preview": {"kind": "document", "page_count": 11, "pages": ["preview/page-01.png", "…", "preview/page-11.png"], "preview": 1, "summary": "a footnoted draft", "truncated": true}, "record": {"name": "thesis", "kind": "document", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
 $ facet preview assets/canopy.txt --no-open
 http://127.0.0.1:39651/viewer/index.html?asset=canopy.txt
-$ facet preview out/thesis.pdf --no-open           # a document prints its file URL
-file:///home/facet/out/thesis.pdf
+$ facet preview out/thesis.pdf --no-open           # a document: its viewer, same route
+http://127.0.0.1:39651/viewer/index.html?asset=thesis.pdf
 $ facet preview pieces --kind image --json         # a folder: one entry per asset
 {"contract": 1, "data": {"assets": [{"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image", "created": "2026-11-12T10:04:11Z", "duration_s": null, "kind": "image", "preview": {"preview": 1, "…": "the parsed preview"}, "preview_state": "fresh", "verified": true}, "…"], "folder": "pieces"}, "facet": "0.1.0b1", "ok": true}
 $ facet preview pieces --no-open                    # the gallery page, one server
