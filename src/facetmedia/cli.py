@@ -17,6 +17,7 @@ from facetmedia import (
     config,
     contract,
     doctor,
+    example,
     introspect,
     license_accept,
     licenses,
@@ -49,6 +50,7 @@ _VERBS: tuple[tuple[str, str], ...] = (
     ("doctor", "report facet, this machine's readiness and each package's doctor"),
     ("check", "re-verify an asset against its record"),
     ("run", "run a tool through the --json contract"),
+    ("example", "copy a capability's bundled example into a folder"),
     ("preview", "render a tool's output for a person"),
     ("remove", "remove an installed tool"),
     ("clean", "remove unused environments and caches"),
@@ -68,7 +70,9 @@ _CONFIG_VERBS: tuple[tuple[str, str], ...] = (
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
 # describe, preview, license list) take no lock and reject them. `check`
 # holds the lock itself, so it also rejects the flags.
-_LOCK_VERBS: frozenset[str] = frozenset({"doctor", "clean", "pull", "remove", "run", "update"})
+_LOCK_VERBS: frozenset[str] = frozenset(
+    {"doctor", "clean", "pull", "remove", "run", "update", "example"}
+)
 
 
 class FacetParser(argparse.ArgumentParser):
@@ -436,6 +440,7 @@ _HANDLERS: dict[str, Handler] = {
     "describe": _handle_describe,
     "doctor": _handle_doctor,
     "clean": _handle_gc,
+    "example": example.handle,
     "list": _handle_list,
     "preview": _handle_preview,
     "pull": _handle_pull,
@@ -815,6 +820,8 @@ def build_parser() -> FacetParser:
             _add_gc_flags(verb_parser)
         elif verb == "run":
             _add_run_flags(verb_parser)
+        elif verb == "example":
+            example.add_flags(verb_parser)
         elif verb == "preview":
             _add_preview_flags(verb_parser)
     license_parsers = _add_group(

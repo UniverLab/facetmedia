@@ -57,7 +57,7 @@ narration with kokoro:
 
 ```bash
 facet update --ref feature/v0.1
-facet run kokoro.speak packages/kokoro/examples/laboratorio.toml --out out
+facet example kokoro.speak --run
 ```
 
 `run` on a capability id is the shape of everything: it installs the

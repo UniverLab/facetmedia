@@ -31,6 +31,7 @@ The two verbs that look similar answer two different questions:
 | `facet doctor` | check facet, the tool chain and this machine | shared |
 | `facet check` | re-verify an asset against its record | per manifest |
 | `facet run` | turn a piece into verified assets with records | per manifest |
+| `facet example` | copy a capability's bundled example into a folder | none, per manifest with `--run` |
 | `facet preview` | show an asset to a person or to an agent | none |
 | `facet license` | accept and list model licences | `accept` exclusive; `list` none |
 | `facet remove` | remove an installed tool | exclusive |
@@ -590,6 +591,44 @@ piece selects needs acceptance — only the gated models the piece actually
 selects are required (see [licenses.md](licenses.md)); `5` the machine
 gate refuses; `7` `--no-pull` on an
 absent or changed package; `9` the runner crashed or broke the protocol.
+
+## `facet example`
+
+Copies a capability's bundled example — a working piece the package ships
+under `examples/` in the registry snapshot — into a folder, with every
+file and folder its inputs reference, so a person has something to run
+and preview. The destination defaults to `./<capability with dots as
+dashes>`; an existing non-empty destination fails instead of mixing.
+
+```console
+$ facet example kokoro.speak
+laboratorio.toml
+facet run kokoro.speak /home/you/work/kokoro-speak/laboratorio.toml --out /home/you/work/kokoro-speak/out
+```
+
+The destination prints resolved to an absolute path, so the next command
+runs as-is from anywhere.
+
+The printed files are what was copied, then the exact next command.
+`--list` prints every example of the capability instead of copying, and
+`--name NAME` copies the example with that file stem. With `--run` facet
+also runs that next command — through the same code path as `facet run`,
+which installs a missing package — and with a terminal it then previews
+the first asset exactly as `facet preview` shows it. `--out DIR` picks
+the asset directory for `--run` (default `<dest>/out`); `--no-open`
+passes through to the preview.
+
+With `--json`, `data` carries `dest`, `piece` and `files`, and with
+`--run` it adds the run's data under `data.run` and stops there.
+
+Lock: none for the copy; with `--run` the run takes the lock per the
+package manifest, like `facet run` itself.
+
+Exit codes: `0` clean (with `--run`, the run's exit code); `2` an unknown
+capability, a capability with no example, an `--name` with no example of
+that stem, or an existing non-empty destination — the no-example message
+names the capability and lists the capabilities of that package that do
+have examples.
 
 ## `facet preview`
 

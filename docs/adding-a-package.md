@@ -42,6 +42,25 @@ facet reads this layout offline from one pinned commit (see
 validate <dir>` loads every part and reports **every** problem at once;
 run it before opening the pull request — the registry's CI does the same.
 
+## Bundled examples
+
+A package may ship working pieces under `examples/` — TOML files facet's
+`example` verb copies into a folder so a person has something to run and
+preview. Each `.toml` at any depth under `examples/` is assigned to a
+capability by the first rule that applies:
+
+1. a top-level `capability = "<id>"` key in the file (`facet run` reads
+   only `[inputs]`, so the key is harmless there) — **recommend this rule
+   for new examples**, because it keeps working when stems and inputs change;
+2. the file stem equals the capability's short name (`diagram.toml` is an
+   example of `hyperframes.diagram`);
+3. its `[inputs]` validate against exactly one capability of the package,
+   through facet's existing input validation.
+
+A file that matches none, or several capabilities under rule 3, is not an
+example. Keep every file and folder an example's inputs reference beside
+the piece, so the copy still runs.
+
 ## `index.toml`
 
 ```toml
