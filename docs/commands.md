@@ -47,6 +47,23 @@ keep that line for their run log and print it with `-v`/`--verbose`.
 shared otherwise, so several light runs overlap. The asset form of `check`
 always waits with the defaults.
 
+## Help
+
+`facet --help` lists the everyday verbs under three headings — `start`,
+`make and check`, `maintain` — and closes with one line for the maintainer
+verb: `maintainers: facet registry validate <registry-dir>`.
+
+Every verb's help ends with an `examples:` section of real command lines,
+and every positional argument is named for what it takes: `facet pull
+<facet-or-package>`, `facet run <capability> <piece.toml>`, `facet license
+accept <model-id>`. Each positional's help line says where its values come
+from. A group verb's own help (`facet license --help`) carries the examples
+for its sub-verbs too.
+
+A group verb with no sub-verb (`facet license`, `facet config`, `facet
+registry`) prints that group's help and exits 2. With `--json` it prints
+the usual failure envelope, code `invalid_input`, instead.
+
 ## `facet update`
 
 Downloads the registry at one reference, resolved to one exact commit, and
@@ -525,9 +542,11 @@ changed in the registry since the pull.
 ## `facet run`
 
 The verb that makes things: `facet run <capability> <piece.toml | ->`.
-It pulls the package if needed, validates the piece against the
-capability's inputs, runs the tool in the package's own environment,
-verifies every asset, and writes the records.
+A piece is a TOML file such as `facet example <capability> <folder>`
+copies and prints the command for, or hand-written; `-` reads the piece
+as JSON on stdin instead. It pulls the package if needed, validates the
+piece against the capability's inputs, runs the tool in the package's own
+environment, verifies every asset, and writes the records.
 
 Flags: `--out DIR` (default: the piece's directory), `--no-verify`,
 `--no-pull` (fail `not_installed` instead of pulling an absent or changed

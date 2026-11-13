@@ -168,4 +168,5 @@ def test_describe_help_names_one_capability(
     assert exit_info.value.code == 0
     out = capsys.readouterr().out
     assert "show one capability's contract" in out
-    assert "registry capability id (one capability's contract)" in out
+    assert "a capability id such as ffmpeg.normalize" in out
+    assert "from `facet list" in out

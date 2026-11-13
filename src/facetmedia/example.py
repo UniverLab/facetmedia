@@ -27,11 +27,16 @@ __all__ = ["Example", "add_flags", "execute", "find_examples", "handle"]
 
 def add_flags(parser: argparse.ArgumentParser) -> None:
     """The ``facet example`` arguments: capability, dest and the copy/run flags."""
-    parser.add_argument("capability", help="registry capability id to copy an example of")
+    parser.add_argument(
+        "capability",
+        metavar="<capability>",
+        help="a capability id such as deck.slides, from `facet list --available`",
+    )
     parser.add_argument(
         "dest",
         nargs="?",
         default=None,
+        metavar="<folder>",
         help="folder to copy the example into (default: ./<capability with dots as dashes>)",
     )
     parser.add_argument(
