@@ -406,7 +406,7 @@ the pages at `/asset/preview/page-NN.png` (see
 book.
 
 The package's `verify` verb carries the kind's own contract: it parses
-the PDF, opens every page PNG beside the asset, reads the sibling record
+the PDF, opens every page PNG its preview lists, reads the sibling record
 file, and compares its fresh `page_count` metric against the recorded
 one — a missing or extra page fails the verdict, and `facet check`
 reports it. All parsing stays in the package: core dependencies are

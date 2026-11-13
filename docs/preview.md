@@ -82,9 +82,11 @@ the registry snapshot in use, at `viewers/<viewer>/`; the shared kit lives
 at `viewers/_kit/`. Facet serves them on 127.0.0.1 — a free port, or
 `--port` — read-only and only three paths: `/viewer/...` from the viewer's
 directory, `/kit/...` from the kit, and `/asset/<name>` for the asset, its
-record, its preview file and its images — nothing else beside the asset,
-and no directory listing. Any other path is 404, and so is any path with
-`..`. A failure while serving answers 500 with a short plain-text body
+record, its preview file and its images. `<name>` is a path relative to
+the asset's directory, so a deck's `preview/page-01.png` is fetched at
+`/asset/preview/page-01.png`; nothing else under that directory is served,
+there is no directory listing, and any other path is 404, as is any path
+with `..`. A failure while serving answers 500 with a short plain-text body
 and is logged to the run log; nothing is printed to the terminal.
 
 The viewer opens at `http://127.0.0.1:<port>/viewer/index.html?asset=<name>`,
