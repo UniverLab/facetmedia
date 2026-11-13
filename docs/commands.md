@@ -106,12 +106,15 @@ the builtin `main` default), the validation problem (for example a missing
 
 Installs a facet, choosing the packages of it that this machine can run.
 Name one or more facets or packages; a name that is both (today `cad`)
-means the facet.
+means the facet. A name that is neither fails with `invalid_input` (exit 2)
+and prints the names that would have worked: `facets:` with every facet and
+`packages:` with every package of the registry, both sorted. With `--json`
+the same names arrive in `error.details` instead.
 
 ```console
 $ facet pull image
-rembg 0.1.0 0.52 GB install: fits this machine
-comfy-xl 0.1.0 8.40 GB install: fits this machine
+rembg 0.1.0  disk 1.2 GB  models 0.5 GB  install: fits this machine
+comfy-xl 0.1.0  disk 8.0 GB  models 8.1 GB  install: fits this machine
 install 2 packages? [y/N] y
 installed rembg 0.1.0
 installed comfy-xl 0.1.0
@@ -123,9 +126,19 @@ order: the platform, `--cpu` against a GPU package, a missing NVIDIA GPU,
 declared VRAM and RAM, a missing host application (with the exact `facet
 config set <key> <path>` fix), and finally its tier group. Packages sharing
 a `tier_group` are alternatives of one tool; `--tier NAME` prefers that
-tier, even when it does not fit, and warns on the line when it does not.
-Without `--tier`, facet picks the member with the highest declared VRAM
-that fits, or the lowest one, skipped with its reason.
+tier, even when it does not fit: its row then reads `install (forced)` and
+its reason starts with a warning saying what it does not meet, so a forced
+install is never mistaken for a fitting one. Without `--tier`, facet picks
+the member with the highest declared VRAM that fits, or the lowest one,
+skipped with its reason.
+
+Each row carries two sizes. `disk` is the disk the package needs,
+`requirements.disk_gb`, which the registry already declares with the
+package's models included. `models` is the declared download: the sum of
+the `bytes` of the package's models that are not present yet, and `0 GB`
+when all of them are. The models size is the only declared download
+anywhere — the browser, FFmpeg, the node runtime and binary artifacts
+declare none, they are not counted, and nothing is fetched to measure them.
 
 A plan that installs more than one package is shown and confirmed with `y`
 at a terminal; any other answer installs nothing and exits 0. `--yes`
@@ -180,7 +193,10 @@ home, the pull fails before any download with `machine_cannot` (exit 5)
 and details naming the needed and free GB and each package's size. The
 `--json` result carries `data.plan`, `data.installed`, `data.skipped` and
 `data.downloaded_bytes`; when one package fails, the pull stops there and
-the summary lists what was installed before the failure.
+the summary lists what was installed before the failure. Each `data.plan`
+row carries the same two sizes as its text line — `disk_gb` and
+`model_download_bytes` — plus `install`, `forced` (true only for a tier the
+machine does not fit) and `reason`.
 
 Each package installs into `~/.facet/envs/<package>/<version>/`: a
 uv-managed Python, the exact dependency set of the package's `uv.lock`,

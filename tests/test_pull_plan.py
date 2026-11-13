@@ -20,6 +20,7 @@ from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.env.package_marker import package_fingerprint
 from facetmedia.home import Home
 from facetmedia.registry import load_registry, validate_registry
+from facetmedia.registry_types import FACETS
 
 GB = 1024**3
 IMAGE = "image"
@@ -29,6 +30,8 @@ TWO_PULLS_BYTES = 20
 ONE_PULL_BYTES = 10
 DISK_NEEDED_GB = 8
 DISK_FREE_GB = 1
+COMFY_DISK_GB = 40.0
+SHA256 = "0" * 64
 
 
 @dataclass
@@ -44,6 +47,7 @@ class Spec:
     tier_group: str = ""
     tier: str = ""
     host_app: bool = False
+    models: tuple[tuple[str, int], ...] = ()
 
 
 def write_package(root: Path, name: str, spec: Spec | None = None) -> None:
@@ -96,7 +100,28 @@ def write_package(root: Path, name: str, spec: Spec | None = None) -> None:
         f"platforms = [{listed}]",
         "",
     ]
+    lines += _model_lines(name, spec.models)
     (directory / "package.toml").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _model_lines(name: str, models: tuple[tuple[str, int], ...]) -> list[str]:
+    """One direct-url ``[[models]]`` table per ``(id, bytes)`` pair."""
+    lines: list[str] = []
+    for model_id, size in models:
+        lines += [
+            "",
+            "[[models]]",
+            f'id = "{model_id}"',
+            'spdx = "Apache-2.0"',
+            "commercial_use = true",
+            "requires_acceptance = false",
+            f"bytes = {size}",
+            f'url = "https://example.invalid/{name}/{model_id}.bin"',
+            f'sha256 = "{SHA256}"',
+            f'path = "{name}/{model_id}.bin"',
+            "",
+        ]
+    return lines
 
 
 def write_registry(root: Path, packages: list[str], spec: Spec | None = None) -> Path:
@@ -256,6 +281,31 @@ def test_tier_is_forced_even_when_it_does_not_fit(use_registry, monkeypatch, cap
     assert "--tier xl" in str(found["comfy-xl"]["reason"])
     assert found["comfy"]["install"] is False
     assert found["comfy"]["reason"] == "tier: chose comfy-xl"
+
+
+def test_forced_tier_marks_the_json_row(use_registry, monkeypatch, capsys) -> None:
+    root = use_registry(["comfy", "comfy-xl"], Spec(tier_group="comfy", tier="standard"))
+    write_package(root, "comfy-xl", Spec(gpu=True, vram_gb=24, tier_group="comfy", tier="xl"))
+    set_machine(monkeypatch, gpu_mib=8 * 1024, ram_gb=64.0)
+    _code, _envelope, entries = plan_of(capsys, "pull", IMAGE, "--tier", "xl", "--plan")
+    found = by_name(entries)
+    assert found["comfy-xl"]["forced"] is True
+    assert found["comfy"]["forced"] is False
+
+
+def test_forced_tier_reads_install_forced_in_the_text_plan(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = use_registry(["comfy", "comfy-xl"], Spec(tier_group="comfy", tier="standard"))
+    write_package(root, "comfy-xl", Spec(gpu=True, vram_gb=24, tier_group="comfy", tier="xl"))
+    set_machine(monkeypatch, gpu_mib=8 * 1024, ram_gb=64.0)
+    assert main(["pull", IMAGE, "--tier", "xl", "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "comfy-xl 0.1.0  disk 1.0 GB  models 0 GB  install (forced): "
+        "warning: --tier xl forced it: needs 24 GB VRAM, this machine has 8.00 GB\n"
+    ) in out
+    assert "install: fits this machine" not in out
 
 
 def test_missing_tier_keeps_the_automatic_choice(use_registry, monkeypatch, capsys) -> None:
@@ -419,6 +469,102 @@ def test_unknown_name_lists_facets_and_packages(use_registry, monkeypatch, capsy
     details = envelope["error"]["details"]
     assert "image" in details["facets"]
     assert details["packages"] == ["a"]
+
+
+EXPECTED_FACETS = "facets: audio, cad, image, presentation, text, video, voice"
+
+
+@pytest.mark.parametrize("argv", [["pull", "nope"], ["pull", "--package", "nope"]])
+def test_unknown_name_text_lists_the_valid_names_sorted(
+    use_registry, monkeypatch, capsys, argv: list[str]
+) -> None:
+    use_registry(["zeta", "alpha"])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    assert main(argv) == EXIT_CODES["invalid_input"]
+    captured = capsys.readouterr()
+    lines = captured.err.splitlines()
+    assert sorted(FACETS) == ["audio", "cad", "image", "presentation", "text", "video", "voice"]
+    assert lines[0].endswith("nope")
+    assert lines[1] == EXPECTED_FACETS
+    assert lines[2] == "packages: alpha, zeta"
+    assert captured.out == ""
+
+
+def test_plan_row_shows_disk_and_the_models_to_download(use_registry, monkeypatch, capsys) -> None:
+    models = (("present-model", GB // 2), ("missing-model", 3 * GB // 2))
+    use_registry(["comfy"], Spec(disk_gb=COMFY_DISK_GB, models=models))
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    _make_models_present(monkeypatch, {"present-model"})
+    _code, _envelope, entries = plan_of(capsys, "pull", IMAGE, "--plan")
+    entry = entries[0]
+    assert entry["disk_gb"] == COMFY_DISK_GB
+    assert entry["model_download_bytes"] == 3 * GB // 2
+    assert "bytes" not in entry
+    assert entry["forced"] is False
+
+
+def test_plan_text_row_prints_both_sizes(use_registry, monkeypatch, capsys) -> None:
+    models = (("present-model", GB // 2), ("missing-model", 3 * GB // 2))
+    use_registry(["comfy"], Spec(disk_gb=COMFY_DISK_GB, models=models))
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    _make_models_present(monkeypatch, {"present-model"})
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    assert main(["pull", IMAGE, "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert out == "comfy 0.1.0  disk 40.0 GB  models 1.5 GB  install: fits this machine\n"
+    assert calls == []
+
+
+def test_plan_text_row_prints_no_models_when_all_are_present(
+    use_registry, monkeypatch, capsys
+) -> None:
+    models = (("present-model", GB // 2),)
+    use_registry(["comfy"], Spec(disk_gb=COMFY_DISK_GB, models=models))
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    _make_models_present(monkeypatch, {"present-model"})
+    _code, _envelope, entries = plan_of(capsys, "pull", IMAGE, "--plan")
+    assert entries[0]["model_download_bytes"] == 0
+    assert main(["pull", IMAGE, "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert "  disk 40.0 GB  models 0 GB  install: fits this machine\n" in out
+
+
+ENTRY_KEYS = {"name", "version", "disk_gb", "model_download_bytes", "install", "forced", "reason"}
+
+
+def test_plan_json_row_carries_exactly_the_new_keys(use_registry, monkeypatch, capsys) -> None:
+    use_registry(["a"])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    _code, _envelope, entries = plan_of(capsys, "pull", IMAGE, "--plan")
+    assert set(entries[0]) == ENTRY_KEYS
+
+
+def test_confirmation_required_details_carry_the_two_sizes(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = use_registry(["a", "b"], Spec(disk_gb=COMFY_DISK_GB))
+    write_package(root, "b", Spec(disk_gb=COMFY_DISK_GB, models=(("b-model", GB),)))
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    _make_models_present(monkeypatch, set())
+    code = main(["pull", IMAGE, "--json"])
+    envelope = json.loads(capsys.readouterr().out)
+    assert code == EXIT_CONFIRMATION
+    rows = by_name(envelope["error"]["details"]["plan"])
+    assert rows["a"]["model_download_bytes"] == 0
+    assert rows["b"]["model_download_bytes"] == GB
+    for row in rows.values():
+        assert row["disk_gb"] == COMFY_DISK_GB
+        assert "bytes" not in row
+
+
+def _make_models_present(monkeypatch: pytest.MonkeyPatch, present: set[str]) -> None:
+    """Patch presence by model id, so no model file has to be written."""
+    monkeypatch.setattr(
+        plan.env,
+        "model_present",
+        lambda model, home, verify=False: model.id in present,
+    )
 
 
 @pytest.mark.parametrize(

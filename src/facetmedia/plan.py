@@ -49,6 +49,8 @@ class PlanEntry:
     install: bool
     reason: str
     noop: bool = False
+    model_download_bytes: int = 0
+    forced: bool = False
 
     @property
     def name(self) -> str:
@@ -62,18 +64,14 @@ class PlanEntry:
     def disk_gb(self) -> float:
         return self.package.requirements.disk_gb
 
-    @property
-    def total_bytes(self) -> int:
-        models = sum(model.bytes for model in self.package.models)
-        return int(self.package.requirements.disk_gb * GB) + models
-
     def as_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
             "version": self.version,
             "disk_gb": self.disk_gb,
-            "bytes": self.total_bytes,
+            "model_download_bytes": self.model_download_bytes,
             "install": self.install,
+            "forced": self.forced,
             "reason": self.reason,
         }
 
@@ -101,7 +99,12 @@ def resolve(registry: Registry, names: list[str], packages: list[str]) -> list[P
     for name in packages:
         package = registry.package(name)
         if package is None:
-            raise FacetError("invalid_input", f"unknown package: {name}", details=_known(registry))
+            raise FacetError(
+                "invalid_input",
+                f"unknown package: {name}",
+                hint=_unknown_hint(registry),
+                details=_known(registry),
+            )
         selected.append(package)
     return _unique(selected)
 
@@ -111,6 +114,13 @@ def _known(registry: Registry) -> dict[str, object]:
     return {"facets": list(FACETS), "packages": sorted(registry.packages)}
 
 
+def _unknown_hint(registry: Registry) -> str:
+    """The valid names, one line each, for the text error of a typo."""
+    facets = ", ".join(sorted(FACETS))
+    packages = ", ".join(sorted(registry.packages))
+    return f"facets: {facets}\npackages: {packages}"
+
+
 def _from_name(registry: Registry, name: str) -> list[Package]:
     """A facet's packages when ``name`` is a facet (even if a package shares it)."""
     if name in FACETS:
@@ -118,7 +128,10 @@ def _from_name(registry: Registry, name: str) -> list[Package]:
     package = registry.package(name)
     if package is None:
         raise FacetError(
-            "invalid_input", f"unknown facet or package: {name}", details=_known(registry)
+            "invalid_input",
+            f"unknown facet or package: {name}",
+            hint=_unknown_hint(registry),
+            details=_known(registry),
         )
     return [package]
 
@@ -143,12 +156,26 @@ def build_plan(packages: list[Package], home: Home, cpu: bool, tier: str | None)
 
 def decide(package: Package, home: Home, machine: Machine) -> PlanEntry:
     """One package against the machine: skip reason first, then installed state."""
+    entry = PlanEntry(
+        package,
+        install=True,
+        reason=FITS,
+        model_download_bytes=_missing_model_bytes(package, home),
+    )
     reason = requirement_reason(package, machine, home)
     if reason:
-        return PlanEntry(package, install=False, reason=reason)
+        return replace(entry, install=False, reason=reason)
     if env.is_installed(package, home) and not env.package_stale(package, home):
-        return PlanEntry(package, install=True, reason=ALREADY, noop=True)
-    return PlanEntry(package, install=True, reason=FITS)
+        return replace(entry, reason=ALREADY, noop=True)
+    return entry
+
+
+def _missing_model_bytes(package: Package, home: Home) -> int:
+    """The declared ``bytes`` of the models not yet present; never fetched to size.
+
+    A backend-owned model is always present, so its declared bytes never count.
+    """
+    return sum(model.bytes for model in package.models if not env.model_present(model, home, False))
 
 
 def requirement_reason(package: Package, machine: Machine, home: Home) -> str:
@@ -225,6 +252,7 @@ def _winner_entry(entry: PlanEntry, tier: str, forced: bool, unmatched: bool) ->
             entry,
             install=True,
             noop=False,
+            forced=True,
             reason=f"warning: --tier {tier} forced it: {entry.reason}",
         )
     if not unmatched:
@@ -392,9 +420,24 @@ def _confirmed(
 
 def _print_plan(entries: list[PlanEntry]) -> None:
     for entry in entries:
-        state = "install" if entry.install else "skip"
-        size = entry.total_bytes / GB
-        print(f"{entry.name} {entry.version} {size:.2f} GB {state}: {entry.reason}")
+        state = _state_text(entry)
+        print(
+            f"{entry.name} {entry.version}  disk {entry.disk_gb:.1f} GB  "
+            f"models {_models_text(entry.model_download_bytes)}  "
+            f"{state}: {entry.reason}"
+        )
+
+
+def _state_text(entry: PlanEntry) -> str:
+    """The row's state, with forced tiers spelled out so nobody misses them."""
+    if entry.forced:
+        return "install (forced)"
+    return "install" if entry.install else "skip"
+
+
+def _models_text(missing_bytes: int) -> str:
+    """``0 GB`` for nothing missing, else the download size in GB."""
+    return "0 GB" if missing_bytes == 0 else f"{missing_bytes / GB:.1f} GB"
 
 
 def _install_all(
