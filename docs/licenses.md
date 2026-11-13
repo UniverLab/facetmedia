@@ -15,13 +15,13 @@ the command to run. No environment variable accepts licences.
 ## Accepting
 
 ```bash
-facet license accept            # at a terminal: pick from the pending ones
-facet license accept <model>    # name one; facet asks in the terminal
-facet license accept <model> --yes   # an agent the person directs
-facet license list              # every model that requires acceptance
+facet license accept               # at a terminal: pick from the pending ones
+facet license accept <model-id>    # name one; facet asks for the id back
+facet license accept <model-id> --yes   # an agent the person directs
+facet license list                 # every model that requires acceptance
 ```
 
-`facet license accept <model>` runs the flow below. For an unaccepted
+`facet license accept <model-id>` runs the flow below. For an unaccepted
 model `termsy-weights` under CC-BY-NC-4.0, the listing reads:
 
     termsy-weights CC-BY-NC-4.0 not accepted
