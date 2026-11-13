@@ -619,13 +619,16 @@ the asset directory for `--run` (default `<dest>/out`); `--no-open`
 passes through to the preview.
 
 With `--json`, `data` carries `dest`, `piece` and `files`, and with
-`--run` it adds the run's data under `data.run` and stops there.
+`--run` it adds the run's data under `data.run` and stops there; a
+`--list` answer carries `capability` and `examples` instead, each example
+with its `piece` stem and registry `path`.
 
 Lock: none for the copy; with `--run` the run takes the lock per the
-package manifest, like `facet run` itself.
+package manifest, like `facet run` itself. The copy accepts the lock
+waiting flags only because `--run` passes them through to the run.
 
 Exit codes: `0` clean (with `--run`, the run's exit code); `2` an unknown
-capability, a capability with no example, an `--name` with no example of
+capability, a capability with no example, a `--name` with no example of
 that stem, or an existing non-empty destination — the no-example message
 names the capability and lists the capabilities of that package that do
 have examples.
