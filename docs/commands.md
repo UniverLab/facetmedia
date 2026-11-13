@@ -151,7 +151,9 @@ keys (`package`, `version`, `env`, `python`, `already_installed`,
 there.
 
 With no facet and no `--package` at a terminal, `facet pull` opens a
-wizard instead of failing: it prints facet's banner, the detected machine
+wizard instead of failing: it prints facet's banner — the facetMedia word
+on one line in DOS Rebel while its widest line fits the terminal, in the
+narrower TheDraw font ansiltr4 otherwise — the detected machine
 (GPU and VRAM, RAM, free disk under the facet home, and each host app),
 and every facet with its package count and this machine's plan for it.
 Facets with at least one installable package start selected; already
