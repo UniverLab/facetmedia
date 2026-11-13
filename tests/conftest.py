@@ -25,6 +25,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 @pytest.fixture(autouse=True)
 def _facet_home_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+    # No test may reach the network by accident: the update check is off unless
+    # a test deletes this variable to exercise it against a fake server.
+    monkeypatch.setenv("FACET_NO_UPDATE_CHECK", "1")
 
 
 @pytest.fixture

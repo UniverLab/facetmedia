@@ -103,6 +103,9 @@ def test_pull_echo_installs_then_reports_already_installed(
     assert data["downloaded_bytes"] == 0
     assert data["models"] == []
     assert (env_dir / ".complete").read_text(encoding="utf-8") == package.lock_sha256
+    entry = json.loads(home.state_file("installed.json").read_text(encoding="utf-8"))
+    assert entry["echo"]["version"] == "0.1.0"
+    assert entry["echo"]["registry_commit"] == ""
     run = subprocess.run(
         [str(env_dir / "venv" / "bin" / "python"), "-c", "import sys; print(sys.version_info[:2])"],
         capture_output=True,

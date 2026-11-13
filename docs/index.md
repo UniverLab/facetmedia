@@ -99,7 +99,7 @@ FACET_HOME=/data/facet`. The directory is created on first use:
 ├── python/              # uv-managed Python interpreters
 ├── registry/            # extracted registry snapshots (one dir per commit)
 ├── servers/             # pinned tool checkouts, one per package version and rev
-├── state/               # registry.json, leftovers.json, licenses.json, lock files
+├── state/               # registry.json, installed.json, update-check.json, leftovers.json, licenses.json, lock files
 └── tmp/                 # scratch, same filesystem, for atomic renames
 ```
 
@@ -114,6 +114,36 @@ and deleting that directory by hand is the only way to discard it. Every
 invocation leaves a debug log under `logs/<YYYY-MM-DD>/<run-id>.log`, and
 state files are written through atomic renames, so a machine that powers off
 mid-write keeps its state.
+
+## Package versions and update notices
+
+Versions are per package, never per facet. A successful pull records the
+version it installed in `state/installed.json`, whatever the package's engine;
+`facet remove` deletes the entry. The installed version of a package is its
+entry's version, or — for a package installed before facet kept that file —
+the snapshot's version when the package is installed.
+
+`facet list` shows each package's version in the snapshot and, for an
+installed package, the installed version; when they differ it adds
+`update: <installed> → <snapshot>`. `--json` carries `installed_version` and
+`update_available` per package.
+
+While facet is being used — `pull`, `run`, `check`, `preview`, `list` and
+`doctor` — it also looks for newer versions, at most once every 24 hours and
+within a 3-second budget. It resolves the ref `facet update` pinned and reads
+each installed package's manifest at that commit; when a version is newer, a
+terminal gets one line on stderr after the verb's own output:
+
+```
+updates: comfy 0.1.0 → 0.2.0, moss 0.1.0 → 0.1.1 — run facet update, then facet pull --package <name>
+```
+
+With `--json` the same news travels in the envelope's optional `notices` list.
+A failed check says nothing and is retried after an hour. Nothing updates by
+itself: the pinned registry is what keeps an asset reproducible, so installing
+the newer version is always a person's `facet update` and `facet pull
+--package <name>`. `FACET_NO_UPDATE_CHECK=1` disables the check and the
+notice.
 
 ## The registry and how it is pinned
 

@@ -71,10 +71,18 @@ def default_ref() -> str:
     return os.environ.get("FACET_REGISTRY_REF") or DEFAULT_REF
 
 
-def resolve_ref(ref: str) -> str:
-    """Resolve a branch, tag, or 40-hex commit to the commit it names."""
+def resolve_ref(ref: str, timeout: float = TIMEOUT_S) -> str:
+    """Resolve a branch, tag, or 40-hex commit to the commit it names.
+
+    ``timeout`` bounds the request; the update check passes the time it has
+    left, everything else keeps the default.
+    """
     url = f"{_base('FACET_GITHUB_API', API_BASE)}/repos/{REPO}/commits/{_quote(ref)}"
-    answer = _get(url, accept="application/vnd.github.sha").decode("utf-8", "replace").strip()
+    answer = (
+        _get(url, accept="application/vnd.github.sha", timeout=timeout)
+        .decode("utf-8", "replace")
+        .strip()
+    )
     if not is_commit(answer):
         raise FacetError(
             "download_failed",
@@ -226,18 +234,20 @@ def _headers(accept: str | None) -> dict[str, str]:
     return headers
 
 
-def _get(url: str, accept: str | None = None) -> bytes:
+def _get(url: str, accept: str | None = None, timeout: float = TIMEOUT_S) -> bytes:
     """Fetch ``url`` and return its body."""
-    with _opened(url, accept) as response:
+    with _opened(url, accept, timeout) as response:
         return bytes(response.read())
 
 
 @contextlib.contextmanager
-def _opened(url: str, accept: str | None) -> Iterator[http.client.HTTPResponse]:
+def _opened(
+    url: str, accept: str | None, timeout: float = TIMEOUT_S
+) -> Iterator[http.client.HTTPResponse]:
     """Open ``url``, turning every network failure into ``download_failed``."""
     request = urllib.request.Request(url, headers=_headers(accept))
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             yield response
     except urllib.error.HTTPError as exc:
         rate_limited = _rate_limit_error(url, exc)

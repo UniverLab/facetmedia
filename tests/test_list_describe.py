@@ -109,11 +109,11 @@ def test_human_list_available_is_grouped_by_facet(
     assert main(["list", "--available"]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "text:",
-        "  echo  light",
+        "  echo  light  0.1.0",
         "    echo.text  text  Echo text back, repeated.",
-        "  future  cpu-heavy",
+        "  future  cpu-heavy  0.1.0",
         "    future.thing  text  A capability from the future.",
-        "  termsy  cpu-heavy",
+        "  termsy  cpu-heavy  0.1.0",
         "    termsy.make  text  Make one termsy asset.",
     ]
 
@@ -135,6 +135,8 @@ def test_fake_installed_echo_is_listed_alone(
     rows = data["packages"]
     assert [row["name"] for row in rows] == ["echo"]
     assert rows[0]["installed"] is True
+    assert rows[0]["installed_version"] == "0.1.0"
+    assert rows[0]["update_available"] is False
     assert data["available"] == _available_counts()
     # env_bytes is tree_bytes(<env>): the 64-byte .complete marker plus the
     # 7-byte payload file.
@@ -142,7 +144,8 @@ def test_fake_installed_echo_is_listed_alone(
 
     assert main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "text:\n  echo  light  [installed]\n    echo.text  text  Echo text back, repeated.\n"
+        "text:\n  echo  light  0.1.0  installed 0.1.0\n"
+        "    echo.text  text  Echo text back, repeated.\n"
     )
 
 

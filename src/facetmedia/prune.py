@@ -30,6 +30,7 @@ from typing import Final
 import uv
 
 from facetmedia import env as env_module
+from facetmedia import installed as installed_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, atomic_write_json, read_json, uv_env
 from facetmedia.registry import override_dir, snapshot_commit
@@ -166,6 +167,7 @@ def rm_env(home: Home, name: str, version: str) -> None:
     """Delete one environment and its package directory when it becomes empty."""
     _delete(home.env_dir(name, version))
     _rmdir_if_empty(home.envs_dir / name)
+    installed_module.forget(home, name)
 
 
 def rm_package(
@@ -187,6 +189,7 @@ def rm_package(
         removed.append(str(version_dir))
         _delete(version_dir)
     _rmdir_if_empty(home.envs_dir / name)
+    installed_module.forget(home, name)
     servers = home.servers_dir / name
     if servers.exists():
         freed += dir_bytes(servers)

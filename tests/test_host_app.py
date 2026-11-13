@@ -473,6 +473,14 @@ def test_pull_downloads_nothing_and_is_installed(
     assert data["downloaded_bytes"] == 0
     assert env_module.is_installed(world.package(), home) is True
     assert not (home.env_dir(PACKAGE, "0.1.0") / ".complete").exists()
+    entry = json.loads(home.state_file("installed.json").read_text(encoding="utf-8"))
+    assert entry[PACKAGE]["version"] == "0.1.0"
+    assert entry[PACKAGE]["registry_commit"] == ""
+
+    code, _envelope = _json(capsys, "remove", PACKAGE)
+
+    assert code == 0
+    assert PACKAGE not in json.loads(home.state_file("installed.json").read_text(encoding="utf-8"))
 
 
 # --- the runner: injected flags, their order, and failing scripts.

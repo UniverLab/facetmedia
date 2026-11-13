@@ -50,6 +50,12 @@ An unhealthy `facet doctor` is the exception: it prints `ok:false` **with**
 `data` and no `error` (`data.healthy` is `false`), and exits with the first
 failing class, so the envelope and the exit code always agree.
 
+A success envelope may also carry an optional top-level `notices` list, present
+only when it is not empty. Today its only kind is `{"kind": "update",
+"package", "installed", "available"}`: an installed package has a newer version
+in the registry. It never changes `data`, `ok` or the exit code; installing it
+is the person's `facet update` and `facet pull --package <name>`.
+
 Branch on the exit code, not the prose:
 
 | Exit | Code | When |

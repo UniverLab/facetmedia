@@ -29,6 +29,7 @@ from facetmedia import (
     registry,
     run,
     update,
+    updates,
 )
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
@@ -368,48 +369,16 @@ def _announce_gc(data: dict[str, object]) -> None:
 
 
 def _handle_list(args: argparse.Namespace) -> int:
-    """A light verb: the registry snapshot and the home, no lock, no network."""
+    """A light verb: the registry snapshot and the home, no lock.
+
+    The update check this invocation may have run is the only network it
+    touches, and its answer never changes this output.
+    """
     data = introspect.list_data(args.available, args.facet)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
-        _announce_list(data, args.available, args.facet)
+        introspect.announce_list(data, args.available, args.facet)
     return 0
-
-
-def _announce_list(data: dict[str, object], available: bool, facet: str | None) -> None:
-    printed = False
-    for group in FACETS:
-        rows = [
-            package
-            for package in _packages(data)
-            if isinstance(package, dict) and package.get("facet") == group
-        ]
-        if not rows:
-            continue
-        printed = True
-        print(f"{group}:")
-        for package in sorted(rows, key=lambda row: str(row.get("name", ""))):
-            suffix = "  [installed]" if package.get("installed") is True else ""
-            print(f"  {package.get('name')}  {package.get('weight')}{suffix}")
-            capabilities = package.get("capabilities")
-            for capability in capabilities if isinstance(capabilities, list) else []:
-                if not isinstance(capability, dict):
-                    continue
-                print(
-                    f"    {capability.get('id')}  {capability.get('kind')}  "
-                    f"{capability.get('summary')}"
-                )
-    if not printed and not available:
-        print(_no_packages_line(facet))
-
-
-def _no_packages_line(facet: str | None) -> str:
-    if facet is None:
-        return "no packages installed; `facet list --available` shows the registry's"
-    return (
-        f"no {facet} packages installed; "
-        f"`facet list --available --facet {facet}` shows the registry's"
-    )
 
 
 def _handle_describe(args: argparse.Namespace) -> int:
@@ -907,7 +876,17 @@ def _run_logged(argv: list[str] | None, run_id: str) -> int:
             args.run_id = run_id
             as_json = bool(getattr(args, "json", as_json))
             handler_fn: Handler = args.handler
-            return handler_fn(args)
+            notices: list[dict[str, object]] = []
+            contract.set_notices(())
+            if getattr(args, "command", "") in updates.CHECK_VERBS:
+                notices = updates.begin(Home.from_env())
+                contract.set_notices(notices)
+            code = handler_fn(args)
+            try:
+                updates.print_notice(notices, as_json)
+            except Exception:
+                logger.exception("update notice failed")
+            return code
         except FacetError as exc:
             contract.emit(contract.failure(exc), as_json)
             return exc.exit_code

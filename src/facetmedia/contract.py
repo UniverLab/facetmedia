@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Iterable, Mapping
+from contextvars import ContextVar
 from typing import Final
 
 from facetmedia import __version__
@@ -70,13 +72,25 @@ class FacetError(Exception):
         return EXIT_CODES[self.code]
 
 
+_NOTICES: ContextVar[tuple[dict[str, object], ...]] = ContextVar("facet_notices", default=())
+
+
+def set_notices(notices: Iterable[Mapping[str, object]]) -> None:
+    """The notices ``ok`` adds to every envelope of this invocation."""
+    _NOTICES.set(tuple(dict(notice) for notice in notices))
+
+
 def ok(data: dict[str, object]) -> dict[str, object]:
-    return {
+    envelope: dict[str, object] = {
         "contract": CONTRACT_VERSION,
         "data": data,
         "facet": __version__,
         "ok": True,
     }
+    notices = _NOTICES.get()
+    if notices:
+        envelope["notices"] = list(notices)
+    return envelope
 
 
 def failure(err: FacetError) -> dict[str, object]:

@@ -33,6 +33,22 @@ released: a JSON consumer written against one version keeps parsing every
 later run of it. `facet` is the facet version. `data` holds the verb's
 result.
 
+### Notices
+
+A success envelope may carry an optional top-level `notices` list. The key is
+present only when the list is not empty; a consumer that does not know it
+keeps working.
+
+```json
+{"contract": 1, "data": {"…": "…"}, "facet": "0.1.0b1", "notices": [{"available": "0.2.0", "installed": "0.1.0", "kind": "update", "package": "comfy"}], "ok": true}
+```
+
+`kind: "update"` names an installed package whose version in the registry
+snapshot is newer than the one on disk; `installed` and `available` are those
+two versions. The notice never changes `data`, the envelope's `ok`, or the
+exit code: `facet update` pins the registry, and `facet pull --package <name>`
+installs the newer version.
+
 ### Failure
 
 ```json

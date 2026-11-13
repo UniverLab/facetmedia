@@ -13,7 +13,9 @@ import json
 import math
 from typing import Any
 
-from facetmedia import check, doctor, env, licenses, schema, skill, update
+from packaging.version import InvalidVersion, Version
+
+from facetmedia import check, doctor, env, installed, licenses, schema, skill, update
 from facetmedia.contract import CONTRACT_VERSION, FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry, snapshot_identity
@@ -28,7 +30,7 @@ from facetmedia.registry_types import (
     weight,
 )
 
-__all__ = ["describe_data", "list_data", "skill_data"]
+__all__ = ["announce_list", "describe_data", "list_data", "skill_data"]
 
 
 def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
@@ -46,8 +48,9 @@ def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
         )
     active = load_active_registry()
     home = Home.peek_env()
+    recorded = installed.entries(home)
     rows = [
-        _package_row(package, home)
+        _package_row(package, home, recorded)
         for package in sorted(active.packages.values(), key=lambda item: item.name)
     ]
     if not available:
@@ -60,6 +63,56 @@ def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
     return data
 
 
+def announce_list(data: dict[str, Any], available: bool, facet: str | None) -> None:
+    """Print ``facet list``'s text output, grouped by facet."""
+    printed = False
+    for group in FACETS:
+        rows = [package for package in _list_rows(data) if package.get("facet") == group]
+        if not rows:
+            continue
+        printed = True
+        print(f"{group}:")
+        for package in sorted(rows, key=lambda row: str(row.get("name", ""))):
+            print(_list_line(package))
+            capabilities = package.get("capabilities")
+            for capability in capabilities if isinstance(capabilities, list) else []:
+                if not isinstance(capability, dict):
+                    continue
+                print(
+                    f"    {capability.get('id')}  {capability.get('kind')}  "
+                    f"{capability.get('summary')}"
+                )
+    if not printed and not available:
+        print(_no_packages_line(facet))
+
+
+def _list_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    packages = data.get("packages")
+    if not isinstance(packages, list):
+        return []
+    return [package for package in packages if isinstance(package, dict)]
+
+
+def _list_line(package: dict[str, Any]) -> str:
+    """One package's line: name, weight, snapshot version, install and update."""
+    line = f"  {package.get('name')}  {package.get('weight')}  {package.get('version')}"
+    installed_version = package.get("installed_version")
+    if isinstance(installed_version, str):
+        line += f"  installed {installed_version}"
+    if package.get("update_available") is True:
+        line += f"  update: {installed_version} → {package.get('version')}"
+    return line
+
+
+def _no_packages_line(facet: str | None) -> str:
+    if facet is None:
+        return "no packages installed; `facet list --available` shows the registry's"
+    return (
+        f"no {facet} packages installed; "
+        f"`facet list --available --facet {facet}` shows the registry's"
+    )
+
+
 def _available_summary(active: Registry) -> dict[str, int]:
     """Whole-snapshot counts for the installed-set ``data.available``."""
     return {
@@ -69,9 +122,12 @@ def _available_summary(active: Registry) -> dict[str, int]:
     }
 
 
-def _package_row(package: Package, home: Home) -> dict[str, Any]:
-    installed = env.is_installed(package, home)
+def _package_row(
+    package: Package, home: Home, recorded: dict[str, dict[str, object]]
+) -> dict[str, Any]:
+    is_installed = env.is_installed(package, home)
     env_dir = home.env_dir(package.name, package.version)
+    installed_version = _installed_version(package, is_installed, recorded)
     return {
         "name": package.name,
         "version": package.version,
@@ -81,8 +137,10 @@ def _package_row(package: Package, home: Home) -> dict[str, Any]:
         "weight": weight(package),
         "vram_gb": package.requirements.vram_gb,
         "compatible": package.compatible,
-        "installed": installed,
-        "env_bytes": doctor.tree_bytes(env_dir) if installed else 0,
+        "installed": is_installed,
+        "installed_version": installed_version,
+        "update_available": _update_available(installed_version, package.version),
+        "env_bytes": doctor.tree_bytes(env_dir) if is_installed else 0,
         "models_bytes": sum(
             model.bytes for model in package.models if env.model_present(model, home)
         ),
@@ -91,6 +149,26 @@ def _package_row(package: Package, home: Home) -> dict[str, Any]:
             for cap in sorted(package.capabilities, key=lambda item: item.id)
         ],
     }
+
+
+def _installed_version(
+    package: Package, is_installed: bool, recorded: dict[str, dict[str, object]]
+) -> str | None:
+    """The recorded version, else the snapshot's when installed, else none."""
+    version = recorded.get(package.name, {}).get("version")
+    if isinstance(version, str) and version:
+        return version
+    return package.version if is_installed else None
+
+
+def _update_available(installed_version: str | None, snapshot_version: str) -> bool:
+    """Whether the snapshot's version is newer than the installed one."""
+    if installed_version is None:
+        return False
+    try:
+        return Version(installed_version) < Version(snapshot_version)
+    except InvalidVersion:
+        return False
 
 
 def describe_data(capability_id: str) -> dict[str, Any]:

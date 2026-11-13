@@ -32,6 +32,7 @@ import uv
 
 from facetmedia import config as config_module
 from facetmedia import doctor as doctor_module
+from facetmedia import installed as installed_module
 from facetmedia import licenses, shared
 from facetmedia.contract import FacetError
 from facetmedia.env import binary as env_binary
@@ -178,7 +179,9 @@ def pull(
     env_dir = home.env_dir(package.name, package.version)
     _print_plan(package, home, env_dir, verify_models)
     if package.host_app is not None:
-        return _pull_host_app(package, home, env_dir, started)
+        host_report = _pull_host_app(package, home, env_dir, started)
+        installed_module.record(home, package.name, package.version)
+        return host_report
     reporter = progress if progress is not None else Progress.off()
     already, environment_bytes = _environment_phase(package, home, env_dir, reporter)
     records, model_bytes = _models_phase(package, home, verify_models, reporter)
@@ -193,6 +196,7 @@ def pull(
         "seconds": round(time.monotonic() - started, 3),
         "models": records,
     }
+    installed_module.record(home, package.name, package.version)
     return _with_artifacts(report, artifact_bytes)
 
 
