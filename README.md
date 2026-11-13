@@ -52,7 +52,7 @@ packages, the first run, and how an agent starts with `facet skill`.
 | `facet check` | re-verify an asset against its record |
 | `facet run` | turn a piece file into verified assets with records |
 | `facet example` | copy a capability's bundled example into a folder, optionally running and previewing it |
-| `facet preview` | show an asset to a person through its viewer, or to an agent as data |
+| `facet preview` | show an asset, or a folder of them in one gallery, to a person or to an agent as data |
 | `facet license accept` | accept a model's terms before it may be used |
 | `facet license list` | list models that need acceptance, with status |
 | `facet registry validate` | validate a registry checkout |

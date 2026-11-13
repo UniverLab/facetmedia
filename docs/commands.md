@@ -635,12 +635,12 @@ have examples.
 
 ## `facet preview`
 
-Shows one asset: to an agent as data, to a person through the capability's
-viewer — see [preview.md](preview.md). The preview never starts the
-package's server, even for a capability with `verify_uses_server = true`.
-A `document` asset is different:
-its person preview is the PDF itself — the printed URL is the asset's
-`file://` path and the browser opens exactly that — and its `--json`
+Shows one asset, or a whole folder as one gallery: to an agent as data, to
+a person through the capability's viewer — see [preview.md](preview.md).
+The preview never starts the package's server, even for a capability with
+`verify_uses_server = true`. A `document` asset is different: its person
+preview is the PDF itself — the printed URL is the asset's `file://` path
+and the browser opens exactly that — and its `--json`
 `images` array carries the page PNGs, at most 10, with the `preview`
 object saying `page_count` and `truncated` one way or the other.
 

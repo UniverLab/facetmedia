@@ -186,8 +186,8 @@ http://127.0.0.1:39651/gallery/index.html
 
 Off a terminal — `facet preview <folder> | less`, or a script — the cards
 are printed as JSON and no server starts. When the snapshot has no
-`viewers/gallery/index.html` (an older snapshot) the person gets a plain
-table of the same list and facet exits 0.
+`viewers/gallery/index.html` (an older snapshot) the list is printed as a
+plain table instead — off a terminal too — and facet exits 0.
 
 `--no-open`, `--port` and `--idle-timeout` mean what they mean for one
 asset: the same server, the same opener, the same idle stop.
