@@ -675,8 +675,12 @@ non-empty, and the hint repeats one `<field>: <rule>` (or `<field>:
 
 With `--json` on success, `data` carries `capability`, `out_dir`,
 `pulled`, `downloaded_bytes` and one full record per asset. Failed assets
-and their records are kept so an agent can inspect them. Lock: exclusive
-or shared per the manifest.
+and their records are kept so an agent can inspect them. When an asset
+fails verification the envelope is `ok:false` with both that `data` and an
+`error` of code `verification_failed` (`details.assets` lists the failed
+asset paths, `hint` is `facet check <first failed asset>`), and the exit
+code is 3; `facet example --run` inherits the same envelope. Lock:
+exclusive or shared per the manifest.
 
 Exit codes: `0` every asset passed; `3` an asset was made but failed its
 check; `2` bad arguments, an invalid piece, an unknown capability, or an
