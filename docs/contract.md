@@ -87,6 +87,7 @@ Branch on the exit code without parsing prose:
 | `runner_failed` | 9 | the package runner crashed or broke the runner protocol |
 | `license_needs_person` | 10 | `license accept` was run without an interactive terminal |
 | `confirmation_required` | 11 | a pull installs more than one package and no interactive terminal can confirm it; rerun with `--yes` |
+| — | 130 | interrupted with Ctrl+C; prints `cancelled`, and installs or records nothing that had not already completed |
 
 Bad arguments exit 2 and, with `--json`, still print an `invalid_input`
 envelope on stdout.

@@ -40,7 +40,10 @@ complying with these terms.
 The confirmation names the exact text to type, quoted, so the person never
 has to guess the id. For `termsy-weights` it reads:
 
-    Type "termsy-weights" to accept [default: cancel]:
+    Type "termsy-weights" to accept, or press Enter to cancel:
+
+In the wizard the same question reads `Type "termsy-weights" to accept
+[default: cancel]:` instead.
 
 - The exact model id records the acceptance. Anything else records
   nothing and exits 2 with a message naming what was expected.

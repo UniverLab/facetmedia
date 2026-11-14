@@ -60,6 +60,11 @@ accept <model-id>`. Each positional's help line says where its values come
 from. A group verb's own help (`facet license --help`) carries the examples
 for its sub-verbs too.
 
+At a terminal, help is styled: `Options` and `Commands` panels, and one
+panel per verb group on the top-level help. With `NO_COLOR` set, or without
+a terminal (a pipe or a CI log), help is plain text — the same output agents
+and `--json` callers see.
+
 A group verb with no sub-verb (`facet license`, `facet config`, `facet
 registry`) prints that group's help and exits 2. With `--json` it prints
 the usual failure envelope, code `invalid_input`, instead.
@@ -140,8 +145,8 @@ when all of them are. The models size is the only declared download
 anywhere — the browser, FFmpeg, the node runtime and binary artifacts
 declare none, they are not counted, and nothing is fetched to measure them.
 
-A plan that installs more than one package is shown and confirmed with `y`
-at a terminal; any other answer installs nothing and exits 0. `--yes`
+A plan that installs more than one package is shown and asks once at a
+terminal, defaulting to no; anything but yes installs nothing and exits 0. `--yes`
 skips the question. Without a terminal, or with `--json`, such a plan
 fails with `confirmation_required` (exit 11) unless `--yes` or `--plan` is
 given. A single package installs as before, with no question: naming it
