@@ -13,6 +13,7 @@ from facetmedia.contract import (
     FacetError,
     emit,
     failure,
+    failure_with_data,
     ok,
 )
 
@@ -65,6 +66,23 @@ def test_failure_shape_defaults() -> None:
     assert isinstance(error, dict)
     assert error["hint"] is None
     assert error["details"] == {}
+
+
+def test_failure_with_data_keeps_the_data_and_the_error() -> None:
+    err = FacetError("verification_failed", "1 of 1 assets failed", hint="facet check a")
+    envelope = failure_with_data({"assets": [], "out_dir": "."}, err)
+    assert envelope == {
+        "contract": CONTRACT_VERSION,
+        "ok": False,
+        "facet": __version__,
+        "data": {"assets": [], "out_dir": "."},
+        "error": {
+            "code": "verification_failed",
+            "message": "1 of 1 assets failed",
+            "hint": "facet check a",
+            "details": {},
+        },
+    }
 
 
 def test_exit_codes_table_is_exhaustive() -> None:

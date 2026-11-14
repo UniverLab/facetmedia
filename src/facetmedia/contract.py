@@ -95,18 +95,30 @@ def ok(data: dict[str, object]) -> dict[str, object]:
     return envelope
 
 
+def _error(err: FacetError) -> dict[str, object]:
+    return {
+        "code": err.code,
+        "details": err.details,
+        "hint": err.hint,
+        "message": err.message,
+    }
+
+
 def failure(err: FacetError) -> dict[str, object]:
     return {
         "contract": CONTRACT_VERSION,
-        "error": {
-            "code": err.code,
-            "details": err.details,
-            "hint": err.hint,
-            "message": err.message,
-        },
+        "error": _error(err),
         "facet": __version__,
         "ok": False,
     }
+
+
+def failure_with_data(data: dict[str, object], err: FacetError) -> dict[str, object]:
+    """A failure that still carries the run's data (records, assets, out_dir)."""
+    envelope = ok(data)
+    envelope["ok"] = False
+    envelope["error"] = _error(err)
+    return envelope
 
 
 def emit(envelope: dict[str, object], as_json: bool) -> None:

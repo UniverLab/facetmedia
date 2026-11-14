@@ -20,6 +20,7 @@ from facetmedia.registry import load_active_registry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
+EXIT_VERIFICATION_FAILED = 3
 
 EXTRA_CAPABILITIES = """
 [capabilities.pick]
@@ -216,7 +217,7 @@ def test_json_carries_dest_piece_files(
 
 
 def _fake_run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, failed: bool = False
 ) -> dict[str, list[dict[str, object]]]:
     """Replace ``run.execute`` with a fake writing one asset; return the calls seen."""
     calls: dict[str, list[dict[str, object]]] = {"run": [], "preview": []}
@@ -227,6 +228,7 @@ def _fake_run(
         asset = out / "echo.txt"
         asset.write_text("hello", encoding="utf-8")
         calls["run"].append({"piece": str(args.piece), "run_id": run_id})
+        status = "failed" if failed else "passed"
         return (
             {
                 "capability": "echo.text",
@@ -237,11 +239,11 @@ def _fake_run(
                         "path": "echo.txt",
                         "name": "echo",
                         "kind": "text",
-                        "verification": {"status": "passed"},
+                        "verification": {"status": status},
                     }
                 ],
             },
-            0,
+            3 if failed else 0,
         )
 
     def fake_preview_execute(
@@ -267,6 +269,20 @@ def test_json_run_adds_run_data_and_stops(
     assert data["run"]["assets"][0]["name"] == "echo"
     assert data["preview_command"] == f"facet preview {dest}/out/echo.txt"
     assert calls["preview"] == []
+
+
+def test_json_run_failure_envelope(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _registry_with_examples(monkeypatch, tmp_path)
+    _fake_run(monkeypatch, tmp_path, failed=True)
+    dest = tmp_path / "run-failed"
+    assert main(["example", "echo.text", str(dest), "--run", "--json"]) == EXIT_VERIFICATION_FAILED
+    envelope = _envelope(capsys)
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "verification_failed"
+    assert envelope["error"]["details"] == {"assets": [f"{dest}/out/echo.txt"]}
+    assert envelope["data"]["run"]["assets"][0]["verification"]["status"] == "failed"
 
 
 def test_run_previews_first_asset_on_tty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

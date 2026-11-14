@@ -19,7 +19,7 @@ from typing import Any
 from facetmedia import preview as preview_module
 from facetmedia import run as run_module
 from facetmedia import schema
-from facetmedia.contract import FacetError, emit, ok
+from facetmedia.contract import FacetError, emit, failure_with_data, ok
 from facetmedia.progress import Progress, set_verbose
 from facetmedia.registry import Capability, Package, load_active_registry
 
@@ -72,7 +72,10 @@ def add_flags(parser: argparse.ArgumentParser) -> None:
 def handle(args: argparse.Namespace) -> int:
     """Copy a bundled example; ``--run`` also runs it and previews the asset."""
     data, code = execute(args, args.run_id)
-    emit(ok(data), args.json)
+    run_data = data.get("run")
+    error = run_module.verification_error(run_data) if isinstance(run_data, dict) else None
+    envelope = failure_with_data(data, error) if error is not None else ok(data)
+    emit(envelope, args.json)
     if not args.json:
         _announce(args, data)
     return code

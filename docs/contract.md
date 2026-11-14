@@ -73,6 +73,14 @@ lines. A failing `pull` or `update` also repeats the last
 20 lines of its run log on stderr, then a `log: <path>` line, with or
 without `--json` and `--verbose`; stdout stays a single JSON document.
 
+A `facet run` whose asset fails verification is `ok:false` **with** both
+`data` (the records, `assets` and `out_dir`) and an `error` of code
+`verification_failed`: `message` is `<k> of <n> assets failed verification:
+<names>`, `details.assets` lists the failed asset paths, `hint` is
+`facet check <first failed asset>`, and the exit code is 3. `facet example
+--run` inherits the same envelope. So a reader of only `ok`, or only the exit
+code, sees the failure.
+
 An unhealthy `facet doctor` is the one envelope that reports `ok:false`
 **with** `data` and no `error`: `data.healthy` is `false`, and the exit
 code is the first failing class.

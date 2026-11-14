@@ -54,6 +54,11 @@ Every verb with `--json` prints one envelope on stdout:
 {"contract": 1, "ok": false, "facet": "0.1.0b1", "error": {"code": "invalid_input", "message": "...", "details": {}, "hint": null}}
 ```
 
+A `facet run` whose asset fails verification prints `ok:false` **with** both
+`data` and `error` (`code: "verification_failed"`, `details.assets` the failed
+paths, a `facet check <first>` hint) and exits 3; `facet example --run`
+inherits it, so a reader of only `ok`, or only the exit code, sees the failure.
+
 An unhealthy `facet doctor` is the exception: it prints `ok:false` **with**
 `data` and no `error` (`data.healthy` is `false`), and exits with the first
 failing class, so the envelope and the exit code always agree.

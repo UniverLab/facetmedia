@@ -37,7 +37,7 @@ from facetmedia.registry import Capability, Field, Package, load_active_registry
 from facetmedia.registry_types import Model, capability_models
 from facetmedia.runner import Invocation, Outcome, RunAsset, VerifyResult
 
-__all__ = ["execute"]
+__all__ = ["execute", "verification_error"]
 
 logger = logging.getLogger("facetmedia")
 
@@ -123,6 +123,48 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     if gate_warnings:
         data["warnings"] = gate_warnings
     return data, exit_code
+
+
+def verification_error(data: Mapping[str, object]) -> FacetError | None:
+    """The error a run's data implies when an asset failed verification.
+
+    The caller keeps the data and reports this error, so the envelope and the
+    exit code agree. A record stores the bare file name relative to the run's
+    ``out_dir``; it is joined back so ``facet check`` resolves it.
+    """
+    assets = data.get("assets")
+    entries = (
+        [entry for entry in assets if isinstance(entry, dict)] if isinstance(assets, list) else []
+    )
+    failed: list[str] = []
+    for entry in entries:
+        ref = _failed_ref(entry, data)
+        if ref is not None:
+            failed.append(ref)
+    if not failed:
+        return None
+    return FacetError(
+        "verification_failed",
+        f"{len(failed)} of {len(entries)} assets failed verification: {', '.join(failed)}",
+        hint=f"facet check {failed[0]}",
+        details={"assets": failed},
+    )
+
+
+def _failed_ref(entry: Mapping[str, object], data: Mapping[str, object]) -> str | None:
+    """The failed asset's path, as ``facet check`` resolves it, or ``None``."""
+    verification = entry.get("verification")
+    if not isinstance(verification, Mapping) or verification.get("status") != "failed":
+        return None
+    path = entry.get("path")
+    if not isinstance(path, str):
+        return None
+    if Path(path).is_absolute():
+        return path
+    out_dir = data.get("out_dir")
+    if isinstance(out_dir, str) and out_dir:
+        return str(Path(out_dir) / path)
+    return path
 
 
 def _ephemeral(args: argparse.Namespace, package: Package, home: Home) -> bool:

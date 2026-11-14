@@ -526,8 +526,13 @@ def test_run_verify_failure_exits_3_and_keeps_asset_and_record(
     code = main(["run", "echo.text", str(piece), "--out", str(out), "--json"])
     envelope = _envelope(capsys)
     assert code == EXIT_VERIFICATION_FAILED
-    # The envelope is still ok with every record; the exit code carries the failure.
-    assert envelope["ok"] is True
+    # The envelope reports the failure and still carries every record.
+    assert envelope["ok"] is False
+    error = envelope["error"]
+    assert error["code"] == "verification_failed"
+    assert error["message"] == f"1 of 1 assets failed verification: {out}/echo.txt"
+    assert error["details"] == {"assets": [str(out / "echo.txt")]}
+    assert error["hint"] == f"facet check {out}/echo.txt"
     stored = json.loads((out / "echo.txt.facet.json").read_text(encoding="utf-8"))
     assert envelope["data"]["assets"] == [stored]
     assert (out / "echo.txt").read_text(encoding="utf-8") == "hellohello"
