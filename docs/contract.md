@@ -15,9 +15,12 @@ $ facet list --json
 
 The keys above are the examples, not the whole `data`: `facet describe`
 adds `i18n` (localized summaries keyed by language tag, `{}` when none),
-and `facet list --available` adds a `facets` map with each facet's `label`
-and `i18n` when `index.toml` declares them. Both are additive, so no
-consumer written against this version needs to change.
+`piece_example` (the capability's first bundled example piece as TOML
+text, or a synthetic minimal piece when it ships none) and `example_path`
+(that example's path relative to the package directory, `null` when the
+text is synthetic), and `facet list --available` adds a `facets` map with
+each facet's `label` and `i18n` when `index.toml` declares them. Both are
+additive, so no consumer written against this version needs to change.
 
 With `--json`, stdout carries exactly one JSON document: an **envelope**
 with the contract version. Progress goes to stderr, and every invocation

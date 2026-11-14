@@ -2,6 +2,7 @@
   "capability": "echo.text",
   "contract": 1,
   "download_bytes": 0,
+  "example_path": null,
   "facet": "text",
   "i18n": {},
   "inputs": {

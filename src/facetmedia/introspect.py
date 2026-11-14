@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import json
 import math
+import re
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from pathlib import Path
 from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
-from facetmedia import check, doctor, env, installed, licenses, schema, skill, update
+from facetmedia import check, doctor, env, example, installed, licenses, schema, skill, update
 from facetmedia.contract import CONTRACT_VERSION, FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry, snapshot_identity
@@ -28,6 +31,7 @@ from facetmedia.registry_types import (
     Package,
     Registry,
     capability_models,
+    is_multiple,
     weight,
 )
 
@@ -192,6 +196,7 @@ def describe_data(capability_id: str) -> dict[str, Any]:
     home = Home.peek_env()
     installed = env.is_installed(package, home)
     accepted = licenses.accepted_models(package.models)
+    piece, example_path = _describe_piece(capability, package)
     return {
         "contract": CONTRACT_VERSION,
         "capability": capability.id,
@@ -208,7 +213,8 @@ def describe_data(capability_id: str) -> dict[str, Any]:
             "provider": package.provider,
         },
         "inputs": schema.to_json_schema(capability),
-        "piece_example": _piece_example(capability),
+        "piece_example": piece,
+        "example_path": example_path,
         "verify": {"thresholds": dict(sorted(capability.thresholds.items()))},
         "verify_uses_server": capability.verify_uses_server,
         "preview": {"viewer": capability.viewer},
@@ -253,15 +259,46 @@ def _download_bytes(package: Package, home: Home, installed: bool) -> int:
     return sum(model.bytes for model in package.models if not env.model_present(model, home))
 
 
-# --- the minimal valid piece `describe` shows.
+# --- the piece `describe` shows: the bundled example, else a synthetic one.
+
+
+def _describe_piece(capability: Capability, package: Package) -> tuple[str, str | None]:
+    """The capability's first bundled example, or a synthetic valid piece.
+
+    ``facet example`` copies the first example in path order, so ``describe``
+    shows that same text with its top-level ``capability`` key removed.  The
+    second element is the example's path relative to the package directory,
+    ``None`` when the capability ships none.
+    """
+    found = [item for item in example.find_examples(package) if item.capability == capability.id]
+    if not found:
+        return _piece_example(capability), None
+    first = found[0]
+    return _piece_file_text(first.path), first.path.relative_to(package.directory).as_posix()
+
+
+_CAPABILITY_KEY = re.compile(r"[\"']?capability[\"']?\s*=")
+
+
+def _piece_file_text(path: Path) -> str:
+    """An example's own TOML, without the top-level ``capability`` key."""
+    kept: list[str] = []
+    in_table = False
+    for line in path.read_text(encoding="utf-8-sig").splitlines(keepends=True):
+        stripped = line.lstrip()
+        in_table = in_table or stripped.startswith("[")
+        if in_table or _CAPABILITY_KEY.match(stripped) is None:
+            kept.append(line)
+    return "".join(kept)
 
 
 def _piece_example(capability: Capability) -> str:
     """A minimal valid piece in TOML, from required fields and defaults.
 
     Every field that is required or carries a default gets a value the
-    capability's schema accepts: the first enum value, the numeric minimum,
-    and so on.  Arrays of objects become one ``[[inputs.name]]`` block per
+    capability's schema accepts: an enum's default or first value, the
+    numeric minimum adjusted to ``multiple_of``, a string matching its
+    ``pattern``.  Arrays of objects become one ``[[inputs.name]]`` block per
     ``min_items`` (at least one), kept after the scalar keys so the TOML
     table stays unambiguous.
     """
@@ -273,7 +310,7 @@ def _piece_example(capability: Capability) -> str:
         if field.type == "array" and field.items:
             arrays.append(field)
             continue
-        lines.append(f"{field.name} = {_toml_value(_example_value(field))}")
+        lines.append(_example_line(field, _example_value(field)))
     for field in arrays:
         lines.extend(_array_example_lines(field))
     return "\n".join(lines) + "\n"
@@ -286,14 +323,25 @@ def _array_example_lines(field: Field) -> list[str]:
         lines.append(f"[[inputs.{field.name}]]")
         for item in field.items:
             if item.required or item.has_default:
-                lines.append(f"{item.name} = {_toml_value(_example_value(item))}")
+                lines.append(_example_line(item, _example_value(item)))
     return lines
 
 
+#: No value matches the field's constraints: the line becomes a comment.
+_SET_THIS: Any = object()
+
+
+def _example_line(field: Field, value: Any) -> str:
+    """One TOML key line, or a ``# set this`` comment when nothing fits."""
+    if value is _SET_THIS:
+        return f"# set this: {field.name}"
+    return f"{field.name} = {_toml_value(value)}"
+
+
 def _example_value(field: Field) -> Any:
-    """One schema-valid value for ``field``: enum first, minimum, false."""
-    if field.type == "enum" and field.values:
-        return field.values[0]
+    """One schema-valid value for ``field``, or ``_SET_THIS`` when none fits."""
+    if field.type in {"string", "enum"}:
+        return _example_string(field)
     if field.type in {"integer", "number"}:
         return _example_number(field)
     if field.type == "boolean":
@@ -303,16 +351,68 @@ def _example_value(field: Field) -> Any:
     if field.type == "path":
         # The piece's own directory: the one path that always exists.
         return "."
-    return "text"
+    return _SET_THIS
+
+
+def _example_string(field: Field) -> Any:
+    """A string the field's ``pattern`` accepts, else ``_SET_THIS``."""
+    candidates: list[str] = []
+    if field.has_default and isinstance(field.default, str):
+        candidates.append(field.default)
+    if field.type == "enum":
+        candidates.extend(field.values)
+    else:
+        candidates.extend(["text", "example", field.name, "a", ""])
+    for candidate in candidates:
+        if _matches(field.pattern, candidate):
+            return candidate
+    return _SET_THIS
+
+
+def _matches(pattern: str | None, value: str) -> bool:
+    """True when ``value`` satisfies ``pattern``, or when there is none."""
+    if pattern is None:
+        return True
+    return re.fullmatch(pattern, value) is not None
 
 
 def _example_number(field: Field) -> float | int:
-    """The minimum when there is one, else 0 — or the maximum, below zero."""
+    """A number the field accepts: its default, or a boundary it allows.
+
+    ``multiple_of`` wins over the boundary: the value rounds up to the next
+    multiple, or down to the largest one at or below ``max``.
+    """
+    base = _number_base(field)
+    multiple = field.multiple_of
+    if multiple is None or is_multiple(base, multiple):
+        return _cast_number(field, base)
+    return _cast_number(field, _next_multiple(base, multiple, field.max))
+
+
+def _number_base(field: Field) -> float:
+    """The default, else the minimum, else the maximum below zero, else 0."""
+    default = field.default
+    if field.has_default and isinstance(default, int | float) and not isinstance(default, bool):
+        return default
     if field.min is not None:
         return math.ceil(field.min) if field.type == "integer" else field.min
     if field.max is not None and field.max < 0:
         return math.floor(field.max) if field.type == "integer" else field.max
     return 0
+
+
+def _next_multiple(base: float, multiple: float, maximum: float | None) -> float:
+    """``base`` rounded up to a multiple, or down when that passes ``maximum``."""
+    step = Decimal(str(multiple))
+    rounded = (Decimal(str(base)) / step).to_integral_value(rounding=ROUND_CEILING) * step
+    if maximum is not None and rounded > Decimal(str(maximum)):
+        rounded = (Decimal(str(maximum)) / step).to_integral_value(rounding=ROUND_FLOOR) * step
+    return float(rounded)
+
+
+def _cast_number(field: Field, value: float) -> float | int:
+    """An integer field gets ``int`` so the TOML stays an integer literal."""
+    return int(value) if field.type == "integer" else value
 
 
 def _toml_value(value: Any) -> str:

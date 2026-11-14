@@ -42,8 +42,9 @@ and `facet list --available --json` carries each facet's `label` and
 
 ## Run
 
-`facet describe` prints `piece_example`: a minimal valid piece, the starting
-point for a piece file. `facet run` pulls the package when needed, runs it
+`facet describe` prints `piece_example`: the capability's bundled example
+piece, or a minimal valid one when it ships none — the starting point for a
+piece file. `facet run` pulls the package when needed, runs it
 isolated, and writes the asset plus its record. Read the record, not only
 the asset.
 

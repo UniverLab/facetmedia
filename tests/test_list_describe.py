@@ -313,7 +313,7 @@ def test_describe_termsy_reports_models_licences_and_download(
 
 
 def test_piece_example_covers_every_field_kind(tmp_path: Path) -> None:
-    """Each type gets a schema-valid value: enum first, min, false, [], path."""
+    """Each type gets a schema-valid value: enum default, min, false, [], path."""
     capability = Capability(
         id="demo.every",
         package="demo",
@@ -321,9 +321,11 @@ def test_piece_example_covers_every_field_kind(tmp_path: Path) -> None:
         kind="text",
         inputs=(
             Field(name="mode", type="enum", required=True, values=("fast", "slow")),
+            Field(name="kind", type="enum", default="b", values=("a", "b")),
             Field(name="gain", type="number", required=True, min=0.5),
             Field(name="loud", type="boolean", default=True),
             Field(name="count", type="integer", required=True, min=2.0),
+            Field(name="width", type="integer", required=True, min=1.0, multiple_of=64),
             Field(name="src", type="path", required=True),
             Field(name="offset", type="number", required=True, max=-1.0),
             Field(name="untouched", type="string"),
@@ -340,9 +342,11 @@ def test_piece_example_covers_every_field_kind(tmp_path: Path) -> None:
     assert example == (
         "[inputs]\n"
         'mode = "fast"\n'
+        'kind = "b"\n'
         "gain = 0.5\n"
         "loud = false\n"
         "count = 2\n"
+        "width = 64\n"
         'src = "."\n'
         "offset = -1.0\n"
         "[[inputs.takes]]\n"
@@ -352,6 +356,91 @@ def test_piece_example_covers_every_field_kind(tmp_path: Path) -> None:
     )
     piece: Any = tomllib.loads(example)
     schema_module.validate(capability, piece["inputs"], tmp_path)
+
+
+def test_piece_example_string_pattern_avoids_a_refused_word(tmp_path: Path) -> None:
+    """comfy.edit's bug: a prompt that refuses "text" gets a value that validates."""
+    capability = Capability(
+        id="comfy.edit",
+        package="comfy",
+        summary="Edit an image.",
+        kind="image",
+        inputs=(
+            Field(
+                name="prompt",
+                type="string",
+                required=True,
+                pattern="^(?!text$).+$",
+            ),
+        ),
+    )
+    example = introspect._piece_example(capability)
+    assert 'prompt = "example"' in example
+    assert '"text"' not in example
+    piece: Any = tomllib.loads(example)
+    schema_module.validate(capability, piece["inputs"], tmp_path)
+
+
+def test_piece_example_pattern_on_an_array_item_is_respected() -> None:
+    capability = Capability(
+        id="comfy.batch",
+        package="comfy",
+        summary="Edit several images.",
+        kind="image",
+        inputs=(
+            Field(
+                name="shots",
+                type="array",
+                required=True,
+                min_items=1,
+                items=(
+                    Field(name="prompt", type="string", required=True, pattern="^(?!text$).+$"),
+                ),
+            ),
+        ),
+    )
+    example = introspect._piece_example(capability)
+    assert 'prompt = "example"' in example
+    assert '"text"' not in example
+
+
+def test_piece_example_without_a_derivable_pattern_value_sets_this() -> None:
+    capability = Capability(
+        id="demo.code",
+        package="demo",
+        summary="A code.",
+        kind="text",
+        inputs=(Field(name="prompt", type="string", required=True, pattern="^z+$"),),
+    )
+    assert introspect._piece_example(capability) == "[inputs]\n# set this: prompt\n"
+
+
+def _registry_copy_with_an_example(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """A registry copy, so a test adds an example without touching the fixtures."""
+    target = tmp_path / "registry"
+    shutil.copytree(FIXTURES, target)
+    monkeypatch.setenv("FACET_REGISTRY", str(target))
+    return target
+
+
+def test_describe_shows_the_bundled_example_and_its_path(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = _registry_copy_with_an_example(monkeypatch, tmp_path)
+    examples = target / "packages" / "echo" / "examples"
+    examples.mkdir()
+    (examples / "demo.toml").write_text(
+        'capability = "echo.text"\n[inputs]\ntext = "hi"\nrepeat = 2\n', encoding="utf-8"
+    )
+    assert main(["describe", "echo.text", "--json"]) == 0
+    data = _data(capsys)
+    assert data["piece_example"] == '[inputs]\ntext = "hi"\nrepeat = 2\n'
+    assert data["example_path"] == "examples/demo.toml"
+
+    assert main(["describe", "termsy.make", "--json"]) == 0
+    data = _data(capsys)
+    assert data["piece_example"] == "[inputs]\n"
+    assert data["example_path"] is None
 
 
 GATED_MODEL_TOML = """

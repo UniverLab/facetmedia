@@ -391,8 +391,13 @@ inputs: clip (array, required), language (string, default es), speed (number, de
 installed: no
 ```
 
-`piece_example` in the `--json` data is a minimal valid piece, the
-starting point for a piece file. `i18n` carries the capability's localized
+`piece_example` in the `--json` data is the capability's first bundled
+example piece — the text `facet example <capability>` copies, with its
+top-level `capability` key removed — so it validates as it stands. A
+capability that ships no example gets a synthetic minimal valid piece
+instead, and `example_path` is then `null`; when there is one it is the
+example's path relative to the package directory
+(`examples/demo.toml`). `i18n` carries the capability's localized
 summaries by language tag (`{"es": {"summary": "…"}}`), `{}` when the
 manifest declares none; `summary` stays the English default. Lock: none.
 
