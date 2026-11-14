@@ -131,8 +131,10 @@ content-type: application/pdf
 `facet preview <folder>`, or `facet preview` in the folder you are in,
 collects every asset below the folder, recursively, that has a sibling
 `.facet.json` record, and sorts them by their path relative to the folder.
-No runner starts until a card is opened: each asset's `.preview.json` is
-classified, and nothing else runs.
+Collecting also reads the active registry snapshot, to name each package's
+facet — an empty home fetches that snapshot once, as the first run always
+does. No runner starts until a card is opened: each asset's `.preview.json`
+is classified, and nothing else runs.
 
 - `fresh` — the preview file is not older than the asset;
 - `stale` — the preview file is older than the asset;
@@ -165,9 +167,10 @@ order:
 
 `kind`, `capability`, `created`, `bytes` and `duration_s` come from the
 record (`duration_s` is null when the record states none); `facet` is the
-facet id of the record's package from the active registry snapshot, null
-when the snapshot names no such package; `verified` is
-true only when the record's check passed; `preview` is the parsed preview
+facet id of the record's package in the active registry snapshot, null when
+the snapshot names no such package or cannot be read at all — it is that
+id, not the facet version the envelope's own `facet` key carries; `verified`
+is true only when the record's check passed; `preview` is the parsed preview
 file for a fresh asset and null otherwise.
 
 ### The gallery
@@ -189,15 +192,13 @@ A failure while serving — any route, any cause — answers 500 with a short
 plain-text body and is logged to the run log; nothing is printed to the
 terminal.
 
-A card carries the `--json` fields without `preview` — `facet` among them —
-plus `n` (the index the routes use), `name` and `package` (from the record),
-`thumb` and `open` (a route, or null). `facet` is the facet id of the
-record's package from the active registry snapshot, null when the snapshot
-names no such package. A fresh card always has an `open` route; a
-stale or missing card has one when its package is installed — opening it
-builds the preview first, through the same runner call
-`facet preview <asset path>` makes, and the card turns fresh. A card
-whose package is not installed has `open: null`.
+A card carries the `--json` fields without `preview` — `facet` among them,
+with the same meaning — plus `n` (the index the routes use), `name` and
+`package` (from the record), `thumb` and `open` (a route, or null). A fresh
+card always has an `open` route; a stale or missing card has one when its
+package is installed — opening it builds the preview first, through the same
+runner call `facet preview <asset path>` makes, and the card turns fresh. A
+card whose package is not installed has `open: null`.
 
 Builds run one at a time: a card opened while another is still building
 waits for that build, then starts its own. The route answers when the
