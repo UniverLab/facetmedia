@@ -381,3 +381,13 @@ def test_validate_multiple_of_number_tolerates_float_arithmetic() -> None:
 def test_to_json_schema_includes_multiple_of() -> None:
     cap = _capability(Field(name="width", type="integer", multiple_of=WIDTH_MULTIPLE))
     assert to_json_schema(cap)["properties"]["width"]["multiple_of"] == WIDTH_MULTIPLE
+
+
+def test_validate_enum_refusal_lists_the_values() -> None:
+    cap = _capability(Field(name="metre", type="enum", values=("3/4", "4/4")))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"metre": "5/4"}, Path.cwd())
+    assert exc.value.details["errors"] == [
+        {"field": "metre", "problem": "enum", "rule": "must be one of: 3/4, 4/4"}
+    ]
+    assert exc.value.hint == "metre: must be one of: 3/4, 4/4"

@@ -184,7 +184,8 @@ def _check_scalar(
         errors.append({"field": path, "problem": "type"})
         return _INVALID
     if field.type == "enum" and value not in field.values:
-        errors.append({"field": path, "problem": "enum"})
+        rule = f"must be one of: {', '.join(field.values)}"
+        errors.append({"field": path, "problem": "enum", "rule": rule})
         return _INVALID
     if (
         field.pattern is not None
