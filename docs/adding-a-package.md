@@ -61,6 +61,9 @@ A file that matches none, or several capabilities under rule 3, is not an
 example. Keep every file and folder an example's inputs reference beside
 the piece, so the copy still runs.
 
+The first example of a capability in path order is what `facet describe`
+shows as that capability's `piece_example`.
+
 ## `index.toml`
 
 ```toml

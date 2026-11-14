@@ -377,9 +377,9 @@ Exit codes: `0` (an empty list is a success with data, never an error).
 
 ## `facet describe`
 
-One capability's whole contract: inputs (JSON Schema), a minimal example
-piece, verification thresholds, requirements, licences, and what a pull
-would still download.
+One capability's whole contract: inputs (JSON Schema), the piece example
+`facet example` would copy, verification thresholds, requirements,
+licences, and what a pull would still download.
 
 Flags: `--json` carries everything; the human form is a summary.
 
