@@ -1,4 +1,4 @@
-"""Progress lines for ``facet pull`` and ``facet update``: standard library only.
+"""Progress lines for ``facet pull`` and ``facet update``, styled from the one theme.
 
 ``pull`` drives one line per phase through a :class:`Progress`: a spinner while
 the phase has no known size and a bar when it does.  At a terminal that line is
@@ -10,6 +10,10 @@ echoed to stderr only with ``--verbose``.
 Three modes: ``tty`` redraws one carriage-return line, ``plain`` prints one
 line per phase start and end for a pipe or a CI log, and ``off`` draws nothing
 (a ``facet run`` pull, or ``--json``).
+
+Only the finished lines (``_write_line``) go through the theme; the live
+redraws stay raw text because :meth:`Progress._erase` measures them with
+``len``, and an escape sequence would break that arithmetic.
 """
 
 from __future__ import annotations
@@ -19,6 +23,9 @@ import time
 from collections.abc import Callable
 from typing import Final, Literal, TextIO
 
+from rich.markup import escape
+
+from facetmedia import theme
 from facetmedia.contract import FacetError
 from facetmedia.home import log_file
 
@@ -148,7 +155,11 @@ class Progress:
         if self._mode == "off":
             return
         elapsed = self._clock() - self._started
-        text = f"✓ {self._name} ({elapsed:.1f}s)" if ok else f"✗ {self._name}: {err}"
+        text = (
+            f"[ok]✓[/] {escape(self._name)} [muted]({elapsed:.1f}s)[/]"
+            if ok
+            else f"[error]✗[/] {escape(self._name)}: {escape(err)}"
+        )
         if self._mode == "plain":
             self._write_line(f"end {text}")
             return
@@ -192,7 +203,8 @@ class Progress:
             self._width = 0
 
     def _write_line(self, text: str) -> None:
-        self._out.write(text + "\n")
+        """Write one finished line: markup through the theme, plain when piped."""
+        theme.console(self._out).print(text, soft_wrap=True)
         self._out.flush()
 
 

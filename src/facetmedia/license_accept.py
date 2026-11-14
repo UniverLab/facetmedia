@@ -15,6 +15,7 @@ from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, Final
 
 import questionary
+from rich.markup import escape
 from rich.panel import Panel
 
 from facetmedia import banner, contract, env, licenses, lock, theme
@@ -71,8 +72,16 @@ def _report(outcome: licenses.Acceptance, model_id: str, args: argparse.Namespac
         return 0
     contract.emit(contract.ok(outcome.record or {}), as_json)
     if not as_json:
-        print(f"{model_id} accepted")
+        _announced(model_id)
     return 0
+
+
+def _announced(model_id: str) -> None:
+    """The acceptance line: only the word ``accepted`` is marked."""
+    if theme.styled():
+        theme.console().print(f"{escape(model_id)} [ok]accepted[/]", soft_wrap=True)
+        return
+    print(f"{model_id} accepted")
 
 
 def _without_model(args: argparse.Namespace) -> int:
@@ -156,7 +165,7 @@ def _confirm(args: argparse.Namespace, model_id: str) -> None:
         return
     with _held(args):
         licenses.record(model, "interactive")
-    print(f"{model_id} accepted")
+    _announced(model_id)
 
 
 def _terms_text(model_id: str) -> str:

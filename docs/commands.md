@@ -69,6 +69,22 @@ A group verb with no sub-verb (`facet license`, `facet config`, `facet
 registry`) prints that group's help and exits 2. With `--json` it prints
 the usual failure envelope, code `invalid_input`, instead.
 
+## Colour and marks
+
+facet's identity is textual: most of every screen stays the terminal's own
+foreground, on the terminal's own background.
+
+One accent, Señal yellow, marks only what was verified: `passed` in a `run`
+or `check` result line, the `✓` of a finished pull line, `accepted` once a
+licence is accepted. Reasons, paths, sizes, times and hints are secondary
+text in Hueso tenue. A failed result stays uncoloured, and its error line on
+stderr is prefixed `✗ `; a warning — a gate that timed out, a forced tier in
+the plan — is prefixed `! `.
+
+With `NO_COLOR` set, without a terminal (a pipe or a CI log), or with
+`--json`, every byte is the plain text it always was: no colour and no
+`✗ ` or `! ` prefix.
+
 ## `facet update`
 
 Downloads the registry at one reference, resolved to one exact commit, and
@@ -131,7 +147,8 @@ order: the platform, `--cpu` against a GPU package, a missing NVIDIA GPU,
 declared VRAM and RAM, a missing host application (with the exact `facet
 config set <key> <path>` fix), and finally its tier group. Packages sharing
 a `tier_group` are alternatives of one tool; `--tier NAME` prefers that
-tier, even when it does not fit: its row then reads `install (forced)` and
+tier, even when it does not fit: its row then reads `! install (forced)` at a
+terminal (`install (forced)` in plain text) and
 its reason starts with a warning saying what it does not meet, so a forced
 install is never mistaken for a fitting one. Without `--tier`, facet picks
 the member with the highest declared VRAM that fits, or the lowest one,

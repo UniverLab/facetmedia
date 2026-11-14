@@ -24,7 +24,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from facetmedia import __version__, doctor, env, licenses, prune, record, runner, schema
+from rich.markup import escape
+
+from facetmedia import __version__, doctor, env, licenses, prune, record, runner, schema, theme
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
@@ -222,11 +224,19 @@ def _require_machine(package: Package, run_id: str) -> list[str]:
     )
     errors = [error for error in errors if error.code != "license_not_accepted"]
     for warning in warnings:
-        print(warning, file=sys.stderr)
+        _warn(warning)
         logger.info("%s", warning)
     if errors:
         raise errors[0]
     return warnings
+
+
+def _warn(text: str) -> None:
+    """One gate warning on stderr: marked at a terminal, bare in a pipe or log."""
+    if theme.styled(sys.stderr):
+        theme.console(sys.stderr).print(f"[warn]! {escape(text)}[/]", soft_wrap=True)
+        return
+    print(text, file=sys.stderr)
 
 
 def _ensure_installed(args: argparse.Namespace, package: Package, run_id: str) -> tuple[bool, int]:

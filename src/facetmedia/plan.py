@@ -18,6 +18,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 import questionary
+from rich.markup import escape
 from rich.table import Table
 
 from facetmedia import config, env, lock, probes, theme
@@ -478,15 +479,22 @@ def _plan_table(entries: list[PlanEntry]) -> Table:
     table.add_column("models")
     table.add_column("decision")
     for entry in entries:
-        state = _state_text(entry)
         table.add_row(
-            entry.name,
-            entry.version,
-            f"{entry.disk_gb:.1f} GB",
-            _models_text(entry.model_download_bytes),
-            f"{state}: {entry.reason}",
+            f"[accent]{escape(entry.name)}[/]",
+            f"[muted]{escape(entry.version)}[/]",
+            f"[muted]{entry.disk_gb:.1f} GB[/]",
+            f"[muted]{_models_text(entry.model_download_bytes)}[/]",
+            _decision_text(entry),
         )
     return table
+
+
+def _decision_text(entry: PlanEntry) -> str:
+    """The row's decision, its reason muted; a forced tier carries a ``! ``."""
+    reason = f"[muted]{escape(entry.reason)}[/]"
+    if entry.forced:
+        return f"[warn]! install (forced)[/]: {reason}"
+    return f"{'install' if entry.install else 'skip'}: {reason}"
 
 
 def _state_text(entry: PlanEntry) -> str:

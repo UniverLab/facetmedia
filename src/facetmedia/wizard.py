@@ -51,10 +51,12 @@ def offered(args: argparse.Namespace) -> bool:
 def choose(registry: Registry, home: Home, args: argparse.Namespace) -> list[str] | None:
     """Run the wizard; the chosen facet names, or ``None`` to install nothing."""
     console = theme.console()
-    console.print("Step 1 of 4: this machine")
+    console.print("[accent]Step 1 of 4: this machine[/]")
     banner.print_text()
     console.print(Panel(_machine_text(registry, home), title="This machine"))
-    console.print("Step 2 of 4: choose facets — arrows move, space toggles, enter confirms")
+    console.print(
+        "[accent]Step 2 of 4: choose facets — arrows move, space toggles, enter confirms[/]"
+    )
     names = _pick(registry, home, args)
     if not names:
         print(NOTHING_SELECTED)
@@ -63,7 +65,7 @@ def choose(registry: Registry, home: Home, args: argparse.Namespace) -> list[str
         return names
     if not _confirm(registry, home, args, names):
         return None
-    console.print("Step 4 of 4: install")
+    console.print("[accent]Step 4 of 4: install[/]")
     return names
 
 
@@ -162,7 +164,7 @@ def _package_note(entry: PlanEntry) -> str:
 
 def _confirm(registry: Registry, home: Home, args: argparse.Namespace, names: list[str]) -> bool:
     """Step 3: the plan table, then the same confirmation the flags use."""
-    theme.console().print("Step 3 of 4: review the plan")
+    theme.console().print("[accent]Step 3 of 4: review the plan[/]")
     selected = plan.resolve(registry, names, [])
     entries = plan.build_plan(
         selected,

@@ -30,7 +30,9 @@ from collections.abc import Iterable, Mapping
 from contextvars import ContextVar
 from typing import Final
 
-from facetmedia import __version__
+from rich.markup import escape
+
+from facetmedia import __version__, theme
 
 logger: Final[logging.Logger] = logging.getLogger("facetmedia")
 
@@ -119,8 +121,16 @@ def emit(envelope: dict[str, object], as_json: bool) -> None:
     message = error.get("message")
     if isinstance(message, str) and message:
         logger.info("%s", message)
-        print(message, file=sys.stderr)
+        _stderr_line(message, f"[error]✗ {escape(message)}[/]")
     hint = error.get("hint")
     if isinstance(hint, str) and hint:
         logger.info("%s", hint)
-        print(hint, file=sys.stderr)
+        _stderr_line(hint, f"[muted]{escape(hint)}[/]")
+
+
+def _stderr_line(text: str, markup: str) -> None:
+    """One error line on stderr: marked at a terminal, byte-identical in a pipe."""
+    if theme.styled(sys.stderr):
+        theme.console(sys.stderr).print(markup, soft_wrap=True)
+        return
+    print(text, file=sys.stderr)

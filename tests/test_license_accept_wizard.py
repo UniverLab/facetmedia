@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -33,6 +34,12 @@ NO_PENDING = license_accept.NO_PENDING
 EXIT_INVALID_INPUT = 2
 EXIT_CANCELLED = 130
 PENDING_MODELS = 2
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def visible(text: str) -> str:
+    """The text a person reads: the terminal styling removed."""
+    return _ANSI.sub("", text)
 
 
 class _TtyProxy:
@@ -179,7 +186,7 @@ def test_accepting_one_returns_to_the_shortened_list(
     fake_tty(monkeypatch, ["\r", f"{ECHO_MODEL}\r", "\x1b[B\r"])
     assert main(["license", "accept"]) == 0
     captured = capsys.readouterr()
-    out = captured.out
+    out = visible(captured.out)
     assert f"Terms for {ECHO_MODEL}" in out
     assert "https://example.invalid/echo-weights" in out
     for fragment in (
@@ -223,7 +230,7 @@ def test_accepting_both_leaves_nothing_pending(
 ) -> None:
     fake_tty(monkeypatch, ["\r", f"{ECHO_MODEL}\r", "\r", f"{TERMSY_MODEL}\r"])
     assert main(["license", "accept"]) == 0
-    out = capsys.readouterr().out
+    out = visible(capsys.readouterr().out)
     assert f"{ECHO_MODEL} accepted" in out
     assert f"{TERMSY_MODEL} accepted" in out
     assert NO_PENDING in out

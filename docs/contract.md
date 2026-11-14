@@ -67,7 +67,9 @@ path, the known ids). A piece that fails validation carries one
 `<field>: <rule>` (or `<field>: <problem>`) line per error in `hint`, so
 that hint can be several lines; every other hint is one line. Without
 `--json`, a failure prints its message (and hint, when there is one) to
-stderr instead of JSON. A failing `pull` or `update` also repeats the last
+stderr instead of JSON; at a terminal the message is prefixed `✗ ` and the
+two lines are styled, while a pipe, a log file or `NO_COLOR` gets the bare
+lines. A failing `pull` or `update` also repeats the last
 20 lines of its run log on stderr, then a `log: <path>` line, with or
 without `--json` and `--verbose`; stdout stays a single JSON document.
 

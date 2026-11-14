@@ -8,6 +8,9 @@ import os
 import sys
 import traceback
 from pathlib import Path
+from typing import Final
+
+from rich.markup import escape
 
 from facetmedia import (
     check,
@@ -26,6 +29,7 @@ from facetmedia import (
     record,
     registry,
     run,
+    theme,
     update,
     updates,
 )
@@ -34,6 +38,9 @@ from facetmedia.cli_parser import build_parser as _build_parser
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_posix
 from facetmedia.registry import load_active_registry, validate_registry
+
+#: The verification verdict that Señal marks: the rest of a verdict stays calm.
+PASSED: Final[str] = "passed"
 
 
 def _lock_params(args: argparse.Namespace) -> tuple[bool, float]:
@@ -155,8 +162,16 @@ def _announce_run(data: dict[str, object]) -> None:
         status = (
             verification.get("status", "unknown") if isinstance(verification, dict) else "unknown"
         )
-        print(f"{entry.get('path')} {entry.get('name')} {status}")
+        _result_line(f"{entry.get('path')} {entry.get('name')}", status)
     print(f"out {data.get('out_dir')}")
+
+
+def _result_line(what: object, status: object) -> None:
+    """One verified asset: only the word ``passed`` is marked, never ``failed``."""
+    if status == PASSED and theme.styled():
+        theme.console().print(f"{escape(str(what))} [ok]{PASSED}[/]", soft_wrap=True)
+        return
+    print(f"{what} {status}")
 
 
 def _handle_check(args: argparse.Namespace) -> int:
@@ -193,8 +208,8 @@ def _check_capability(asset: str) -> str:
 
 
 def _announce_reverify(data: dict[str, object]) -> None:
-    state = "passed" if data.get("passed") is True else "failed"
-    print(f"{data.get('asset')} {state}")
+    state = PASSED if data.get("passed") is True else "failed"
+    _result_line(data.get("asset"), state)
 
 
 def _handle_doctor(args: argparse.Namespace) -> int:

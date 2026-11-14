@@ -23,6 +23,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Final, Protocol
 
+from rich.markup import escape
+
 from facetmedia.progress import Progress
 
 MIB: Final[float] = 1024.0 * 1024.0
@@ -105,32 +107,44 @@ def plan_widths(entries: Iterable[Planned]) -> Widths:
     )
 
 
+def _muted(text: str) -> str:
+    """Secondary text: a size, a time, a reason."""
+    return f"[muted]{escape(text)}[/]"
+
+
 def _head(widths: Widths, mark: str, name: str, version: str) -> str:
-    """``✓ kokoro 0.1.2`` with both columns padded, then the gap before the size."""
-    return f"{mark} {name.ljust(widths.name)} {version.ljust(widths.version)}{GAP}"
+    """``✓ kokoro 0.1.2`` with both columns padded, then the gap before the size.
+
+    The mark carries the outcome's style; the name and version are the package
+    the line belongs to.  Every builder returns markup: ``_write_line`` renders
+    it once, so a pipe receives the same bytes with the tags stripped.
+    """
+    labelled = escape(f"{name.ljust(widths.name)} {version.ljust(widths.version)}")
+    return f"{mark} [accent]{labelled}[/]{GAP}"
 
 
 def collapse_line(widths: Widths, name: str, version: str, size: str, seconds: float) -> str:
     """The line a finished package leaves behind: ``✓ kokoro 0.1.2   812 MB   27.6s``."""
-    head = _head(widths, "✓", name, version)
-    return f"{head}{size.ljust(widths.size)}{GAP}{time_text(seconds)}".rstrip()
+    head = _head(widths, "[ok]✓[/]", name, version)
+    tail = _muted(f"{size.ljust(widths.size)}{GAP}{time_text(seconds)}")
+    return f"{head}{tail}".rstrip()
 
 
 def noop_line(widths: Widths, name: str, version: str) -> str:
     """A package the plan found installed: ``· kokoro 0.1.2   already installed``."""
-    return f"{_head(widths, '·', name, version)}already installed".rstrip()
+    return f"{_head(widths, '·', name, version)}{_muted('already installed')}".rstrip()
 
 
 def failed_line(widths: Widths, name: str, version: str, seconds: float, err: str) -> str:
     """A package that broke: ``✗ kokoro 0.1.2   failed in 12.3s: <one line>``."""
-    head = _head(widths, "✗", name, version)
-    return f"{head}failed in {time_text(seconds)}: {err}".rstrip()
+    head = _head(widths, "[error]✗[/]", name, version)
+    return f"{head}{_muted(f'failed in {time_text(seconds)}')}: {escape(err)}".rstrip()
 
 
 def total_line(count: int, downloaded: int, seconds: float) -> str:
     """The pull's closing line: ``16 packages · 14.2 GB · 12m 41s``."""
     noun = "package" if count == 1 else "packages"
-    return f"{count} {noun} · {total_size_text(downloaded)} · {time_text(seconds)}"
+    return _muted(f"{count} {noun} · {total_size_text(downloaded)} · {time_text(seconds)}")
 
 
 class PullSummary:
@@ -157,7 +171,7 @@ class PullSummary:
     def begin(self, name: str, version: str) -> None:
         """The header the live phase line draws under."""
         if self.enabled:
-            self._note(f"→ {name} {version}")
+            self._note(f"→ [accent]{escape(f'{name} {version}')}[/]")
 
     def collapse(self, name: str, version: str, downloaded: int, seconds: float) -> None:
         """Replace the finished package's block with its one line."""

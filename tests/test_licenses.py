@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -20,6 +21,12 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 MODEL_ID = "termsy-weights"
 EXIT_INVALID_INPUT = 2
 EXIT_NEEDS_PERSON = 10
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def visible(text: str) -> str:
+    """The text a person reads: the terminal styling removed."""
+    return _ANSI.sub("", text)
 
 
 def _use_fixture_registry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,7 +112,7 @@ def test_accept_tty_with_right_id_records_interactive(
     _use_fixture_registry(monkeypatch)
     prompts = _terminal_with_answer(monkeypatch, MODEL_ID)
     assert main(["license", "accept", MODEL_ID]) == 0
-    out = capsys.readouterr().out
+    out = visible(capsys.readouterr().out)
     assert prompts == [licenses_module.prompt_text(MODEL_ID)]
     assert prompts[0] == (f'Type "{MODEL_ID}" to accept, or press Enter to cancel: ')
     assert f"{MODEL_ID} accepted" in out

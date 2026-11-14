@@ -12,6 +12,7 @@ import io
 from dataclasses import dataclass
 
 import pytest
+from rich.text import Text
 
 from facetmedia import pull_summary
 from facetmedia.progress import Progress
@@ -20,6 +21,11 @@ MIB = 1024**2
 GIB = 1024**3
 SHORT_NAME = "kokoro"
 SHORT_VERSION = "0.1.2"
+
+
+def plain(markup: str) -> str:
+    """The line a pipe receives: the markup stripped, as ``_write_line`` renders it."""
+    return Text.from_markup(markup).plain
 
 
 @dataclass(frozen=True)
@@ -78,8 +84,8 @@ def test_the_columns_line_up_across_packages() -> None:
     ]
 
     widths = pull_summary.plan_widths(entries)
-    first = pull_summary.collapse_line(widths, SHORT_NAME, SHORT_VERSION, "812 MB", 27.6)
-    second = pull_summary.collapse_line(widths, "musicgen-small", "1.0.0", "1.5 GB", 4.0)
+    first = plain(pull_summary.collapse_line(widths, SHORT_NAME, SHORT_VERSION, "812 MB", 27.6))
+    second = plain(pull_summary.collapse_line(widths, "musicgen-small", "1.0.0", "1.5 GB", 4.0))
 
     assert widths.name == len("musicgen-small")
     assert widths.version == len(SHORT_VERSION)
@@ -95,7 +101,7 @@ def test_a_collapsed_line_reads_name_version_size_and_time() -> None:
         pull_summary.Widths(), SHORT_NAME, SHORT_VERSION, "812 MB", 27.6
     )
 
-    assert line == "✓ kokoro 0.1.2   812 MB   27.6s"
+    assert plain(line) == "✓ kokoro 0.1.2   812 MB   27.6s"
 
 
 def test_the_size_column_ignores_packages_that_download_nothing() -> None:
@@ -109,18 +115,20 @@ def test_the_failure_line_omits_the_size_and_keeps_the_error() -> None:
         pull_summary.Widths(), SHORT_NAME, SHORT_VERSION, 12.3, "HTTP 404 on the model"
     )
 
-    assert line == "✗ kokoro 0.1.2   failed in 12.3s: HTTP 404 on the model"
+    assert plain(line) == "✗ kokoro 0.1.2   failed in 12.3s: HTTP 404 on the model"
 
 
 def test_the_installed_line_says_already_installed() -> None:
     line = pull_summary.noop_line(pull_summary.Widths(), SHORT_NAME, SHORT_VERSION)
 
-    assert line == "· kokoro 0.1.2   already installed"
+    assert plain(line) == "· kokoro 0.1.2   already installed"
 
 
 def test_the_total_line_counts_packages_bytes_and_time() -> None:
-    assert pull_summary.total_line(16, int(14.2 * GIB), 761.0) == "16 packages · 14.2 GB · 12m 41s"
-    assert pull_summary.total_line(1, 0, 12.5) == "1 package · 0 MB · 12.5s"
+    assert plain(pull_summary.total_line(16, int(14.2 * GIB), 761.0)) == (
+        "16 packages · 14.2 GB · 12m 41s"
+    )
+    assert plain(pull_summary.total_line(1, 0, 12.5)) == "1 package · 0 MB · 12.5s"
 
 
 def test_tty_replaces_the_live_phase_row_with_the_package_line() -> None:
