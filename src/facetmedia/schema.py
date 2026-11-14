@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from decimal import ROUND_FLOOR, Decimal
 from pathlib import Path
 from typing import Any, Final
 
 from facetmedia.contract import FacetError
 from facetmedia.registry import Capability, Field
+from facetmedia.registry_types import is_multiple
 
 _INVALID: Final[object] = object()
 _JSON_SCHEMA: Final[str] = "https://json-schema.org/draft/2020-12/schema"
@@ -85,7 +87,71 @@ def _check_field(
     if field.type in {"integer", "number"} and field.max is not None and checked > field.max:
         errors.append({"field": path, "problem": "max"})
         return _INVALID
+    if (
+        field.type in {"integer", "number"}
+        and field.multiple_of is not None
+        and not is_multiple(checked, field.multiple_of)
+    ):
+        candidates = _multiple_candidates(field, checked)
+        divisor = _format_number(field.multiple_of)
+        if candidates:
+            joined = ", ".join(_format_number(candidate) for candidate in candidates)
+            rule = f"not a multiple of {divisor}; nearest valid: {joined}"
+        else:
+            low = _format_bound(field.min, "-inf")
+            high = _format_bound(field.max, "inf")
+            rule = f"not a multiple of {divisor}; no valid value within {low}..{high}"
+        errors.append({"field": path, "problem": "multiple_of", "rule": rule})
+        return _INVALID
     return checked
+
+
+def _multiple_candidates(field: Field, value: int | float) -> list[int | float]:
+    """The multiples just below and above value that also satisfy min/max."""
+
+    exact = Decimal(str(value))
+    step = Decimal(str(field.multiple_of))
+    if not exact.is_finite():
+        return []
+    low = _floor_multiple(exact, step)
+    candidates: list[int | float] = []
+    for raw in (low, low + step):
+        if field.min is not None and raw < Decimal(str(field.min)):
+            continue
+        if field.max is not None and raw > Decimal(str(field.max)):
+            continue
+        candidates.append(_to_number(raw))
+    return candidates
+
+
+def _floor_multiple(value: Decimal, step: Decimal) -> Decimal:
+    """The greatest multiple of step at or below value.
+
+    ``Decimal //`` truncates toward zero, which would skip a multiple below
+    a negative value, so round the quotient down explicitly.
+    """
+
+    return (value / step).to_integral_value(rounding=ROUND_FLOOR) * step
+
+
+def _to_number(raw: Decimal) -> int | float:
+    """A decimal as an int when integral, else a float."""
+
+    return int(raw) if raw == raw.to_integral_value() else float(raw)
+
+
+def _format_number(value: int | float) -> str:
+    """A number without a trailing ``.0``."""
+
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _format_bound(value: float | None, missing: str) -> str:
+    """A min/max bound for the no-valid-value message."""
+
+    return _format_number(value) if value is not None else missing
 
 
 def _default_value(field: Field, path: str, piece_dir: Path, errors: list[dict[str, str]]) -> Any:
@@ -192,6 +258,8 @@ def _field_schema(field: Field) -> dict[str, Any]:
         schema["minimum"] = field.min
     if field.max is not None:
         schema["maximum"] = field.max
+    if field.multiple_of is not None:
+        schema["multiple_of"] = field.multiple_of
     if field.pattern is not None:
         schema["pattern"] = field.pattern
     return schema

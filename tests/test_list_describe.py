@@ -508,3 +508,24 @@ def test_describe_without_i18n_reports_empty_object(
     _registry(monkeypatch)
     assert main(["describe", "echo.text", "--json"]) == 0
     assert _data(capsys)["i18n"] == {}
+
+
+SIZE_MULTIPLE = 64
+SIZE_INPUT = f"""
+[capabilities.text.inputs.size]
+type = "integer"
+multiple_of = {SIZE_MULTIPLE}
+"""
+
+
+def test_describe_reports_multiple_of(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry = _copied_registry(tmp_path)
+    manifest = registry / "packages" / "echo" / "package.toml"
+    with manifest.open("a", encoding="utf-8") as handle:
+        handle.write(SIZE_INPUT)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+
+    assert main(["describe", "echo.text", "--json"]) == 0
+    assert _data(capsys)["inputs"]["properties"]["size"]["multiple_of"] == SIZE_MULTIPLE

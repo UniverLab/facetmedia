@@ -10,6 +10,7 @@ from facetmedia.schema import to_json_schema, validate
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
 GOLDEN_ROOT = Path(__file__).parent / "golden" / "schema"
 REPEAT_MAX = 10
+WIDTH_MULTIPLE = 64
 
 
 def _capability(*fields: Field) -> Capability:
@@ -289,3 +290,94 @@ def test_to_json_schema_required_list() -> None:
     cap = registry.capability("echo.text")
     schema = to_json_schema(cap)
     assert schema["required"] == ["text"]
+
+
+def test_validate_multiple_of_accepts_multiple() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64))
+    assert validate(cap, {"width": 128}, Path.cwd()) == {"width": 128}
+
+
+def test_validate_multiple_of_refuses_with_candidates() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": 100}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    assert exc.value.details["errors"] == [
+        {
+            "field": "width",
+            "problem": "multiple_of",
+            "rule": "not a multiple of 64; nearest valid: 64, 128",
+        }
+    ]
+    assert exc.value.hint == "width: not a multiple of 64; nearest valid: 64, 128"
+
+
+def test_validate_multiple_of_drops_candidate_above_max() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64, max=100))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": 100}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 64; nearest valid: 64"
+
+
+def test_validate_multiple_of_no_candidate_survives() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64, min=70, max=100))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": 90}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 64; no valid value within 70..100"
+
+
+def test_validate_multiple_of_array_item() -> None:
+    item = Field(name="w", type="integer", multiple_of=64)
+    cap = _capability(Field(name="items", type="array", items=(item,)))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"items": [{"w": 100}]}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors == [
+        {
+            "field": "items[0].w",
+            "problem": "multiple_of",
+            "rule": "not a multiple of 64; nearest valid: 64, 128",
+        }
+    ]
+
+
+def test_validate_multiple_of_number_field() -> None:
+    cap = _capability(Field(name="scale", type="number", multiple_of=0.5))
+    assert validate(cap, {"scale": 1.5}, Path.cwd()) == {"scale": 1.5}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"scale": 1.2}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 0.5; nearest valid: 1, 1.5"
+
+
+def test_validate_multiple_of_keeps_candidate_below_a_negative_value() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": -100}, Path.cwd())
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 64; nearest valid: -128, -64"
+
+
+def test_validate_multiple_of_refuses_a_non_finite_number() -> None:
+    cap = _capability(Field(name="scale", type="number", multiple_of=0.5))
+    for value in (float("inf"), float("nan")):
+        with pytest.raises(FacetError) as exc:
+            validate(cap, {"scale": value}, Path.cwd())
+        assert exc.value.code == "invalid_input"
+        assert exc.value.details["errors"][0]["problem"] == "multiple_of"
+
+
+def test_validate_multiple_of_number_tolerates_float_arithmetic() -> None:
+    cap = _capability(Field(name="scale", type="number", multiple_of=0.1))
+    assert validate(cap, {"scale": 0.3}, Path.cwd()) == {"scale": 0.3}
+
+
+def test_to_json_schema_includes_multiple_of() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=WIDTH_MULTIPLE))
+    assert to_json_schema(cap)["properties"]["width"]["multiple_of"] == WIDTH_MULTIPLE

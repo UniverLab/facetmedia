@@ -18,6 +18,7 @@ from packaging.version import InvalidVersion, Version
 
 from facetmedia.manifest.binary import read_binary
 from facetmedia.manifest.ffmpeg import read_ffmpeg
+from facetmedia.manifest.field import check_default, check_field_options, read_multiple_of
 from facetmedia.manifest.host import read_host_app
 from facetmedia.manifest.i18n import SUMMARY_LIMIT, read_facets, read_i18n
 from facetmedia.manifest.model import read_models
@@ -51,20 +52,6 @@ _PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(\.\d+)?\Z")
 _USES_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]*\Z")
 _REQUIRES_RE: Final[re.Pattern[str]] = re.compile(r"^Requires:[ \t]*(.*)$", re.MULTILINE)
 _LIB_DIR: Final[str] = "lib"
-
-
-def _default_type_matches(field_type: str, default: object) -> bool:
-    """True when a scalar default has the type its field declares."""
-
-    if field_type in {"string", "path"}:
-        return isinstance(default, str)
-    if field_type == "integer":
-        return isinstance(default, int) and not isinstance(default, bool)
-    if field_type == "number":
-        return isinstance(default, int | float) and not isinstance(default, bool)
-    if field_type == "boolean":
-        return isinstance(default, bool)
-    return True
 
 
 def _is_relative_path(value: str) -> bool:
@@ -202,19 +189,13 @@ _FIELD_KEYS: Final[frozenset[str]] = frozenset(
         "description",
         "min",
         "max",
+        "multiple_of",
         "pattern",
         "values",
         "min_items",
         "items",
     }
 )
-_FIELD_OPTION_TYPES: Final[Mapping[str, frozenset[str]]] = {
-    "values": frozenset({"enum"}),
-    "min": frozenset({"integer", "number"}),
-    "max": frozenset({"integer", "number"}),
-    "pattern": frozenset({"string", "enum"}),
-    "min_items": frozenset({"array"}),
-}
 
 
 class RegistryLoader:
@@ -787,7 +768,8 @@ class RegistryLoader:
             self.add(file, f"{key}.type", "value")
         if field_type == "array" and not allow_array:
             self.add(file, f"{key}.type", "value")
-        self.check_field_options(field_type, spec, file, key)
+        check_field_options(self, field_type, spec, file, key)
+        multiple_of = read_multiple_of(self, spec, file, f"{key}.", field_type)
         required = self.boolean(spec, "required", file, f"{key}.", default=False)
         description = self.string(spec, "description", file, f"{key}.", required=False) or ""
         values = self.string_list(spec, "values", file, f"{key}.")
@@ -795,7 +777,9 @@ class RegistryLoader:
             self.add(file, f"{key}.values", "required")
         default = spec.get("default", MISSING)
         if default is not MISSING:
-            self.check_default(field_type or "", default, values, file, f"{key}.default")
+            check_default(
+                self, field_type or "", default, values, file, f"{key}.default", multiple_of
+            )
         minimum = self.number(spec, "min", file, f"{key}.")
         maximum = self.number(spec, "max", file, f"{key}.")
         pattern = self.string(spec, "pattern", file, f"{key}.", required=False)
@@ -820,43 +804,9 @@ class RegistryLoader:
             description=description,
             min=minimum,
             max=maximum,
+            multiple_of=multiple_of,
             pattern=pattern or None,
             values=values,
             min_items=min_items,
             items=items,
         )
-
-    def check_field_options(
-        self,
-        field_type: str | None,
-        spec: Mapping[str, Any],
-        file: str,
-        key: str,
-    ) -> None:
-        """Reject options that do not apply to the field's type.
-
-        ``pattern`` is a regular expression: applying it to an integer would
-        crash validation, so a manifest cannot attach it to a non-text field.
-        """
-
-        if field_type is None:
-            return
-        for option, allowed in _FIELD_OPTION_TYPES.items():
-            if spec.get(option) is not None and field_type not in allowed:
-                self.add(file, f"{key}.{option}", "value")
-
-    def check_default(
-        self,
-        field_type: str,
-        default: object,
-        values: tuple[str, ...],
-        file: str,
-        key: str,
-    ) -> None:
-        if field_type == "array":
-            if not isinstance(default, list):
-                self.add(file, key, "type")
-        elif not _default_type_matches(field_type, default):
-            self.add(file, key, "type")
-        elif field_type == "enum" and default not in values:
-            self.add(file, key, "value")

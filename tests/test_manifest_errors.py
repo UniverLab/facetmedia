@@ -50,6 +50,25 @@ summary = "speaks"
 kind = "audio"
 """
 
+FIELD_V = """
+[capabilities.speech.inputs.v]
+"""
+
+MULTIPLE_OF_ZERO = FIELD_V + 'type = "integer"\nmultiple_of = 0\n'
+MULTIPLE_OF_FRACTION = FIELD_V + 'type = "integer"\nmultiple_of = 2.5\n'
+MULTIPLE_OF_TEXT = FIELD_V + 'type = "string"\nmultiple_of = 2\n'
+MULTIPLE_OF_BAD_DEFAULT = FIELD_V + 'type = "integer"\nmultiple_of = 64\ndefault = 100\n'
+MULTIPLE_OF_INFINITE_DEFAULT = FIELD_V + 'type = "number"\nmultiple_of = 0.5\ndefault = inf\n'
+MULTIPLE_OF_ITEM_ZERO = (
+    FIELD_V
+    + 'type = "array"\n'
+    + """
+[capabilities.speech.inputs.v.items.x]
+type = "integer"
+multiple_of = 0
+"""
+)
+
 CASES = [
     pytest.param(
         BASE.replace('type = "python-env"', 'type = "docker"'),
@@ -293,6 +312,42 @@ CASES = [
         "requires engine.server",
         id="verify-uses-server-without-server",
     ),
+    pytest.param(
+        BASE + CAPABILITY + MULTIPLE_OF_ZERO,
+        "capabilities.speech.inputs.v.multiple_of",
+        "value",
+        id="multiple-of-non-positive",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + MULTIPLE_OF_FRACTION,
+        "capabilities.speech.inputs.v.multiple_of",
+        "type",
+        id="multiple-of-int-float",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + MULTIPLE_OF_TEXT,
+        "capabilities.speech.inputs.v.multiple_of",
+        "value",
+        id="multiple-of-non-numeric",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + MULTIPLE_OF_BAD_DEFAULT,
+        "capabilities.speech.inputs.v.default",
+        "value",
+        id="default-not-multiple",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + MULTIPLE_OF_INFINITE_DEFAULT,
+        "capabilities.speech.inputs.v.default",
+        "value",
+        id="default-infinite-not-multiple",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + MULTIPLE_OF_ITEM_ZERO,
+        "capabilities.speech.inputs.v.items.x.multiple_of",
+        "value",
+        id="multiple-of-item-non-positive",
+    ),
 ]
 
 
@@ -337,6 +392,9 @@ def test_vram_gb_defaults_to_zero(tmp_path: Path) -> None:
 MODEL_CAPABILITY = CAPABILITY + 'models = ["m1"]\n'
 MODEL_INPUT = '\n[capabilities.speech.inputs.model]\ntype = "enum"\nvalues = ["m1"]\n'
 CAPABILITY_PREVIEW = '\n[capabilities.speech.preview]\nviewer = "generic"\n'
+
+WIDTH_MULTIPLE = 64
+ITEM_MULTIPLE = 32
 
 MODEL_CASES = [
     pytest.param(
@@ -383,6 +441,32 @@ def _write_package(manifest: str, root: Path, name: str = "pkg") -> None:
     (pkg_dir / "package.toml").write_text(manifest, encoding="utf-8")
     for filename in ("pyproject.toml", "uv.lock", "runner.py"):
         (pkg_dir / filename).write_text("", encoding="utf-8")
+
+
+def test_multiple_of_parses_on_field_and_array_item(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "pkg"\n', encoding="utf-8"
+    )
+    manifest = (
+        BASE
+        + CAPABILITY
+        + CAPABILITY_PREVIEW
+        + FIELD_V
+        + 'type = "integer"\nmultiple_of = 64\n'
+        + """
+[capabilities.speech.inputs.sizes]
+type = "array"
+[capabilities.speech.inputs.sizes.items.x]
+type = "integer"
+multiple_of = 32
+"""
+    )
+    _write_package(manifest, tmp_path)
+    (capability,) = load_registry(tmp_path).package("pkg").capabilities
+    by_name = {field.name: field for field in capability.inputs}
+    assert by_name["v"].multiple_of == WIDTH_MULTIPLE
+    (item,) = by_name["sizes"].items
+    assert item.multiple_of == ITEM_MULTIPLE
 
 
 def test_capability_models_list_parses(tmp_path: Path) -> None:

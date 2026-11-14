@@ -818,6 +818,7 @@ pattern = "^[^\\n]+$"
 `enum` (with `values`), `path` (resolved relative to the piece file, must
 exist) and `array` (one level deep, of objects described by `items`).
 Optional keys are `required`, `default`, `description`, `min`, `max`,
+`multiple_of` (on `integer` and `number`: the value must be a multiple),
 `pattern` (fullmatch), `min_items` and `values`; each option is only
 valid on its types. A `pattern` field's `description` is the rule a caller
 sees when its value fails the pattern, so state the rule in words there

@@ -10,6 +10,7 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field as dc_field
+from decimal import Decimal
 from pathlib import Path
 from typing import Final
 
@@ -67,6 +68,7 @@ class Field:
     description: str = ""
     min: float | None = None
     max: float | None = None
+    multiple_of: int | float | None = None
     pattern: str | None = None
     values: tuple[str, ...] = ()
     min_items: int | None = None
@@ -75,6 +77,20 @@ class Field:
     @property
     def has_default(self) -> bool:
         return self.default is not MISSING
+
+
+def is_multiple(value: int | float, multiple: int | float) -> bool:
+    """True when value is an exact multiple, compared in decimal.
+
+    ``float`` remainder lies (``0.3 % 0.1 != 0``), so compare the decimal
+    expansions instead; callers only pass type-checked numbers, never bools.
+    An infinite or NaN value is no multiple, and taking its remainder raises.
+    """
+
+    decimal_value = Decimal(str(value))
+    if not decimal_value.is_finite():
+        return False
+    return decimal_value % Decimal(str(multiple)) == 0
 
 
 @dataclass(frozen=True)
