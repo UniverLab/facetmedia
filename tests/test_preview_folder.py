@@ -36,6 +36,7 @@ ENTRY_KEYS = {
     "capability",
     "created",
     "duration_s",
+    "facet",
     "kind",
     "preview",
     "preview_state",
@@ -47,6 +48,7 @@ CARD_KEYS = {
     "capability",
     "created",
     "duration_s",
+    "facet",
     "kind",
     "n",
     "name",
@@ -102,6 +104,12 @@ def _preview(asset: Path, payload: dict[str, object], offset: float) -> Path:
     target.write_text(json.dumps(payload), encoding="utf-8")
     _touch(target, offset)
     return target
+
+
+@pytest.fixture(autouse=True)
+def _active_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Folder previews read the fixture registry, never the network."""
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
 
 
 @pytest.fixture
@@ -339,9 +347,59 @@ def test_gallery_json_carries_one_card_per_asset(pieces: Path, gallery_registry:
     ]
     assert [card["name"] for card in cards] == ["first", "first", "doc", "notes", "clip"]
     assert {card["package"] for card in cards} == {"echo"}
+    assert [card["facet"] for card in cards] == ["text"] * 5
     assert cards[1]["verified"] is False
     assert cards[1]["duration_s"] == DURATION_S
     assert cards[1]["preview_state"] == "stale"
+
+
+def test_folder_json_names_the_package_facet(
+    capsys: pytest.CaptureFixture[str],
+    pieces: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A known package names its facet id; an unknown package gives null."""
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    record_path = pieces / "e/clip.txt.facet.json"
+    stored = json.loads(record_path.read_text(encoding="utf-8"))
+    assert isinstance(stored["provenance"], dict)
+    stored["provenance"]["package"] = {"name": "ghost", "version": "0.1.0"}
+    record_path.write_text(json.dumps(stored), encoding="utf-8")
+    assert main(["preview", str(pieces), "--json"]) == EXIT_OK
+    entries = _envelope(capsys)["data"]["assets"]
+    assert all(set(entry) == ENTRY_KEYS for entry in entries)
+    assert [entry["facet"] for entry in entries[:4]] == ["text"] * 4
+    assert entries[4]["facet"] is None
+
+
+def test_folder_json_without_a_readable_registry_gives_null_facets(
+    capsys: pytest.CaptureFixture[str],
+    pieces: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A registry that cannot load leaves every facet null; nothing else changes."""
+    monkeypatch.setenv("FACET_REGISTRY", str(tmp_path / "no-registry"))
+    assert main(["preview", str(pieces), "--json"]) == EXIT_OK
+    entries = _envelope(capsys)["data"]["assets"]
+    assert [entry["facet"] for entry in entries] == [None] * len(entries)
+    assert [entry["capability"] for entry in entries] == ["echo.text"] * len(entries)
+
+
+def test_gallery_card_facet_is_null_for_an_unknown_package(
+    pieces: Path, gallery_registry: Path
+) -> None:
+    """A card whose package left the snapshot carries a null facet."""
+    record_path = pieces / "b/first.png.facet.json"
+    stored = json.loads(record_path.read_text(encoding="utf-8"))
+    assert isinstance(stored["provenance"], dict)
+    stored["provenance"]["package"] = {"name": "ghost", "version": "0.1.0"}
+    record_path.write_text(json.dumps(stored), encoding="utf-8")
+    with _running(_site(pieces, gallery_registry)) as port:
+        status, _headers, body = _get(port, "/gallery.json")
+    assert status == HTTP_OK
+    cards = json.loads(body)["assets"]
+    assert [card["facet"] for card in cards] == ["text", None, "text", "text", "text"]
 
 
 def test_gallery_serves_its_page_and_the_kit(pieces: Path, gallery_registry: Path) -> None:

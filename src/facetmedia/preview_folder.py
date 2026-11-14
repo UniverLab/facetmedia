@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final
 
-from facetmedia import record
+from facetmedia import record, registry
 from facetmedia.contract import FacetError
 
 __all__ = [
@@ -64,6 +64,7 @@ class FolderAsset:
     path: Path
     name: str | None
     package: str | None
+    facet: str | None
     kind: str
     capability: str
     created: str | None
@@ -93,7 +94,11 @@ def collect(folder: Path, kinds: frozenset[str] | None = None) -> tuple[FolderAs
         raise FacetError(
             "invalid_input", f"{folder}: no assets to preview", details={"folder": str(folder)}
         )
-    return tuple(replace(entry, n=index) for index, entry in enumerate(entries))
+    facets = _package_facets()
+    return tuple(
+        replace(entry, n=index, facet=_facet_of(facets, entry.package))
+        for index, entry in enumerate(entries)
+    )
 
 
 def entry_data(entry: FolderAsset) -> dict[str, object]:
@@ -179,6 +184,7 @@ def _fields(entry: FolderAsset) -> dict[str, object]:
         "asset": entry.asset,
         "kind": entry.kind,
         "capability": entry.capability,
+        "facet": entry.facet,
         "created": entry.created,
         "verified": entry.verified,
         "bytes": entry.bytes,
@@ -211,6 +217,7 @@ def _entry(folder: Path, path: Path) -> FolderAsset:
         path=path,
         name=_text(stored, "name"),
         package=_package(stored),
+        facet=None,
         kind=kind,
         capability=_capability(stored, path),
         created=_text(stored, "created"),
@@ -242,6 +249,20 @@ def _package(stored: Mapping[str, object]) -> str | None:
         return None
     package = provenance.get("package")
     return _text(package, "name") if isinstance(package, Mapping) else None
+
+
+def _package_facets() -> dict[str, str]:
+    """Each package name to its facet id, from the active snapshot."""
+    try:
+        active = registry.load_active_registry()
+    except FacetError:
+        return {}
+    return {name: pkg.facet for name, pkg in active.packages.items()}
+
+
+def _facet_of(facets: Mapping[str, str], package: str | None) -> str | None:
+    """The facet id for ``package``, or ``None`` when the snapshot names none."""
+    return facets.get(package) if package is not None else None
 
 
 def _verified(stored: Mapping[str, object]) -> bool:

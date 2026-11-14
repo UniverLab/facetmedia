@@ -758,7 +758,7 @@ http://127.0.0.1:39651/viewer/index.html?asset=canopy.txt
 $ facet preview out/thesis.pdf --no-open           # a document: its viewer, same route
 http://127.0.0.1:39651/viewer/index.html?asset=thesis.pdf
 $ facet preview pieces --kind image --json         # a folder: one entry per asset
-{"contract": 1, "data": {"assets": [{"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image", "created": "2026-11-12T10:04:11Z", "duration_s": null, "kind": "image", "preview": {"preview": 1, "…": "the parsed preview"}, "preview_state": "fresh", "verified": true}, "…"], "folder": "pieces"}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"assets": [{"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image", "created": "2026-11-12T10:04:11Z", "duration_s": null, "facet": "image", "kind": "image", "preview": {"preview": 1, "…": "the parsed preview"}, "preview_state": "fresh", "verified": true}, "…"], "folder": "pieces"}, "facet": "0.1.0b1", "ok": true}
 $ facet preview pieces --no-open                    # the gallery page, one server
 http://127.0.0.1:39651/gallery/index.html
 ```

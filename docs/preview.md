@@ -152,17 +152,21 @@ order:
 {"folder": "pieces",
  "assets": [
    {"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image",
-    "created": "2026-11-12T10:04:11Z", "duration_s": null, "kind": "image",
+    "created": "2026-11-12T10:04:11Z", "duration_s": null, "facet": "image",
+    "kind": "image",
     "preview": {"preview": 1, "kind": "image", "summary": "a boxed product"},
     "preview_state": "fresh", "verified": true},
    {"asset": "voices/intro.wav", "bytes": 911020, "capability": "speak.voice",
-    "created": "2026-11-12T10:09:52Z", "duration_s": 4.25, "kind": "audio",
+    "created": "2026-11-12T10:09:52Z", "duration_s": 4.25, "facet": null,
+    "kind": "audio",
     "preview": null, "preview_state": "stale", "verified": false}
  ]}
 ```
 
 `kind`, `capability`, `created`, `bytes` and `duration_s` come from the
-record (`duration_s` is null when the record states none); `verified` is
+record (`duration_s` is null when the record states none); `facet` is the
+facet id of the record's package from the active registry snapshot, null
+when the snapshot names no such package; `verified` is
 true only when the record's check passed; `preview` is the parsed preview
 file for a fresh asset and null otherwise.
 
@@ -185,9 +189,11 @@ A failure while serving — any route, any cause — answers 500 with a short
 plain-text body and is logged to the run log; nothing is printed to the
 terminal.
 
-A card carries the `--json` fields without `preview`, plus `n` (the index
-the routes use), `name` and `package` (from the record), `thumb` and
-`open` (a route, or null). A fresh card always has an `open` route; a
+A card carries the `--json` fields without `preview` — `facet` among them —
+plus `n` (the index the routes use), `name` and `package` (from the record),
+`thumb` and `open` (a route, or null). `facet` is the facet id of the
+record's package from the active registry snapshot, null when the snapshot
+names no such package. A fresh card always has an `open` route; a
 stale or missing card has one when its package is installed — opening it
 builds the preview first, through the same runner call
 `facet preview <asset path>` makes, and the card turns fresh. A card

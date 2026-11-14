@@ -378,8 +378,10 @@ def test_handle_error_logs_not_stderr(
     gallery: Path,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failure escaping the handler is logged to the run log, never stderr."""
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
     server = make_gallery_server(0, _site(gallery))
     try:
         with caplog.at_level(logging.DEBUG, logger="facetmedia"):
