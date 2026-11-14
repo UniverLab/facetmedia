@@ -12,7 +12,13 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 # uv pins facet's own uv binary (uv.find_uv_bin()); packaging evaluates requires_facet.
-dependencies = ["uv>=0.13,<0.14", "packaging>=24"]
+dependencies = [
+  "uv>=0.13,<0.14",
+  "packaging>=24",
+  "rich>=13",
+  "questionary>=2",
+  "rich-argparse>=1",
+]
 
 # Development tools live in a dependency group (PEP 735), not in an extra:
 # `uv sync` installs it by default, and the lab's quality gate (deptry) would

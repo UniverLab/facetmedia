@@ -1,9 +1,10 @@
 """``facet license accept``: one model by id, or a wizard for a person.
 
-Accepting a licence is a human act, so at a terminal with no model id the verb
-lists what is pending, lets the person pick one by number and asks them to type
-that model's id back. An agent names the model and passes ``--yes`` instead.
-Nothing is recorded unless the typed text is exactly the model id.
+Accepting a licence is a human act, so at a terminal with no model id the
+verb lists what is pending, lets the person pick one with the arrow keys
+and asks them to type that model's id back. An agent names the model and
+passes ``--yes`` instead. Nothing is recorded unless the typed text is
+exactly the model id.
 """
 
 from __future__ import annotations
@@ -11,18 +12,29 @@ from __future__ import annotations
 import argparse
 import sys
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
-from facetmedia import contract, env, licenses, lock
+import questionary
+from rich.panel import Panel
+
+from facetmedia import banner, contract, env, licenses, lock, theme
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry
 
-LIST_PROMPT = "[number / q] "
-RETRY = "enter a number from the list, or q"
+if TYPE_CHECKING:
+    from facetmedia.registry_types import Registry
+
 NO_PENDING = "no model needs acceptance"
 MOOT_LINE = "nothing to accept"
 DIRECT_FORM = "facet license accept <model-id>"
+_DONE: Final = object()
+SELECT_MESSAGE = "Choose a model — arrows move, enter picks [default: done]:"
+
+
+def type_prompt(model_id: str) -> str:
+    """The typing prompt: the exact text to type, cancelling by default."""
+    return f'Type "{model_id}" to accept [default: cancel]: '
 
 
 def handle(args: argparse.Namespace) -> int:
@@ -87,57 +99,80 @@ def _pending() -> list[dict[str, Any]]:
 
 
 def _run(args: argparse.Namespace) -> int:
-    """List, pick, confirm; return to the list after every answer."""
+    """Banner, then pick and confirm; back to the list after every answer."""
+    banner.print_text()
     while True:
         pending = _pending()
         if not pending:
             print(NO_PENDING)
             return 0
-        _show(pending)
-        index = _ask(len(pending))
-        if index is None:
+        model_id = _select(pending)
+        if model_id is None:
             return 0
-        _confirm(args, str(pending[index]["id"]))
+        _confirm(args, model_id)
 
 
-def _show(pending: list[dict[str, Any]]) -> None:
-    """One numbered line per pending model, with its package's install state."""
+def _select(pending: list[dict[str, Any]]) -> str | None:
+    """The picked pending model id, or ``None`` on done."""
     registry = load_active_registry()
     home = Home.peek_env()
-    for index, row in enumerate(pending, start=1):
-        package = registry.packages[str(row["package"])]
-        installed = "installed" if env.is_installed(package, home) else "not installed"
-        commercial = "allowed" if row["commercial_use"] else "not allowed"
-        print(
-            f"{index}) {row['id']}  {row['package']} ({installed})  "
-            f"{row['spdx']}  commercial use {commercial}"
-        )
+    prompts = [
+        questionary.Choice(title=_model_line(row, registry, home), value=str(row["id"]))
+        for row in pending
+    ]
+    prompts.append(questionary.Choice(title="done", value=_DONE))
+    picked = questionary.select(SELECT_MESSAGE, choices=prompts).unsafe_ask()
+    if picked is _DONE:
+        return None
+    return str(picked)
 
 
-def _ask(count: int) -> int | None:
-    """The picked index, or ``None`` to quit; anything else asks again."""
-    while True:
-        try:
-            answer = input(LIST_PROMPT)
-        except EOFError:
-            return None
-        word = answer.strip().lower()
-        if word == "q":
-            return None
-        if word.isdigit() and 1 <= int(word) <= count:
-            return int(word) - 1
-        print(RETRY)
+def _model_line(row: dict[str, Any], registry: Registry, home: Home) -> str:
+    """One pending model: id, package, installed or not, SPDX, commercial use."""
+    package = registry.packages[str(row["package"])]
+    installed = "installed" if env.is_installed(package, home) else "not installed"
+    commercial = "allowed" if row["commercial_use"] else "not allowed"
+    return (
+        f"{row['id']}  {row['package']} ({installed})  {row['spdx']}  commercial use {commercial}"
+    )
 
 
 def _confirm(args: argparse.Namespace, model_id: str) -> None:
-    """Ask for the exact id, then say what happened and go back to the list."""
+    """Show the terms, ask for the exact id, and say what happened."""
+    found = licenses.find_model(model_id)
+    if found is None:
+        return
+    package, model = found
+    licenses.warn(package, model)
+    theme.console().print(Panel(_terms_text(model_id), title=f"Terms for {model_id}"))
+    typed = questionary.text(type_prompt(model_id)).unsafe_ask()
     try:
-        with _held(args):
-            outcome = licenses.accept(model_id, assume_yes=False)
+        verdict = licenses.decide(model_id, typed)
     except FacetError as exc:
         print(exc.message)
         return
-    if outcome.state == licenses.ACCEPTED:
-        print(f"{model_id} accepted")
-    elif outcome.state == licenses.CANCELLED:
+    if verdict.state == licenses.CANCELLED:
         print(licenses.CANCELLED_LINE)
+        return
+    with _held(args):
+        licenses.record(model, "interactive")
+    print(f"{model_id} accepted")
+
+
+def _terms_text(model_id: str) -> str:
+    """The terms the person accepts, as shown above the typing prompt."""
+    found = licenses.find_model(model_id)
+    if found is None:
+        return ""
+    _package, model = found
+    lines = [
+        f"model {model.id}",
+        f"package {found[0].name}",
+        f"spdx {model.spdx}",
+        f"commercial_use {str(model.commercial_use).lower()}",
+        f"terms_url {model.terms_url}",
+    ]
+    if not model.commercial_use:
+        lines.append(licenses.NON_COMMERCIAL_LINE)
+    lines.append(licenses.RESPONSIBILITY_LINE)
+    return "\n".join(lines)

@@ -118,6 +118,48 @@ def _matching_record(model: Model, records: list[dict[str, Any]]) -> dict[str, A
     return None
 
 
+def decide(model_id: str, typed: str) -> Acceptance:
+    """Whether ``typed`` confirms ``model_id``: cancelled, or accepted to record.
+
+    An empty answer cancels and records nothing; a mismatch raises
+    ``invalid_input`` and records nothing.  This is the pure comparison behind
+    :func:`accept`: the direct form feeds it what ``input()`` read, the wizard
+    feeds it what the questionary text prompt read, so the wizard path never
+    hides a second prompt inside this module.
+    """
+    if typed == "":
+        return Acceptance(CANCELLED)
+    if typed != model_id:
+        raise FacetError(
+            "invalid_input",
+            f'confirmation did not match; nothing was recorded (expected "{model_id}")',
+            details={"model": model_id},
+        )
+    return Acceptance(ACCEPTED)
+
+
+def record(model: Model, method: str) -> Acceptance:
+    """Write the acceptance record for an already-confirmed ``model``."""
+    entry: dict[str, Any] = {
+        "model": model.id,
+        "spdx": model.spdx,
+        "terms_url": model.terms_url,
+        "commercial_use": model.commercial_use,
+        "by": getpass.getuser(),
+        "at": _now_z(),
+        "method": method,
+    }
+    home = Home.from_env()
+    kept = [
+        record_item for record_item in _read_accepted(home) if record_item.get("model") != model.id
+    ]
+    kept.append(entry)
+    atomic_write_json(
+        home.licenses_file, {"version": STATE_VERSION, "accepted": kept}, home.tmp_dir
+    )
+    return Acceptance(ACCEPTED, entry)
+
+
 def accept(model_id: str, assume_yes: bool) -> Acceptance:
     """Accept ``model_id``; returns what happened, with the record when accepted.
 
@@ -136,42 +178,17 @@ def accept(model_id: str, assume_yes: bool) -> Acceptance:
         return Acceptance(MOOT)
     warn(package, model)
     if assume_yes:
-        method = "flag"
-    else:
-        if not (sys.stdin.isatty() and sys.stdout.isatty()):
-            raise FacetError(
-                "license_needs_person",
-                "license accept needs a person at a terminal",
-                hint=NEEDS_PERSON_HINT,
-            )
-        answer = input(prompt_text(model_id))
-        if answer == "":
-            return Acceptance(CANCELLED)
-        if answer != model_id:
-            raise FacetError(
-                "invalid_input",
-                f'confirmation did not match; nothing was recorded (expected "{model_id}")',
-                details={"model": model_id},
-            )
-        method = "interactive"
-    record: dict[str, Any] = {
-        "model": model.id,
-        "spdx": model.spdx,
-        "terms_url": model.terms_url,
-        "commercial_use": model.commercial_use,
-        "by": getpass.getuser(),
-        "at": _now_z(),
-        "method": method,
-    }
-    home = Home.from_env()
-    kept = [
-        record_item for record_item in _read_accepted(home) if record_item.get("model") != model_id
-    ]
-    kept.append(record)
-    atomic_write_json(
-        home.licenses_file, {"version": STATE_VERSION, "accepted": kept}, home.tmp_dir
-    )
-    return Acceptance(ACCEPTED, record)
+        return record(model, "flag")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise FacetError(
+            "license_needs_person",
+            "license accept needs a person at a terminal",
+            hint=NEEDS_PERSON_HINT,
+        )
+    verdict = decide(model_id, input(prompt_text(model_id)))
+    if verdict.state == CANCELLED:
+        return verdict
+    return record(model, "interactive")
 
 
 def list_status() -> list[dict[str, Any]]:

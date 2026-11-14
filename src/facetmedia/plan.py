@@ -16,7 +16,10 @@ import sys
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
-from facetmedia import config, env, lock, probes
+import questionary
+from rich.table import Table
+
+from facetmedia import config, env, lock, probes, theme
 from facetmedia.contract import FacetError, emit, ok
 from facetmedia.home import Home
 from facetmedia.progress import Progress, announce_failure
@@ -292,10 +295,16 @@ def handle_pull(args: argparse.Namespace) -> int:
         from facetmedia import wizard  # noqa: PLC0415
 
         if wizard.offered(args):
-            chosen = wizard.choose(registry, home)
+            chosen = wizard.choose(registry, home, args)
             if chosen is None:
                 return 0
             names = chosen
+            selected = resolve(registry, names, packages)
+            reporter = _reporter(args)
+            wait = bool(getattr(args, "wait", True))
+            timeout_s = float(getattr(args, "wait_timeout", 3600.0))
+            with lock.hold("exclusive", "facet pull", wait, timeout_s):
+                return _planned_pull(args, home, selected, reporter, confirmed=True)
     selected = resolve(registry, names, packages)
     legacy = legacy_package(args, selected, names)
     reporter = _reporter(args)
@@ -372,6 +381,7 @@ def _planned_pull(
     home: Home,
     selected: list[Package],
     reporter: Progress | None = None,
+    confirmed: bool = False,
 ) -> int:
     entries = build_plan(
         selected,
@@ -388,7 +398,7 @@ def _planned_pull(
     refusal = disk_refusal(entries, home)
     if refusal is not None:
         raise refusal
-    if not _confirmed(args, entries, plan_data):
+    if not confirmed and not _confirmed(args, entries, plan_data):
         return 0
     return _install_all(args, home, entries, reporter)
 
@@ -408,17 +418,32 @@ def _confirmed(
             details={"plan": plan_data},
         )
     _print_plan(entries)
-    try:
-        answer = input(f"install {len(to_install)} packages? [y/N] ")
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() != "y":
+    if theme.styled():
+        agreed = questionary.confirm(
+            confirm_prompt(len(to_install)),
+            default=False,
+        ).unsafe_ask()
+    else:
+        try:
+            answer = input(f"install {len(to_install)} packages? [y/N] ")
+        except EOFError:
+            answer = ""
+        agreed = answer.strip().lower() == "y"
+    if not agreed:
         print("nothing installed")
         return False
     return True
 
 
+def confirm_prompt(count: int) -> str:
+    """The multi-package confirmation question, defaulting to no."""
+    return f"install {count} packages? [default: no]"
+
+
 def _print_plan(entries: list[PlanEntry]) -> None:
+    if theme.styled():
+        theme.console().print(_plan_table(entries))
+        return
     for entry in entries:
         state = _state_text(entry)
         print(
@@ -426,6 +451,26 @@ def _print_plan(entries: list[PlanEntry]) -> None:
             f"models {_models_text(entry.model_download_bytes)}  "
             f"{state}: {entry.reason}"
         )
+
+
+def _plan_table(entries: list[PlanEntry]) -> Table:
+    """The plan as a rich table: package, version, disk, models, decision."""
+    table = Table(title="Plan")
+    table.add_column("package")
+    table.add_column("version")
+    table.add_column("disk")
+    table.add_column("models")
+    table.add_column("decision")
+    for entry in entries:
+        state = _state_text(entry)
+        table.add_row(
+            entry.name,
+            entry.version,
+            f"{entry.disk_gb:.1f} GB",
+            _models_text(entry.model_download_bytes),
+            f"{state}: {entry.reason}",
+        )
+    return table
 
 
 def _state_text(entry: PlanEntry) -> str:

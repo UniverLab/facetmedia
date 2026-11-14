@@ -1,9 +1,9 @@
 """``facet license accept`` with no model: the wizard for a person at a terminal.
 
 Everything here builds its own registry copy and drives the wizard with
-scripted stdin and fake TTYs; nothing downloads.  ``_TtyProxy``, ``_TtyIn``,
-``scripted_tty`` and ``make_installed`` are copied from
-``tests.test_pull_wizard`` so this file reads alone.
+fake TTYs: questionary prompts read keystrokes from prompt_toolkit pipe
+input, one entry per prompt in order.  Nothing is recorded unless the typed
+text is exactly the model id.
 """
 
 from __future__ import annotations
@@ -15,22 +15,24 @@ import sys
 from pathlib import Path
 
 import pytest
+import questionary
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from facetmedia import license_accept
 from facetmedia import licenses as licenses_module
 from facetmedia.cli import main
 from facetmedia.env.package_marker import package_fingerprint
 from facetmedia.home import Home
-from facetmedia.registry import load_registry
+from facetmedia.registry import load_active_registry, load_registry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 ECHO_MODEL = "echo-weights"
 TERMSY_MODEL = "termsy-weights"
 NO_PENDING = license_accept.NO_PENDING
-# The list is printed once per pass, so an answer that returns to it prints it twice.
-LISTINGS_AFTER_RETURN = 2
-RETRIES = 3
 EXIT_INVALID_INPUT = 2
+EXIT_CANCELLED = 130
+PENDING_MODELS = 2
 
 
 class _TtyProxy:
@@ -47,23 +49,46 @@ class _TtyProxy:
 
 
 class _TtyIn(io.StringIO):
-    """A stdin whose only truth is ``isatty()``; answers come from ``input``."""
+    """A stdin whose only truth is ``isatty()``; prompts read pipe input."""
 
     def isatty(self) -> bool:
         return True
 
 
-def scripted_tty(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
-    """Fake TTYs on both stdio and feed ``answers`` to ``input`` in order."""
+def fake_tty(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
+    """Fake TTYs on both stdio; each questionary prompt reads one pipe entry."""
     monkeypatch.setattr(sys, "stdin", _TtyIn(""))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.delenv("NO_COLOR", raising=False)
     pending = list(answers)
+    real = {name: getattr(questionary, name) for name in ("checkbox", "select", "confirm", "text")}
 
-    def fake_input(prompt: str = "") -> str:
-        print(prompt, end="")
-        return pending.pop(0)
+    def factory(name: str) -> object:
+        def make(*args: object, **kwargs: object) -> questionary.Question:
+            question = real[name](*args, **kwargs)
+            entered = create_pipe_input()
+            pipe = entered.__enter__()
+            pipe.send_text(pending.pop(0))
+            dummy = DummyOutput()
+            question.application.input = pipe
+            question.application.output = dummy
+            question.application.renderer.output = dummy
+            original = question.unsafe_ask
 
-    monkeypatch.setattr("builtins.input", fake_input)
+            def run(*args: object, **kwargs: object) -> object:
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    entered.__exit__(None, None, None)
+
+            question.unsafe_ask = run  # type: ignore[method-assign]
+            return question
+
+        return make
+
+    for name in real:
+        monkeypatch.setattr(questionary, name, factory(name))
 
 
 def make_installed(home: Home, registry_root: Path, name: str) -> None:
@@ -116,83 +141,114 @@ def _records() -> list[dict[str, object]]:
     return accepted
 
 
-def _listing_lines(out: str) -> list[str]:
-    return [line for line in out.splitlines() if line[:1].isdigit()]
+def test_model_line_shows_install_spdx_and_commercial(
+    registry: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = Home.peek_env()
+    active = load_active_registry()
+    rows = {str(row["id"]): row for row in license_accept._pending()}
+    echo = license_accept._model_line(rows[ECHO_MODEL], active, home)
+    assert ECHO_MODEL in echo
+    assert "echo (not installed)" in echo
+    assert "CC-BY-4.0" in echo
+    assert "commercial use allowed" in echo
+    termsy = license_accept._model_line(rows[TERMSY_MODEL], active, home)
+    assert TERMSY_MODEL in termsy
+    assert "termsy (installed)" in termsy
+    assert "commercial use not allowed" in termsy
 
 
-def test_quit_shows_every_pending_model_and_records_nothing(
+def test_prompts_show_what_to_type_and_the_defaults() -> None:
+    assert "[default: done]" in license_accept.SELECT_MESSAGE
+    prompt = license_accept.type_prompt(TERMSY_MODEL)
+    assert TERMSY_MODEL in prompt
+    assert "[default: cancel]" in prompt
+
+
+def test_done_records_nothing(
     registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted_tty(monkeypatch, ["q"])
+    fake_tty(monkeypatch, ["\x1b[B\x1b[B\r"])
     assert main(["license", "accept"]) == 0
-    out = capsys.readouterr().out
-    listed = [line for line in _listing_lines(out) if ")" in line]
-    assert listed == [
-        f"1) {ECHO_MODEL}  echo (not installed)  CC-BY-4.0  commercial use allowed",
-        f"2) {TERMSY_MODEL}  termsy (installed)  CC-BY-NC-4.0  commercial use not allowed",
-    ]
-    assert license_accept.LIST_PROMPT in out
     assert _records() == []
 
 
 def test_accepting_one_returns_to_the_shortened_list(
     registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted_tty(monkeypatch, ["2", TERMSY_MODEL, "q"])
+    fake_tty(monkeypatch, ["\r", f"{ECHO_MODEL}\r", "\x1b[B\r"])
     assert main(["license", "accept"]) == 0
     captured = capsys.readouterr()
     out = captured.out
-    assert licenses_module.prompt_text(TERMSY_MODEL) in out
+    assert f"Terms for {ECHO_MODEL}" in out
+    assert "https://example.invalid/echo-weights" in out
     for fragment in (
-        f"model {TERMSY_MODEL}",
-        "package termsy",
-        "spdx CC-BY-NC-4.0",
-        "commercial_use false",
-        "terms_url https://example.invalid/termsy",
-        licenses_module.NON_COMMERCIAL_LINE,
+        f"model {ECHO_MODEL}",
+        "package echo",
+        "spdx CC-BY-4.0",
+        "commercial_use true",
+        "terms_url https://example.invalid/echo-weights",
         licenses_module.RESPONSIBILITY_LINE,
     ):
         assert fragment in captured.err
-    assert f"{TERMSY_MODEL} accepted" in out
-    after = out.split(f"{TERMSY_MODEL} accepted")[1]
-    assert f"1) {ECHO_MODEL}  echo (not installed)" in after
-    assert TERMSY_MODEL not in after
+    assert f"{ECHO_MODEL} accepted" in out
     records = _records()
-    assert [record["model"] for record in records] == [TERMSY_MODEL]
+    assert [record["model"] for record in records] == [ECHO_MODEL]
     assert records[0]["method"] == "interactive"
 
 
 def test_mismatch_records_nothing_and_returns_to_the_list(
     registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted_tty(monkeypatch, ["1", "nope", "q"])
+    fake_tty(monkeypatch, ["\r", "nope\r", "\x1b[B\x1b[B\r"])
     assert main(["license", "accept"]) == 0
     out = capsys.readouterr().out
     assert "confirmation did not match" in out
-    assert ECHO_MODEL in out.split("confirmation did not match")[0]
-    assert out.count(f"1) {ECHO_MODEL}") == LISTINGS_AFTER_RETURN
+    assert f"Terms for {ECHO_MODEL}" in out
     assert _records() == []
 
 
 def test_enter_cancels_records_nothing_and_returns_to_the_list(
     registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted_tty(monkeypatch, ["1", "", "q"])
+    fake_tty(monkeypatch, ["\r", "\r", "\x1b[B\x1b[B\r"])
     assert main(["license", "accept"]) == 0
     out = capsys.readouterr().out
     assert licenses_module.CANCELLED_LINE in out
-    assert out.count(f"1) {ECHO_MODEL}") == LISTINGS_AFTER_RETURN
     assert _records() == []
 
 
-def test_a_bad_selection_asks_again(
+def test_accepting_both_leaves_nothing_pending(
     registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted_tty(monkeypatch, ["", "x", "7", "q"])
+    fake_tty(monkeypatch, ["\r", f"{ECHO_MODEL}\r", "\r", f"{TERMSY_MODEL}\r"])
     assert main(["license", "accept"]) == 0
     out = capsys.readouterr().out
-    assert out.count(license_accept.RETRY) == RETRIES
-    assert out.count(f"1) {ECHO_MODEL}") == 1
+    assert f"{ECHO_MODEL} accepted" in out
+    assert f"{TERMSY_MODEL} accepted" in out
+    assert NO_PENDING in out
+    assert len(_records()) == PENDING_MODELS
+
+
+def test_ctrl_c_at_select_exits_130_and_records_nothing(
+    registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_tty(monkeypatch, ["\x03"])
+    assert main(["license", "accept"]) == EXIT_CANCELLED
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+    assert "Traceback" not in out
+    assert _records() == []
+
+
+def test_ctrl_c_at_typing_exits_130_and_records_nothing(
+    registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_tty(monkeypatch, ["\r", "\x03"])
+    assert main(["license", "accept"]) == EXIT_CANCELLED
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+    assert "Traceback" not in out
     assert _records() == []
 
 
@@ -202,11 +258,12 @@ def test_nothing_pending_says_so_without_asking(
     assert main(["license", "accept", TERMSY_MODEL, "--yes"]) == 0
     assert main(["license", "accept", ECHO_MODEL, "--yes"]) == 0
     capsys.readouterr()
-    scripted_tty(monkeypatch, [])
+    fake_tty(monkeypatch, [])
     assert main(["license", "accept"]) == 0
     out = capsys.readouterr().out
-    assert out == f"{NO_PENDING}\n"
-    assert len(_records()) == LISTINGS_AFTER_RETURN
+    assert "█" in out
+    assert out.endswith(f"{NO_PENDING}\n")
+    assert len(_records()) == PENDING_MODELS
 
 
 def test_no_model_off_a_terminal_names_the_direct_form(

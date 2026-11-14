@@ -491,6 +491,9 @@ def main(argv: list[str] | None = None) -> int:
         return exc.exit_code
     except SystemExit:
         raise
+    except KeyboardInterrupt:
+        print("cancelled")
+        return 130
     except Exception:
         traceback.print_exc(file=sys.stderr)
         fallback = FacetError("internal", "internal error, see stderr", details={"log": "stderr"})

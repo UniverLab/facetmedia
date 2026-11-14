@@ -40,7 +40,7 @@ complying with these terms.
 The confirmation names the exact text to type, quoted, so the person never
 has to guess the id. For `termsy-weights` it reads:
 
-    Type "termsy-weights" to accept, or press Enter to cancel:
+    Type "termsy-weights" to accept [default: cancel]:
 
 - The exact model id records the acceptance. Anything else records
   nothing and exits 2 with a message naming what was expected.
@@ -66,22 +66,22 @@ is given; in every other case the verb fails with `invalid_input` (exit 2)
 naming the pending ids and the form `facet license accept <model-id>`.
 `--yes` never accepts more than the one model named.
 
-The wizard lists every model that needs acceptance and has none recorded,
-whether or not its package is installed — `pull` demands acceptance before
-downloading, so a pending model of a package that is not installed is
-exactly the case a person must handle. Each numbered line shows the model
-id, its package, whether that package is installed, its SPDX and whether
-commercial use is allowed:
+The wizard first prints the banner, then lists every model that needs
+acceptance and has none recorded, whether or not its package is
+installed — `pull` demands acceptance before downloading, so a pending
+model of a package that is not installed is exactly the case a person must
+handle. Each line shows the model id, its package, whether that package is
+installed, its SPDX and whether commercial use is allowed:
 
-    1) omnivoice  omnivoice (not installed)  CC-BY-NC-4.0  commercial use not allowed
+    omnivoice  omnivoice (not installed)  CC-BY-NC-4.0  commercial use not allowed
 
-Pick one by its number, or `q` to quit. Any other answer prints
-`enter a number from the list, or q` and asks again. Picking a model shows
-its full terms block and then the confirmation above; after an acceptance,
+Pick one with the arrow keys, or `done` to quit. Picking a model shows
+its terms in a panel and then the confirmation above; after an acceptance,
 a cancel or a mismatch it returns to the list, which is re-read on every
 pass, so an accepted model no longer appears. When nothing is pending the
 wizard says `no model needs acceptance` in one line. It exits 0 when
-nothing is pending or the person quits.
+nothing is pending or the person picks `done`, and exits 130 printing
+`cancelled` on Ctrl+C, recording nothing that had not already completed.
 
 ## Backend-owned models
 

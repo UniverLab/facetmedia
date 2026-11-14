@@ -304,3 +304,19 @@ def test_license_list_json_shape(
     assert isinstance(row["by"], str) and row["by"]
     assert isinstance(row["at"], str) and row["at"]
     assert row["method"] == "flag"
+
+
+def test_decide_accepts_the_exact_id() -> None:
+    assert licenses_module.decide(MODEL_ID, MODEL_ID).state == licenses_module.ACCEPTED
+
+
+def test_decide_empty_answer_cancels() -> None:
+    assert licenses_module.decide(MODEL_ID, "").state == licenses_module.CANCELLED
+
+
+def test_decide_mismatch_raises_invalid_input() -> None:
+    with pytest.raises(FacetError) as exc_info:
+        licenses_module.decide(MODEL_ID, "not-the-model")
+    assert exc_info.value.code == "invalid_input"
+    assert MODEL_ID in exc_info.value.message
+    assert "nothing was recorded" in exc_info.value.message

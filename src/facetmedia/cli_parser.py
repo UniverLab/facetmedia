@@ -11,9 +11,13 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable, Mapping
-from typing import Any, NoReturn, TypeVar
+from typing import Any, ClassVar, NoReturn, TypeVar
 
-from facetmedia import __version__, contract, example, preview
+from rich.panel import Panel
+from rich.text import Text
+from rich_argparse import RawDescriptionRichHelpFormatter
+
+from facetmedia import __version__, contract, example, preview, theme
 from facetmedia.contract import FacetError
 from facetmedia.registry_types import FACETS
 
@@ -99,6 +103,61 @@ class FacetParser(argparse.ArgumentParser):
         super().error(message)
 
 
+def _styled_group_name(name: str) -> str:
+    """A help section heading: sub-verbs live under ``Commands``."""
+    if name == "positional arguments":
+        return "Commands"
+    return str.title(name)
+
+
+class FacetHelpFormatter(RawDescriptionRichHelpFormatter):
+    """Styled help for a person at a terminal.
+
+    Calm colours only (see ``facetmedia.theme``): the default foreground with
+    ``bold`` and ``dim``.  Used only when standard output is a styled TTY;
+    everywhere else the plain ``RawDescriptionHelpFormatter`` keeps the output
+    byte-identical to what it is today.
+    """
+
+    group_name_formatter: ClassVar[Callable[[str], str]] = _styled_group_name
+    styles: ClassVar[dict[str, Any]] = {
+        "argparse.args": "bold",
+        "argparse.groups": "bold",
+        "argparse.help": "default",
+        "argparse.metavar": "default",
+        "argparse.prog": "default",
+        "argparse.default": "dim",
+        "argparse.text": "default",
+        "argparse.syntax": "bold",
+    }
+    help_markup: ClassVar[bool] = False
+    text_markup: ClassVar[bool] = False
+    highlights: ClassVar[list[str]] = []
+
+    def add_text(self, text: Any) -> None:
+        """The top-level verb groups as one panel per group, not plain text."""
+        if isinstance(text, str) and text == _grouped_help():
+            self._add_group_panels()
+            return
+        super().add_text(text)
+
+    def _add_group_panels(self) -> None:
+        """One titled panel per verb group, then the maintainers line."""
+        for title, verbs in _VERB_GROUPS:
+            body = "\n".join(
+                f"{verb:<9} {_VERB_HELP.get(verb) or _GROUP_HELP[verb]}" for verb in verbs
+            )
+            self.add_renderable(Panel(Text(body, style="argparse.text"), title=title))
+        super().add_text("maintainers: facet registry validate <registry-dir>")
+
+
+def _formatter_class() -> type[argparse.HelpFormatter]:
+    """Rich panels for a person, plain text for agents and pipes."""
+    if theme.styled():
+        return FacetHelpFormatter
+    return argparse.RawDescriptionHelpFormatter
+
+
 def _with_examples(description: str, examples: tuple[str, ...]) -> str:
     """The description plus an ``examples:`` section of real command lines."""
     if not examples:
@@ -173,7 +232,7 @@ def _add_verb(
         key[-1],
         help=help_text,
         description=_with_examples(help_text, tuple(examples.get(key, ()))),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=_formatter_class(),
     )
     _add_json(parser)
     if lock:
@@ -196,7 +255,7 @@ def _add_group(
         name,
         help=help_text,
         description=_with_examples(help_text, tuple(examples.get((name,), ()))),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=_formatter_class(),
     )
     _add_json(group)
     nested = group.add_subparsers(
@@ -228,7 +287,7 @@ def _add_registry_group(
             "inspect the package registry (maintainers)",
             tuple(examples.get(("registry",), ())),
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=_formatter_class(),
     )
     _add_json(group)
     nested = group.add_subparsers(
@@ -553,7 +612,7 @@ def build_parser(
         description="Creation tools for agents: isolated, verifiable, license-aware.",
         usage="facet [-h] [--version] [--json] VERB ...",
         epilog=_grouped_help(),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=_formatter_class(),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _add_json(parser)

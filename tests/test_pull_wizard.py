@@ -1,8 +1,9 @@
 """``facet pull`` with no argument: the wizard at a TTY, the error elsewhere.
 
 Everything here builds its own tiny registry and drives the wizard with
-scripted stdin and fake TTYs; nothing downloads.  ``make_installed`` is
-copied from ``tests.test_pull_plan`` so this file reads alone.
+fake TTYs: questionary prompts read keystrokes from prompt_toolkit pipe
+input, one entry per prompt in order.  Nothing downloads.  ``make_installed``
+is copied from ``tests.test_pull_plan`` so this file reads alone.
 """
 
 from __future__ import annotations
@@ -15,8 +16,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import questionary
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
-from facetmedia import probes, wizard
+from facetmedia import plan, probes, wizard
 from facetmedia.cli import main
 from facetmedia.contract import EXIT_CODES
 from facetmedia.env.package_marker import package_fingerprint
@@ -27,6 +31,7 @@ from tests.test_pull_plan import Spec, fake_pull, set_machine, write_package, wr
 
 GPU_INFO = "RTX 3060, 12288 MiB, 100 MiB"
 EXIT_INVALID_INPUT = 2
+EXIT_CANCELLED = 130
 SelectRegistry = Callable[..., Path]
 
 
@@ -65,24 +70,47 @@ class _TtyProxy:
 
 
 class _TtyIn(io.StringIO):
-    """A stdin whose only truth is ``isatty()``; answers come from ``input``."""
+    """A stdin whose only truth is ``isatty()``; prompts read pipe input."""
 
     def isatty(self) -> bool:
         return True
 
 
-def scripted_tty(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
-    """Fake TTYs on both stdio and feed ``answers`` to ``input`` in order."""
+def fake_tty(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
+    """Fake TTYs on both stdio; each questionary prompt reads one pipe entry."""
     monkeypatch.setattr(sys, "stdin", _TtyIn(""))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(probes, "gpu_info", lambda: GPU_INFO)
     pending = list(answers)
+    real = {name: getattr(questionary, name) for name in ("checkbox", "select", "confirm", "text")}
 
-    def fake_input(prompt: str = "") -> str:
-        print(prompt, end="")
-        return pending.pop(0)
+    def factory(name: str) -> Callable[..., questionary.Question]:
+        def make(*args: object, **kwargs: object) -> questionary.Question:
+            question = real[name](*args, **kwargs)
+            entered = create_pipe_input()
+            pipe = entered.__enter__()
+            pipe.send_text(pending.pop(0))
+            dummy = DummyOutput()
+            question.application.input = pipe
+            question.application.output = dummy
+            question.application.renderer.output = dummy
+            original = question.unsafe_ask
 
-    monkeypatch.setattr("builtins.input", fake_input)
+            def run(*args: object, **kwargs: object) -> object:
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    entered.__exit__(None, None, None)
+
+            question.unsafe_ask = run  # type: ignore[method-assign]
+            return question
+
+        return make
+
+    for name in real:
+        monkeypatch.setattr(questionary, name, factory(name))
 
 
 def no_blender(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +181,7 @@ def test_wizard_shows_machine_and_installs_default(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
     no_blender(monkeypatch)
-    scripted_tty(monkeypatch, [""])
+    fake_tty(monkeypatch, ["\r"])
     assert main(["pull"]) == 0
     out = capsys.readouterr().out
     assert "█" in out
@@ -162,14 +190,32 @@ def test_wizard_shows_machine_and_installs_default(
     assert "RAM" in out
     assert "free disk" in out
     assert "host app blender" in out
-    assert "[x]" in out
-    assert "(installed)" in out
-    assert "[ ]" in out
+    assert "Step 1 of 4" in out
+    assert "Step 2 of 4" in out
+    assert "Step 3 of 4" in out
+    assert "Step 4 of 4" in out
     assert calls == ["a"]
     assert "installed a 0.1.0" in out
 
 
-def test_wizard_toggle_off_lone_facet_selects_nothing(
+def test_checkbox_lists_facets_with_disk_and_install_marks(
+    use_registry: SelectRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = mixed_root(use_registry, Home.from_env())
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    home = Home.from_env()
+    choices = wizard._choices(load_registry(root), home, False, None)
+    lines = [wizard._facet_line(choice) for choice in choices]
+    assert len(lines) == len(FACETS)
+    voice = next(line for line in lines if line.startswith("voice:"))
+    assert "a (" in voice
+    assert "b (installed)" in voice
+    assert "total" in voice
+    assert "GB" in voice
+
+
+def test_wizard_uncheck_all_selects_nothing(
     use_registry: SelectRegistry,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -179,13 +225,13 @@ def test_wizard_toggle_off_lone_facet_selects_nothing(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
     no_blender(monkeypatch)
-    scripted_tty(monkeypatch, ["1", ""])
+    fake_tty(monkeypatch, [" \r"])
     assert main(["pull"]) == 0
     assert "nothing selected" in capsys.readouterr().out
     assert calls == []
 
 
-def test_wizard_a_selects_every_facet(
+def test_wizard_ctrl_c_at_choice_exits_130(
     use_registry: SelectRegistry,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -195,45 +241,11 @@ def test_wizard_a_selects_every_facet(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
     no_blender(monkeypatch)
-    scripted_tty(monkeypatch, ["a", ""])
-    assert main(["pull"]) == 0
+    fake_tty(monkeypatch, ["\x03"])
+    assert main(["pull"]) == EXIT_CANCELLED
     out = capsys.readouterr().out
-    final_listing = out.split(wizard.PROMPT)[-2]
-    rows = [line for line in final_listing.splitlines() if line[:1].isdigit() and ") " in line]
-    assert len(rows) == len(FACETS)
-    assert all("[x]" in row for row in rows)
-    assert calls == ["a"]
-
-
-def test_wizard_garbage_reprompts_then_accepts_default(
-    use_registry: SelectRegistry,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    mixed_root(use_registry, Home.from_env())
-    calls: list[str] = []
-    fake_pull(monkeypatch, calls)
-    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
-    no_blender(monkeypatch)
-    scripted_tty(monkeypatch, ["zz", ""])
-    assert main(["pull"]) == 0
-    assert "type facet numbers, a, or q" in capsys.readouterr().out
-    assert calls == ["a"]
-
-
-def test_wizard_q_quits_without_installing(
-    use_registry: SelectRegistry,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    mixed_root(use_registry, Home.from_env())
-    calls: list[str] = []
-    fake_pull(monkeypatch, calls)
-    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
-    no_blender(monkeypatch)
-    scripted_tty(monkeypatch, ["q"])
-    assert main(["pull"]) == 0
-    assert "nothing installed" in capsys.readouterr().out
+    assert "cancelled" in out
+    assert "Traceback" not in out
     assert calls == []
 
 
@@ -249,11 +261,15 @@ def test_wizard_two_facets_ask_once_and_install(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
     no_blender(monkeypatch)
-    scripted_tty(monkeypatch, ["", "y"])
+    fake_tty(monkeypatch, ["\r", "y\r"])
     assert main(["pull"]) == 0
     out = capsys.readouterr().out
-    assert "install 2 packages? [y/N]" in out
+    assert "Plan" in out
     assert calls == ["a", "c"]
+
+
+def test_confirm_defaults_to_no() -> None:
+    assert plan.confirm_prompt(2) == "install 2 packages? [default: no]"
 
 
 def test_wizard_two_facets_decline_installs_nothing(
@@ -268,11 +284,67 @@ def test_wizard_two_facets_decline_installs_nothing(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
     no_blender(monkeypatch)
-    scripted_tty(monkeypatch, ["", "n"])
+    fake_tty(monkeypatch, ["\r", "\r"])
     assert main(["pull"]) == 0
     out = capsys.readouterr().out
-    assert "install 2 packages? [y/N]" in out
     assert "nothing installed" in out
+    assert calls == []
+
+
+def test_wizard_ctrl_c_at_confirm_exits_130(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a", "c"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "c", Spec(facet="audio"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r", "\x03"])
+    assert main(["pull"]) == EXIT_CANCELLED
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+    assert "Traceback" not in out
+    assert calls == []
+
+
+def test_wizard_single_installable_skips_the_confirm(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a"])
+    write_package(root, "a", Spec(facet="voice"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r"])
+    assert main(["pull"]) == 0
+    out = capsys.readouterr().out
+    assert "[default: no]" not in out
+    assert calls == ["a"]
+
+
+def test_wizard_plan_flag_prints_the_plan_and_installs_nothing(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a", "c"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "c", Spec(facet="audio"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r"])
+    assert main(["pull", "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert "Plan" in out
     assert calls == []
 
 
@@ -287,11 +359,11 @@ def test_wizard_tier_group_installs_chosen_member(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=8 * 1024, ram_gb=64.0)
     no_blender(monkeypatch)
-    scripted_tty(monkeypatch, [""])
+    fake_tty(monkeypatch, ["\r"])
     monkeypatch.setattr(probes, "gpu_info", lambda: "RTX 3060, 8192 MiB, 100 MiB")
     assert main(["pull"]) == 0
     out = capsys.readouterr().out
-    assert "tier: chose comfy" in out
+    assert "tier: chose comfy" in " ".join(out.split())
     assert calls == ["comfy"]
 
 

@@ -3,9 +3,9 @@
 ``facet pull`` with no facet and no ``--package`` starts here when both
 standard input and output are TTYs (and ``--json`` is not given): the
 banner, the detected machine, and the facets to choose from.  The wizard
-builds the same machine plan ``facet pull <facet>`` would and installs it
-through the same confirmation and progress output.  Agents keep the flag
-form, which never enters this module.
+builds the same machine plan ``facet pull <facet>`` would and confirms it
+through the same confirmation logic.  Agents keep the flag form, which
+never enters this module.
 """
 
 from __future__ import annotations
@@ -15,7 +15,10 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from facetmedia import banner, config, plan, probes
+import questionary
+from rich.panel import Panel
+
+from facetmedia import banner, config, plan, probes, theme
 from facetmedia.registry_types import FACETS
 
 if TYPE_CHECKING:
@@ -25,19 +28,17 @@ if TYPE_CHECKING:
     from facetmedia.plan import PlanEntry
     from facetmedia.registry_types import Registry
 
-PROMPT: Final[str] = "[numbers / a / Enter / q] "
-RETRY: Final[str] = "type facet numbers, a, or q"
 NOTHING_INSTALLED: Final[str] = "nothing installed"
 NOTHING_SELECTED: Final[str] = "nothing selected"
 
 
 @dataclass
 class Choice:
-    """One facet row: its machine plan and whether it is currently picked."""
+    """One facet row: its machine plan and whether it starts picked."""
 
     name: str
     entries: list[PlanEntry]
-    selected: bool
+    checked: bool
 
 
 def offered(args: argparse.Namespace) -> bool:
@@ -47,25 +48,30 @@ def offered(args: argparse.Namespace) -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def choose(registry: Registry, home: Home) -> list[str] | None:
+def choose(registry: Registry, home: Home, args: argparse.Namespace) -> list[str] | None:
     """Run the wizard; the chosen facet names, or ``None`` to install nothing."""
+    console = theme.console()
+    console.print("Step 1 of 4: this machine")
     banner.print_text()
-    _machine(registry, home)
-    choices: list[Choice] = []
-    for name in FACETS:
-        entries = plan.build_plan(plan._from_name(registry, name), home, cpu=False, tier=None)
-        choices.append(Choice(name, entries, selected=any(entry.install for entry in entries)))
-    _show(choices)
-    return _ask(choices)
+    console.print(Panel(_machine_text(registry, home), title="This machine"))
+    console.print("Step 2 of 4: choose facets — arrows move, space toggles, enter confirms")
+    names = _pick(registry, home, args)
+    if not names:
+        print(NOTHING_SELECTED)
+        return None
+    if bool(getattr(args, "plan", False)):
+        return names
+    if not _confirm(registry, home, args, names):
+        return None
+    console.print("Step 4 of 4: install")
+    return names
 
 
-def _machine(registry: Registry, home: Home) -> None:
+def _machine_text(registry: Registry, home: Home) -> str:
     """The detected machine in one block: GPU, RAM, free disk, host apps."""
-    print(_gpu_line())
-    print(_ram_line())
-    print(_disk_line(home))
-    for line in _app_lines(registry, home):
-        print(line)
+    lines = [_gpu_line(), _ram_line(), _disk_line(home)]
+    lines.extend(_app_lines(registry, home))
+    return "\n".join(lines)
 
 
 def _gpu_line() -> str:
@@ -116,13 +122,33 @@ def _app_lines(registry: Registry, home: Home) -> list[str]:
     return lines
 
 
-def _show(choices: list[Choice]) -> None:
-    """Every facet as a numbered line with its mark, count and packages."""
-    for index, choice in enumerate(choices, start=1):
-        mark = "x" if choice.selected else " "
-        detail = ", ".join(_package_note(entry) for entry in choice.entries)
-        suffix = f": {detail}" if detail else ""
-        print(f"{index}) {choice.name} [{mark}] {len(choice.entries)} packages{suffix}")
+def _pick(registry: Registry, home: Home, args: argparse.Namespace) -> list[str]:
+    """The facets the person checked; arrows move, space toggles."""
+    cpu = bool(getattr(args, "cpu", False))
+    tier = getattr(args, "tier", None)
+    prompts = [
+        questionary.Choice(title=_facet_line(choice), value=choice.name, checked=choice.checked)
+        for choice in _choices(registry, home, cpu, tier)
+    ]
+    return list(questionary.checkbox("Facets to install:", choices=prompts).unsafe_ask())
+
+
+def _choices(registry: Registry, home: Home, cpu: bool, tier: str | None) -> list[Choice]:
+    """Every facet with its machine plan; installable facets start checked."""
+    choices: list[Choice] = []
+    for name in FACETS:
+        entries = plan.build_plan(plan._from_name(registry, name), home, cpu=cpu, tier=tier)
+        checked = any(entry.install and not entry.noop for entry in entries)
+        choices.append(Choice(name, entries, checked))
+    return choices
+
+
+def _facet_line(choice: Choice) -> str:
+    """One facet with its packages, their disk, and their total disk."""
+    notes = [_package_note(entry) for entry in choice.entries]
+    total = sum(entry.disk_gb for entry in choice.entries if entry.install and not entry.noop)
+    detail = ", ".join(notes) if notes else "no packages"
+    return f"{choice.name}: {detail} [total {total:.1f} GB]"
 
 
 def _package_note(entry: PlanEntry) -> str:
@@ -130,56 +156,22 @@ def _package_note(entry: PlanEntry) -> str:
     if entry.noop or entry.reason == plan.ALREADY:
         return f"{entry.name} (installed)"
     if entry.install:
-        return f"{entry.name} (fits)"
+        return f"{entry.name} ({entry.disk_gb:.1f} GB)"
     return f"{entry.name} ({entry.reason})"
 
 
-def _ask(choices: list[Choice]) -> list[str] | None:
-    """Toggle facets until Enter accepts, ``a`` picks all, ``q`` quits."""
-    while True:
-        try:
-            answer = input(PROMPT)
-        except EOFError:
-            print(NOTHING_INSTALLED)
-            return None
-        word = answer.strip().lower()
-        if word == "":
-            return _accept(choices)
-        if word == "a":
-            for choice in choices:
-                choice.selected = True
-            _show(choices)
-            continue
-        if word == "q":
-            print(NOTHING_INSTALLED)
-            return None
-        if not _toggle(choices, word):
-            print(RETRY)
-            continue
-        _show(choices)
-
-
-def _accept(choices: list[Choice]) -> list[str] | None:
-    """The picked facet names, or ``None`` with ``nothing selected`` when empty."""
-    names = [choice.name for choice in choices if choice.selected]
-    if not names:
-        print(NOTHING_SELECTED)
-        return None
-    return names
-
-
-def _toggle(choices: list[Choice], word: str) -> bool:
-    """Flip the numbered facets; False when ``word`` is not facet numbers."""
-    indices: list[int] = []
-    for token in word.split():
-        if not token.isdigit():
-            return False
-        index = int(token)
-        if index < 1 or index > len(choices):
-            return False
-        indices.append(index)
-    if not indices:
-        return False
-    for index in indices:
-        choices[index - 1].selected = not choices[index - 1].selected
-    return True
+def _confirm(registry: Registry, home: Home, args: argparse.Namespace, names: list[str]) -> bool:
+    """Step 3: the plan table, then the same confirmation the flags use."""
+    theme.console().print("Step 3 of 4: review the plan")
+    selected = plan.resolve(registry, names, [])
+    entries = plan.build_plan(
+        selected,
+        home,
+        cpu=bool(getattr(args, "cpu", False)),
+        tier=getattr(args, "tier", None),
+    )
+    refusal = plan.disk_refusal(entries, home)
+    if refusal is not None:
+        raise refusal
+    plan_data = [entry.as_dict() for entry in entries]
+    return plan._confirmed(args, entries, plan_data)

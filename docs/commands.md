@@ -115,7 +115,7 @@ the same names arrive in `error.details` instead.
 $ facet pull image
 rembg 0.1.0  disk 1.2 GB  models 0.5 GB  install: fits this machine
 comfy-xl 0.1.0  disk 8.0 GB  models 8.1 GB  install: fits this machine
-install 2 packages? [y/N] y
+install 2 packages? [default: no] y
 installed rembg 0.1.0
 installed comfy-xl 0.1.0
 0 bytes downloaded
@@ -151,18 +151,20 @@ keys (`package`, `version`, `env`, `python`, `already_installed`,
 there.
 
 With no facet and no `--package` at a terminal, `facet pull` opens a
-wizard instead of failing: it prints facet's banner — the facetMedia word
-on one line in DOS Rebel while its widest line fits the terminal, in the
-narrower TheDraw font ansiltr4 otherwise — the detected machine
-(GPU and VRAM, RAM, free disk under the facet home, and each host app),
-and every facet with its package count and this machine's plan for it.
-Facets with at least one installable package start selected; already
-installed packages are marked. Type facet numbers to toggle them, `a` for
-all, Enter to accept, or `q` to quit without installing. Accepting shows
-the combined plan, asks once, and installs with the same progress and
-summary as `facet pull <facet>`. Without a terminal, or with `--json`, the
-bare pull fails with `invalid_input` (exit 2), naming the facets and the
-two forms `facet pull <facet>` and `facet pull --package <name>`.
+wizard instead of failing. It walks through numbered steps: the banner
+(the facetMedia word on one line in DOS Rebel while its widest line fits
+the terminal, in the narrower TheDraw font ansiltr4 otherwise) and the
+detected machine (GPU and VRAM, RAM, free disk under the facet home, and
+each host app); then a facet checklist driven with the arrow keys and
+toggled with the space bar, each line showing the facet, this machine's
+plan for it, and their total disk. Facets with something installable
+start checked; installed packages are marked. Accepting shows the combined
+plan as a table, asks once (`[default: no]`), and installs with the same
+progress and summary as `facet pull <facet>`. Ctrl+C exits the wizard with
+code 130, printing `cancelled`, and installs nothing that had not already
+completed. Without a terminal, or with `--json`, the bare pull fails with
+`invalid_input` (exit 2), naming the facets and the two forms
+`facet pull <facet>` and `facet pull --package <name>`.
 
 Flags: `--package NAME` (repeatable, installs that package explicitly and
 cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
@@ -751,11 +753,12 @@ termsy-weights CC-BY-NC-4.0 not accepted
 ```
 
 - `facet license accept [<model-id>]` — accepts in the terminal. With an id,
-  facet asks for that exact id back; with no id at a terminal it lists the
-  pending models, takes a number (or `q`), shows the chosen terms and asks
-  for the id. Enter cancels, recording nothing. The positional is optional
+  facet asks for that exact id back; with no id at a terminal it opens the
+  wizard, which lists the pending models to pick with the arrow keys (or
+  `done` to quit), shows the chosen terms in a panel and asks for the id.
+  An empty answer cancels, recording nothing. The positional is optional
   and shown as `<model-id>`; off a terminal, with `--json` or with `--yes`
-  it must be given.
+  it must be given. Ctrl+C exits with code 130, printing `cancelled`.
 - `facet license accept <model-id> --yes` — accepts without asking, for an
   agent a person directs.
 - `facet license list` — every model requiring acceptance, with status.

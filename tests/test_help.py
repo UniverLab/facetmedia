@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 import pytest
 
@@ -200,3 +201,93 @@ def test_parser_keeps_the_verb_arguments() -> None:
     args = build_parser().parse_args(["license", "accept", "omnivoice"])
     assert args.model == "omnivoice"
     assert args.json is False
+
+
+class _TtyProxy:
+    """Wrap a stream so ``isatty()`` is True while writes still get captured."""
+
+    def __init__(self, wrapped: object) -> None:
+        self._wrapped = wrapped
+
+    def isatty(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+
+def _styled_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A styled TTY: stdout claims to be one, and ``NO_COLOR`` is unset."""
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
+def _styled_help(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:
+    """``facet *argv --help`` on a styled TTY: exit 0 and its output."""
+    with pytest.raises(SystemExit) as exit_info:
+        main([*argv, "--help"])
+    assert exit_info.value.code == 0
+    return capsys.readouterr().out
+
+
+def test_styled_top_help_renders_options_commands_and_group_panels(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _styled_tty(monkeypatch)
+    out = _styled_help([], capsys)
+    assert "Options" in out
+    for title in ("start", "make and check", "maintain"):
+        assert title in out
+    assert "╭" in out
+    for verb in ("update", "pull", "run", "doctor", "license", "skill"):
+        assert verb in out
+    assert "maintainers: facet registry validate <registry-dir>" in out
+
+
+def test_styled_group_help_lists_sub_verbs_under_commands(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _styled_tty(monkeypatch)
+    out = _styled_help(["license"], capsys)
+    assert "Commands" in out
+    assert "accept" in out
+    assert "list" in out
+    assert "examples:" in out
+
+
+def test_styled_verb_help_keeps_every_flag(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _styled_tty(monkeypatch)
+    out = _styled_help(["pull"], capsys)
+    for flag in (
+        "<facet-or-package>",
+        "--package",
+        "--tier",
+        "--cpu",
+        "--yes",
+        "--plan",
+        "--verify-models",
+        "--json",
+        "--no-wait",
+        "--wait-timeout",
+    ):
+        assert flag in out
+    assert "Options" in out
+    assert "examples:" in out
+
+
+def test_help_with_no_color_is_byte_identical_to_a_pipe(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    argv_sets = ([], ["pull"], ["license", "accept"])
+    plains = [_help(argv, capsys) for argv in argv_sets]
+    _styled_tty(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+    for argv, plain in zip(argv_sets, plains, strict=True):
+        styled = _styled_help(argv, capsys)
+        assert styled == plain
+        assert "╭" not in styled
