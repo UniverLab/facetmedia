@@ -19,6 +19,7 @@ from packaging.version import InvalidVersion, Version
 from facetmedia.manifest.binary import read_binary
 from facetmedia.manifest.ffmpeg import read_ffmpeg
 from facetmedia.manifest.host import read_host_app
+from facetmedia.manifest.i18n import SUMMARY_LIMIT, read_facets, read_i18n
 from facetmedia.manifest.model import read_models
 from facetmedia.manifest.node import read_node
 from facetmedia.manifest.server import read_server, read_source
@@ -189,7 +190,7 @@ _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
 )
 _LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
 _CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
-    {"summary", "kind", "inputs", "verify", "preview", "models", "verify_uses_server"}
+    {"summary", "kind", "inputs", "verify", "preview", "models", "verify_uses_server", "i18n"}
 )
 _VERIFY_KEYS: Final[frozenset[str]] = frozenset({"thresholds"})
 _PREVIEW_KEYS: Final[frozenset[str]] = frozenset({"viewer"})
@@ -329,6 +330,7 @@ class RegistryLoader:
         if index is None:
             return None
         version = self.index_version(index)
+        facets = read_facets(self, index, "index.toml")
         packages: dict[str, Package] = {}
         for name in self.index_packages(index):
             file = f"packages/{name}/package.toml"
@@ -339,7 +341,7 @@ class RegistryLoader:
             if package is not None:
                 packages[name] = package
         self.duplicate_tiers(packages)
-        return Registry(self.root, version, packages)
+        return Registry(self.root, version, packages, facets)
 
     def duplicate_tiers(self, packages: Mapping[str, Package]) -> None:
         """Every ``tier`` is unique within its ``tier_group``."""
@@ -354,7 +356,7 @@ class RegistryLoader:
             seen[key] = name
 
     def index_version(self, index: Mapping[str, Any]) -> int:
-        self.unknown(index, frozenset({"version", "packages"}), "index.toml", "")
+        self.unknown(index, frozenset({"version", "packages", "facets"}), "index.toml", "")
         version = self.integer(index, "version", "index.toml", "", required=True)
         if version is None:
             return 0
@@ -691,6 +693,9 @@ class RegistryLoader:
         verify_uses_server = self.boolean(item, "verify_uses_server", file, prefix, default=False)
         if "verify_uses_server" in item and not has_server:
             self.add(file, f"{prefix}verify_uses_server", "requires engine.server")
+        i18n = read_i18n(
+            self, item.get("i18n"), file, f"{prefix}i18n.", key="summary", limit=SUMMARY_LIMIT
+        )
         if models is not None and any(field.name == "model" for field in inputs):
             self.add(
                 file,
@@ -709,6 +714,7 @@ class RegistryLoader:
             viewer=viewer,
             models=models,
             verify_uses_server=verify_uses_server,
+            i18n=i18n,
         )
 
     def verify(self, raw: object, file: str, prefix: str) -> Mapping[str, float]:

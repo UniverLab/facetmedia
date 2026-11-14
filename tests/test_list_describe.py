@@ -427,3 +427,84 @@ def test_describe_capability_with_model_input_lists_package_models(
     models = _data(capsys)["licenses"]["models"]
     assert [row["id"] for row in models] == ["gated-weights"]
     assert models[0]["requires_acceptance"] is True
+
+
+FACET_INDEX = """version = 1
+
+[facets.text]
+label = "Text"
+
+[facets.text.i18n.es]
+label = "Texto"
+
+[[packages]]
+name = "echo"
+
+[[packages]]
+name = "termsy"
+
+[[packages]]
+name = "future"
+"""
+
+SPANISH_SUMMARY = """
+[capabilities.text.i18n.es]
+summary = "Repite el texto."
+"""
+
+
+def test_list_available_reports_declared_facet_labels(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``data.facets`` carries each declared label and its i18n, no more."""
+    registry = _copied_registry(tmp_path)
+    (registry / "index.toml").write_text(FACET_INDEX, encoding="utf-8")
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+
+    assert main(["list", "--available", "--json"]) == 0
+    assert _data(capsys)["facets"] == {
+        "text": {"label": "Text", "i18n": {"es": {"label": "Texto"}}}
+    }
+
+
+def test_list_available_has_no_facets_key_without_declarations(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["list", "--available", "--json"]) == 0
+    assert "facets" not in _data(capsys)
+
+
+def test_list_installed_does_not_report_facet_labels(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The plain list is install state; declared labels ride ``--available``."""
+    registry = _copied_registry(tmp_path)
+    (registry / "index.toml").write_text(FACET_INDEX, encoding="utf-8")
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+
+    assert main(["list", "--json"]) == 0
+    assert "facets" not in _data(capsys)
+
+
+def test_describe_reports_capability_i18n_summaries(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry = _copied_registry(tmp_path)
+    manifest = registry / "packages" / "echo" / "package.toml"
+    with manifest.open("a", encoding="utf-8") as handle:
+        handle.write(SPANISH_SUMMARY)
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+
+    assert main(["describe", "echo.text", "--json"]) == 0
+    data = _data(capsys)
+    assert data["summary"] == "Echo text back, repeated."
+    assert data["i18n"] == {"es": {"summary": "Repite el texto."}}
+
+
+def test_describe_without_i18n_reports_empty_object(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry(monkeypatch)
+    assert main(["describe", "echo.text", "--json"]) == 0
+    assert _data(capsys)["i18n"] == {}

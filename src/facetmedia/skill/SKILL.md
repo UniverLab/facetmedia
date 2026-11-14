@@ -33,6 +33,13 @@ each package row adds `facet` and `weight`. `facet describe <capability>
 --json` adds `facet` beside `kind`, `weight`, and `skill` (the command that
 prints that package's how-to).
 
+`summary` and a facet's name are English by default. When the registry
+declares localized texts, `facet describe --json` carries them under
+`i18n`, keyed by language tag (`{"es": {"summary": "…"}}`, `{}` when none),
+and `facet list --available --json` carries each facet's `label` and
+`i18n` under `data.facets` (`{"text": {"label": "Text", "i18n": {"es":
+{"label": "Texto"}}}}`).
+
 ## Run
 
 `facet describe` prints `piece_example`: a minimal valid piece, the starting

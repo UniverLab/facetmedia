@@ -348,7 +348,9 @@ shows the registry's``. `--json` adds the machine data: per package
 `name`, `version`, `facet`, `weight`, `vram_gb`, `compatible`, `installed`,
 `installed_version` (string or null), `update_available`,
 sizes and its capabilities; an `available` summary of the registry's package,
-capability and facet counts; and the registry it read. Lock: none.
+capability and facet counts; and the registry it read. With `--available`, a
+`facets` map carries the `label` and `i18n` of every facet `index.toml`
+declares (see [adding-a-package.md](adding-a-package.md#indextoml)). Lock: none.
 
 Exit codes: `0` (an empty list is a success with data, never an error).
 
@@ -369,7 +371,9 @@ installed: no
 ```
 
 `piece_example` in the `--json` data is a minimal valid piece, the
-starting point for a piece file. Lock: none.
+starting point for a piece file. `i18n` carries the capability's localized
+summaries by language tag (`{"es": {"summary": "…"}}`), `{}` when the
+manifest declares none; `summary` stays the English default. Lock: none.
 
 Exit codes: `0`; `2` an unknown capability id, listing the known ids in
 `details.known`; a package name lists its capability ids in

@@ -222,6 +222,7 @@ class Capability:
     viewer: str = "generic"
     models: tuple[str, ...] | None = None
     verify_uses_server: bool = False
+    i18n: Mapping[str, str] = dc_field(default_factory=dict)
 
     def input(self, name: str) -> Field | None:
         for field in self.inputs:
@@ -343,12 +344,21 @@ def weight(package: Package) -> str:
 
 
 @dataclass(frozen=True)
+class FacetLabel:
+    """One facet's English label and its localized labels, from ``index.toml``."""
+
+    label: str
+    i18n: Mapping[str, str] = dc_field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Registry:
     """A validated registry checkout, indexed by package name."""
 
     root: Path
     version: int
     packages: Mapping[str, Package]
+    facets: Mapping[str, FacetLabel] = dc_field(default_factory=dict)
 
     def package(self, name: str) -> Package | None:
         return self.packages.get(name)

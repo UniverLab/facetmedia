@@ -66,6 +66,12 @@ the piece, so the copy still runs.
 ```toml
 version = 1
 
+[facets.text]
+label = "Text"
+
+[facets.text.i18n.es]
+label = "Texto"
+
 [[packages]]
 name = "textured"
 ```
@@ -73,6 +79,20 @@ name = "textured"
 `version` is `1`. Each entry names one directory under `packages/`; names
 are unique and match `[a-z][a-z0-9-]*`, and the directory's `package.toml`
 `name` must equal it.
+
+Each facet in facet's own list (`voice`, `audio`, `image`, `video`, `cad`,
+`text`, `presentation`) may carry a `[facets.<facet>]` table with the
+facet's English `label` (1 to 40 characters). An optional
+`[facets.<facet>.i18n.<lang>]` table adds one `label` per language, with
+`<lang>` a lowercase language tag (`es`, `pt`). `facet registry validate`
+rejects a facet name outside that list, a missing or over-long `label`, a
+malformed language tag, and any unknown key. Declaring neither is valid.
+`facet list --available --json` reports what `index.toml` declares under
+`data.facets`, keyed by facet name:
+
+```json
+{"data": {"facets": {"text": {"i18n": {"es": {"label": "Texto"}}, "label": "Text"}}}}
+```
 
 ## `package.toml`
 
@@ -758,6 +778,26 @@ kind = "text"   # audio | video | image | cad | presentation | text | document
 `kind` is the asset the capability writes; it alone picks the preview
 schema and the viewer (`textured` tools make `text`; long written
 documents make [`document`](#the-document-kind)).
+
+The `summary` is English and required: it is the default every surface
+shows. A capability may add localized summaries in
+`[capabilities.<c>.i18n.<lang>]`, one `summary` per language, with `<lang>`
+a lowercase language tag. Each localized summary is 1 to 200 characters,
+`facet registry validate` rejects a malformed tag or a wrong length, and
+`facet describe <capability> --json` reports them under `data.i18n`:
+
+```toml
+[capabilities.strip]
+summary = "One line, shown by facet list and describe."
+kind = "text"
+
+[capabilities.strip.i18n.es]
+summary = "Una línea, que muestran facet list y describe."
+```
+
+```json
+{"data": {"i18n": {"es": {"summary": "Una línea, que muestran facet list y describe."}}}}
+```
 
 Inputs are fields under `[capabilities.<c>.inputs.<field>]`:
 

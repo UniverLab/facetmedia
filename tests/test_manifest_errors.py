@@ -468,3 +468,116 @@ def test_verify_uses_server_true_with_server_loads(tmp_path: Path) -> None:
     assert registry.package("pkg") is not None
     (capability,) = registry.package("pkg").capabilities
     assert capability.verify_uses_server is True
+
+
+LONG_SUMMARY = "x" * 201
+
+I18N_CASES = [
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.i18n.spanish]\nsummary = "habla"\n',
+        "capabilities.speech.i18n.spanish",
+        "value: a lowercase language tag",
+        id="i18n-bad-tag",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.i18n.es]\ntext = "habla"\n',
+        "capabilities.speech.i18n.es.text",
+        "unknown",
+        id="i18n-unknown-key",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.i18n.es]\nsummary = ""\n',
+        "capabilities.speech.i18n.es.summary",
+        "value: 1 to 200 characters",
+        id="i18n-summary-empty",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + f'\n[capabilities.speech.i18n.es]\nsummary = "{LONG_SUMMARY}"\n',
+        "capabilities.speech.i18n.es.summary",
+        "value: 1 to 200 characters",
+        id="i18n-summary-long",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + "\n[capabilities.speech.i18n.es]\nsummary = 1\n",
+        "capabilities.speech.i18n.es.summary",
+        "type",
+        id="i18n-summary-type",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + 'i18n = "x"\n',
+        "capabilities.speech.i18n",
+        "type",
+        id="i18n-non-table",
+    ),
+    pytest.param(
+        BASE + CAPABILITY + '\n[capabilities.speech.i18n]\nes = "habla"\n',
+        "capabilities.speech.i18n.es",
+        "type",
+        id="i18n-language-non-table",
+    ),
+]
+
+
+@pytest.mark.parametrize(("manifest", "key", "problem"), I18N_CASES)
+def test_capability_i18n_problems(manifest: str, key: str, problem: str, tmp_path: Path) -> None:
+    assert ("packages/pkg/package.toml", key, problem) in _problems(manifest, tmp_path)
+
+
+FACET_INDEX_CASES = [
+    pytest.param(
+        '[facets.song]\nlabel = "Song"\n',
+        "facets.song",
+        "value: one of voice, audio, image, video, cad, text, presentation",
+        id="facet-name",
+    ),
+    pytest.param("[facets.text]\n", "facets.text.label", "required", id="facet-label-missing"),
+    pytest.param(
+        f'[facets.text]\nlabel = "{"x" * 41}"\n',
+        "facets.text.label",
+        "value: 1 to 40 characters",
+        id="facet-label-long",
+    ),
+    pytest.param(
+        '[facets.text]\nlabel = ""\n',
+        "facets.text.label",
+        "value: 1 to 40 characters",
+        id="facet-label-empty",
+    ),
+    pytest.param(
+        '[facets.text.i18n.spanish]\nlabel = "Texto"\n',
+        "facets.text.i18n.spanish",
+        "value: a lowercase language tag",
+        id="facet-i18n-bad-tag",
+    ),
+    pytest.param(
+        f'[facets.text.i18n.es]\nlabel = "{"x" * 41}"\n',
+        "facets.text.i18n.es.label",
+        "value: 1 to 40 characters",
+        id="facet-i18n-label-long",
+    ),
+    pytest.param(
+        '[facets.text]\nlabel = "Text"\n\n[facets.text.i18n.es]\ntext = "Texto"\n',
+        "facets.text.i18n.es.text",
+        "unknown",
+        id="facet-i18n-unknown-key",
+    ),
+    pytest.param(
+        '[facets.text]\nlabel = "Text"\nextra = 1\n',
+        "facets.text.extra",
+        "unknown",
+        id="facet-unknown-key",
+    ),
+    pytest.param('facets = "x"\n', "facets", "type", id="facets-type"),
+    pytest.param("facets.text = 1\n", "facets.text", "type", id="facet-declaration-non-table"),
+]
+
+
+@pytest.mark.parametrize(("declaration", "key", "problem"), FACET_INDEX_CASES)
+def test_index_facet_problems(declaration: str, key: str, problem: str, tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        f'version = 1\n{declaration}\n[[packages]]\nname = "pkg"\n', encoding="utf-8"
+    )
+    _write_package(BASE + CAPABILITY + CAPABILITY_PREVIEW, tmp_path)
+    assert ("index.toml", key, problem) in {
+        (entry["file"], entry["key"], entry["problem"]) for entry in validate_registry(tmp_path)
+    }

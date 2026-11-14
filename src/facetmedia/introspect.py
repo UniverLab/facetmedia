@@ -22,6 +22,7 @@ from facetmedia.registry import load_active_registry, snapshot_identity
 from facetmedia.registry_types import (
     FACETS,
     Capability,
+    FacetLabel,
     Field,
     Model,
     Package,
@@ -58,9 +59,19 @@ def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
     if facet is not None:
         rows = [row for row in rows if row["facet"] == facet]
     data: dict[str, Any] = {"registry": snapshot_identity(), "packages": rows}
+    if available and active.facets:
+        data["facets"] = {name: _facet_row(active.facets[name]) for name in sorted(active.facets)}
     if not available:
         data["available"] = _available_summary(active)
     return data
+
+
+def _facet_row(facet: FacetLabel) -> dict[str, Any]:
+    """One facet's declared label and its localized labels."""
+    return {
+        "label": facet.label,
+        "i18n": {lang: {"label": text} for lang, text in sorted(facet.i18n.items())},
+    }
 
 
 def announce_list(data: dict[str, Any], available: bool, facet: str | None) -> None:
@@ -185,6 +196,7 @@ def describe_data(capability_id: str) -> dict[str, Any]:
         "contract": CONTRACT_VERSION,
         "capability": capability.id,
         "summary": capability.summary,
+        "i18n": {lang: {"summary": text} for lang, text in sorted(capability.i18n.items())},
         "kind": capability.kind,
         "facet": package.facet,
         "weight": weight(package),
