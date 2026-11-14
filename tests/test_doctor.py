@@ -523,12 +523,10 @@ def test_doctor_unsupported_platform_fails_with_exit_5(
     monkeypatch.setattr(doctor_module.sys, "platform", "darwin")
 
     code = main(["doctor", "echo.text", "--json"])
-    data = _data(_envelope(capsys))
+    error = _envelope(capsys)["error"]
     assert code == EXIT_MACHINE_CANNOT
-    entry = data["packages"]["echo"]["readiness"]["platform"]
-    assert entry["ok"] is False
-    assert "linux" in entry["detail"]
-    assert "linux" in entry["fix"]
+    assert error["code"] == "machine_cannot"
+    assert error["details"] == {"platform": "darwin", "supported": ["linux"]}
 
 
 def test_doctor_insufficient_disk_fails_with_exit_5(

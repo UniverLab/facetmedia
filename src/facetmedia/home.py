@@ -15,7 +15,7 @@ import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Final, TypeVar
 
 from facetmedia.contract import FacetError
 
@@ -24,13 +24,27 @@ _MNT_RE = re.compile(r"^/mnt/[a-z]/")
 _T = TypeVar("_T")
 
 
-def require_posix() -> None:
-    """Refuse to run on native Windows; WSL must be used instead."""
-    if sys.platform == "win32":
-        raise FacetError(
-            "machine_cannot",
-            "native Windows is not supported in v0.1; use WSL",
-        )
+_PLATFORM_NAMES: Final[dict[str, str]] = {"win32": "native Windows", "darwin": "macOS"}
+_PLATFORM_HINTS: Final[dict[str, str]] = {
+    "win32": "install WSL2 (wsl --install), then install facet inside it",
+}
+
+
+def require_linux() -> None:
+    """Refuse every platform but Linux; WSL2 counts as Linux.
+
+    Every registry package declares ``platforms = ["linux"]``, so another
+    platform could install the core and nothing else.
+    """
+    if sys.platform == "linux":
+        return
+    name = _PLATFORM_NAMES.get(sys.platform, sys.platform)
+    raise FacetError(
+        "machine_cannot",
+        f"{name} is not supported in v0.1; facet runs on Linux and on WSL2 (Windows 10/11)",
+        hint=_PLATFORM_HINTS.get(sys.platform, "run facet on a Linux machine"),
+        details={"platform": sys.platform, "supported": ["linux"]},
+    )
 
 
 class Home:

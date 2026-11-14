@@ -74,7 +74,7 @@ from facetmedia.env.package_marker import (
     package_stale,
 )
 from facetmedia.env.source import fetch_source, source_dir, source_present
-from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
+from facetmedia.home import Home, atomic_write_text, require_linux, uv_env
 from facetmedia.progress import Progress, one_line, verbose
 from facetmedia.registry_types import (
     Model,
@@ -373,7 +373,7 @@ def _preflight(package: Package, home: Home, run_id: str) -> None:
     reports exactly what ``pull`` refuses; the package doctor (which needs an
     installed environment) is skipped until one is there.
     """
-    require_posix()
+    require_linux()
     if package.browser is not None:
         env_browser.require_host()
     if package.ffmpeg is not None:

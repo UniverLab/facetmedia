@@ -673,10 +673,11 @@ def test_single_package_with_plan_or_cpu_asks_the_plan(use_registry, monkeypatch
     code, _envelope, entries = plan_of(capsys, "pull", "--package", "gpuonly", "--plan")
     assert code == 0
     assert entries[0]["install"] is True
-    code, _envelope, entries = plan_of(capsys, "pull", "--package", "gpuonly", "--cpu")
-    assert code == 0
-    assert entries[0]["install"] is False
-    assert entries[0]["reason"] == "needs a GPU and --cpu was given"
+    code = main(["pull", "--package", "gpuonly", "--cpu", "--json"])
+    details = json.loads(capsys.readouterr().out)["error"]["details"]
+    assert code == EXIT_MACHINE_CANNOT
+    assert details["plan"][0]["install"] is False
+    assert details["plan"][0]["reason"] == "needs a GPU and --cpu was given"
     assert calls == []
 
 
@@ -768,3 +769,13 @@ def _mark_tier(root: Path, group: str, tier: str) -> None:
         'facet = "image"', f'facet = "image"\ntier_group = "{group}"\ntier = "{tier}"'
     )
     (directory / "package.toml").write_text(text, encoding="utf-8")
+
+
+def test_pull_with_nothing_fitting_is_machine_cannot(use_registry, monkeypatch, capsys) -> None:
+    use_registry(["gpuonly"], Spec(gpu=True))
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    code = main(["pull", IMAGE, "--yes", "--json"])
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert code == EXIT_MACHINE_CANNOT
+    assert error["code"] == "machine_cannot"
+    assert error["details"]["skipped"] == [{"name": "gpuonly", "reason": "needs an NVIDIA GPU"}]

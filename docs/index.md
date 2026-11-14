@@ -47,8 +47,13 @@ guide:
 uv tool install facetmedia
 ```
 
-Linux and WSL only; native Windows is refused (use WSL) and a home on a
-Windows drive such as `/mnt/c` is refused too.
+Supported platforms: Linux (x86_64) and WSL2 on Windows 10/11. The install
+command works anywhere `uv` runs, but every other platform is refused on the
+first command with `machine_cannot` (exit 5): native Windows is told to use
+WSL2, and macOS is refused because no registry package runs there yet. A home
+on a Windows drive such as `/mnt/c` is refused too. GPU packages need an
+NVIDIA card; on WSL2 that is the Windows NVIDIA driver, nothing installed
+inside Linux.
 
 ## The first run
 

@@ -32,8 +32,8 @@ dev = [
 ]
 
 [project.scripts]
-facet = "facetmedia.cli:main"
-facetmedia = "facetmedia.cli:main"
+facet = "facetmedia.entry:main"
+facetmedia = "facetmedia.entry:main"
 
 [build-system]
 requires = ["hatchling"]

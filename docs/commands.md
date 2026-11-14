@@ -149,7 +149,9 @@ install 2 packages? [default: no] y
 Each package gets one line with its include or skip reason, decided in this
 order: the platform, `--cpu` against a GPU package, a missing NVIDIA GPU,
 declared VRAM and RAM, a missing host application (with the exact `facet
-config set <key> <path>` fix), and finally its tier group. Packages sharing
+config set <key> <path>` fix), and finally its tier group. When no package
+of the request fits, `pull` installs nothing and fails with `machine_cannot`
+(exit 5), its details carrying the plan and every skip reason. Packages sharing
 a `tier_group` are alternatives of one tool; `--tier NAME` prefers that
 tier, even when it does not fit: its row then reads `! install (forced)` at a
 terminal (`install (forced)` in plain text) and

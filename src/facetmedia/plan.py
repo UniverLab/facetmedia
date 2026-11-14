@@ -412,6 +412,8 @@ def _planned_pull(
             _print_plan(entries)
         emit(ok({"plan": plan_data}), args.json)
         return 0
+    if not any(entry.install for entry in entries):
+        raise _nothing_fits(args, entries, plan_data)
     refusal = disk_refusal(entries, home)
     if refusal is not None:
         raise refusal
@@ -507,6 +509,21 @@ def _state_text(entry: PlanEntry) -> str:
 def _models_text(missing_bytes: int) -> str:
     """``0 GB`` for nothing missing, else the download size in GB."""
     return "0 GB" if missing_bytes == 0 else f"{missing_bytes / GB:.1f} GB"
+
+
+def _nothing_fits(
+    args: argparse.Namespace, entries: list[PlanEntry], plan_data: list[dict[str, object]]
+) -> FacetError:
+    """``machine_cannot`` when the plan installs nothing, each reason printed."""
+    skipped = _skipped(entries)
+    if not args.json:
+        _print_skipped(skipped)
+    return FacetError(
+        "machine_cannot",
+        "no package of this request fits this machine",
+        hint="each skipped package names its reason; facet pull <facet> --plan shows them",
+        details={"plan": plan_data, "skipped": skipped},
+    )
 
 
 def _install_all(

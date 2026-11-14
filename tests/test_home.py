@@ -14,7 +14,7 @@ from facetmedia.home import (
     log_file,
     new_run_id,
     read_json,
-    require_posix,
+    require_linux,
     same_filesystem_check,
     uv_env,
 )
@@ -192,14 +192,14 @@ def test_peek_env_does_not_create_the_home(monkeypatch: pytest.MonkeyPatch, tmp_
     assert not root.exists()
 
 
-def test_require_posix_rejects_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_linux_rejects_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.platform", "win32")
     with pytest.raises(FacetError) as exc:
-        require_posix()
+        require_linux()
     assert exc.value.code == "machine_cannot"
     assert "WSL" in exc.value.message
 
 
-def test_require_posix_passes_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_require_linux_passes_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.platform", "linux")
-    require_posix()
+    require_linux()

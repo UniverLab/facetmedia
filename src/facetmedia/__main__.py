@@ -1,5 +1,5 @@
 import sys
 
-from facetmedia.cli import main
+from facetmedia.entry import main
 
 sys.exit(main())

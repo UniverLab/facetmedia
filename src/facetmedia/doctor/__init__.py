@@ -36,7 +36,7 @@ from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.doctor import host as doctor_host
 from facetmedia.doctor import node as doctor_node
 from facetmedia.doctor.package import package_doctor
-from facetmedia.home import Home, require_posix
+from facetmedia.home import Home, require_linux
 from facetmedia.probes import (
     NO_HOST_LIBS_HINT,
     gpu_info,
@@ -531,7 +531,7 @@ def _uv_check() -> Check:
 
 def _home_check(home: Home) -> Check:
     try:
-        require_posix()
+        require_linux()
     except FacetError as exc:
         return Check(False, exc.message, "use WSL; native Windows is not supported")
     if not home.root.is_dir():

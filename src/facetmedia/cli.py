@@ -36,7 +36,7 @@ from facetmedia import (
 from facetmedia.cli_parser import FacetParser, Handler
 from facetmedia.cli_parser import build_parser as _build_parser
 from facetmedia.contract import FacetError
-from facetmedia.home import Home, log_file, new_run_id, require_posix
+from facetmedia.home import Home, log_file, new_run_id, require_linux
 from facetmedia.registry import load_active_registry, validate_registry
 
 #: The verification verdict that Señal marks: the rest of a verdict stays calm.
@@ -500,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     as_json = "--json" in (argv if argv is not None else sys.argv)
     was_verbose = progress.verbose()
     try:
-        require_posix()
+        require_linux()
         Home.from_env()
         return _run_logged(argv, run_id)
     except FacetError as exc:

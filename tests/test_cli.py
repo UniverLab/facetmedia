@@ -170,3 +170,23 @@ def test_describe_help_names_one_capability(
     assert "show one capability's contract" in out
     assert "a capability id such as ffmpeg.normalize" in out
     assert "from `facet list" in out
+
+
+@pytest.mark.parametrize(("platform", "name"), [("win32", "native Windows"), ("darwin", "macOS")])
+def test_entry_refuses_a_platform_other_than_linux(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    name: str,
+) -> None:
+    from facetmedia import entry  # noqa: PLC0415
+
+    def no_cli(argv: list[str] | None = None) -> int:
+        raise AssertionError("the CLI must not load on an unsupported platform")
+
+    monkeypatch.setattr(cli_module, "main", no_cli)
+    monkeypatch.setattr("sys.platform", platform)
+    assert entry.main(["list", "--json"]) == EXIT_MACHINE_CANNOT
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["message"].startswith(f"{name} is not supported")
+    assert error["details"] == {"platform": platform, "supported": ["linux"]}
