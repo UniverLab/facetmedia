@@ -74,10 +74,12 @@ run: it reads each package's declared platform, GPU, VRAM, RAM, disk and
 host application, shows the plan with one reason per package, and asks
 before installing more than one. `facet pull --package rembg` names a
 single package when you want fine control. Use `--plan` to see what a pull
-would do without installing anything. While a package installs, one
+would do without installing anything. While a package installs, one live
 progress line follows it through `environment`, `models` and `artifacts`;
-add `--verbose` for the detailed working log instead, which is also
-written to the file under `logs/`.
+when it finishes, that block becomes one line with the package's name,
+version, size and time, and the pull closes with a total. Add `--verbose`
+for the detailed working log instead, which is also written to the file
+under `logs/`.
 
 ## Where things live
 

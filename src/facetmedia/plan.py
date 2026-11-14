@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import time
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
@@ -22,7 +23,8 @@ from rich.table import Table
 from facetmedia import config, env, lock, probes, theme
 from facetmedia.contract import FacetError, emit, ok
 from facetmedia.home import Home
-from facetmedia.progress import Progress, announce_failure
+from facetmedia.progress import Progress, announce_failure, one_line
+from facetmedia.pull_summary import PullSummary
 from facetmedia.registry import load_active_registry
 from facetmedia.registry_types import FACETS, Package, Registry
 
@@ -345,6 +347,11 @@ def legacy_package(
 def _legacy_pull(
     args: argparse.Namespace, home: Home, package: Package, reporter: Progress | None = None
 ) -> int:
+    """One named package: its block collapses into one line, as every pull's does."""
+    summary = PullSummary(reporter)
+    summary.plan([PlanEntry(package=package, install=True, reason=FITS)])
+    began = time.monotonic()
+    summary.begin(package.name, package.version)
     try:
         report = env.pull(
             package,
@@ -353,16 +360,25 @@ def _legacy_pull(
             run_id=getattr(args, "run_id", ""),
             progress=reporter,
         )
-    except FacetError:
+    except FacetError as error:
+        summary.failed(package.name, package.version, time.monotonic() - began, one_line(error))
         announce_failure(getattr(args, "run_id", ""))
         raise
+    elapsed = time.monotonic() - began
     emit(ok(report), args.json)
-    if not args.json:
+    if args.json:
+        return 0
+    if report["already_installed"] is True:
+        summary.noop(package.name, package.version)
+    else:
+        summary.collapse(package.name, package.version, _bytes(report), elapsed)
+    if not summary.enabled:
         _announce_pull(report, bool(package.models))
     return 0
 
 
 def _announce_pull(report: dict[str, object], has_models: bool) -> None:
+    """The result line for a pull that draws no summary (``--verbose``, a direct call)."""
     name = f"{report['package']} {report['version']}"
     if report["already_installed"] is True:
         print(f"{name} already installed at {report['env']}")
@@ -491,6 +507,9 @@ def _install_all(
     entries: list[PlanEntry],
     reporter: Progress | None = None,
 ) -> int:
+    summary = PullSummary(reporter)
+    summary.plan(entries)
+    started = time.monotonic()
     installed: list[dict[str, object]] = []
     downloaded = 0
     skipped = _skipped(entries)
@@ -498,22 +517,23 @@ def _install_all(
         if not entry.install:
             continue
         if entry.noop:
+            summary.noop(entry.name, entry.version)
             installed.append({"name": entry.name, "version": entry.version})
             continue
         try:
-            report = env.pull(
-                entry.package,
-                home,
-                verify_models=args.verify_models,
-                run_id=getattr(args, "run_id", ""),
-                progress=reporter,
-            )
+            downloaded += _pull_entry(args, home, entry, summary, reporter)
         except FacetError as error:
             announce_failure(getattr(args, "run_id", ""))
             if not args.json:
-                _announce_summary(installed, skipped, downloaded)
+                _announce_summary(
+                    installed,
+                    skipped,
+                    downloaded,
+                    summary,
+                    len(entries),
+                    time.monotonic() - started,
+                )
             raise _with_partial(error, entries, installed, skipped, downloaded) from error
-        downloaded += _bytes(report)
         installed.append({"name": entry.name, "version": entry.version})
     data = {
         "plan": [entry.as_dict() for entry in entries],
@@ -523,8 +543,35 @@ def _install_all(
     }
     emit(ok(data), args.json)
     if not args.json:
-        _announce_summary(installed, skipped, downloaded)
+        _announce_summary(
+            installed, skipped, downloaded, summary, len(entries), time.monotonic() - started
+        )
     return 0
+
+
+def _pull_entry(
+    args: argparse.Namespace,
+    home: Home,
+    entry: PlanEntry,
+    summary: PullSummary,
+    reporter: Progress | None,
+) -> int:
+    """Pull one entry under its own line; a failure prints the line and re-raises."""
+    began = time.monotonic()
+    summary.begin(entry.name, entry.version)
+    try:
+        report = env.pull(
+            entry.package,
+            home,
+            verify_models=args.verify_models,
+            run_id=getattr(args, "run_id", ""),
+            progress=reporter,
+        )
+    except FacetError as error:
+        summary.failed(entry.name, entry.version, time.monotonic() - began, one_line(error))
+        raise
+    summary.collapse(entry.name, entry.version, _bytes(report), time.monotonic() - began)
+    return _bytes(report)
 
 
 def _skipped(entries: list[PlanEntry]) -> list[dict[str, object]]:
@@ -555,9 +602,21 @@ def _announce_summary(
     installed: list[dict[str, object]],
     skipped: list[dict[str, object]],
     downloaded: int,
+    summary: PullSummary | None = None,
+    count: int = 0,
+    seconds: float = 0.0,
 ) -> None:
+    """The total line, then the skipped reasons; the old blocks when nothing draws."""
+    if summary is not None and summary.enabled:
+        summary.total(count, downloaded, seconds)
+        _print_skipped(skipped)
+        return
     for item in installed:
         print(f"installed {item['name']} {item['version']}")
+    _print_skipped(skipped)
+    print(f"{downloaded} bytes downloaded")
+
+
+def _print_skipped(skipped: list[dict[str, object]]) -> None:
     for item in skipped:
         print(f"skipped {item['name']}: {item['reason']}")
-    print(f"{downloaded} bytes downloaded")

@@ -183,7 +183,8 @@ def test_wizard_shows_machine_and_installs_default(
     no_blender(monkeypatch)
     fake_tty(monkeypatch, ["\r"])
     assert main(["pull"]) == 0
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert "█" in out
     assert "RTX 3060" in out
     assert "12.0 GB" in out
@@ -195,7 +196,8 @@ def test_wizard_shows_machine_and_installs_default(
     assert "Step 3 of 4" in out
     assert "Step 4 of 4" in out
     assert calls == ["a"]
-    assert "installed a 0.1.0" in out
+    assert "→ a 0.1.0" in captured.err.splitlines()
+    assert "✓ a 0.1.0   0 MB   0.0s" in captured.err.splitlines()
 
 
 def test_checkbox_lists_facets_with_disk_and_install_marks(

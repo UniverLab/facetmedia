@@ -596,6 +596,10 @@ def test_run_install_draws_progress_lines_instead_of_the_transcript(
     assert "start environment" in err
     assert "end ✓ environment" in err
     assert "total to download" not in err
+    # And the line that says which package those checks belonged to.
+    lines = err.splitlines()
+    assert "→ echo 0.1.0" in lines
+    assert any(line.startswith("✓ echo 0.1.0   already present") for line in lines)
 
 
 def test_run_install_transcript_is_back_with_verbose(

@@ -121,9 +121,9 @@ $ facet pull image
 rembg 0.1.0  disk 1.2 GB  models 0.5 GB  install: fits this machine
 comfy-xl 0.1.0  disk 8.0 GB  models 8.1 GB  install: fits this machine
 install 2 packages? [default: no] y
-installed rembg 0.1.0
-installed comfy-xl 0.1.0
-0 bytes downloaded
+✓ rembg 0.1.0   812 MB   27.6s
+✓ comfy-xl 0.1.0   8.4 GB   1m 09s
+2 packages · 9.2 GB · 1m 37s
 ```
 
 Each package gets one line with its include or skip reason, decided in this
@@ -177,25 +177,41 @@ cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
 `data.plan`), `--verify-models` (recompute the sha256 of models already
 present), and `-v`/`--verbose`.
 
-At a terminal, each package that installs shows one progress line per
-phase, in this order: `environment` (the uv build, the server and source
-checkouts, the node runtime — a spinner with the elapsed time that becomes
-a bar once the download declares its length), `models` (bytes downloaded
-out of the declared bytes it still has to fetch, a bar with the percentage
-and MB/s) and `artifacts` (the browser, FFmpeg, binary and npm tarballs, a
-bar once a size is known and a spinner before). A phase with nothing to do
-still closes its line, so an already installed package shows three `✓`
-lines and no download. A host-application package downloads nothing and
-draws no phase line. Each line ends with `✓` and the elapsed time when
-the phase completes, or `✗` and the one-line error when it fails. Without
-a terminal — a pipe or a CI log — stderr gets one plain `start phase` /
-`end ✓ phase (X.Xs)` line per phase and no carriage-return animation.
-`--json` draws no progress line at all; its envelope is unchanged. The
-detailed working log, the plan and uv's resolution included, still goes to
-the run log under `logs/<YYYY-MM-DD>/<run-id>.log`; on stderr it appears
-only with `-v`/`--verbose`, which replaces the progress lines. When a pull
-fails, its last 20 log lines and the `log: <path>` line are printed to
-stderr even without `--verbose`.
+At a terminal, each package that installs shows its phases live on one line
+under a header that names it (`→ comfy-xl 0.1.0`), in this order:
+`environment` (the uv build, the server and source checkouts, the node
+runtime — a spinner with the elapsed time that becomes a bar once the
+download declares its length), `models` (bytes downloaded out of the
+declared bytes it still has to fetch, a bar with the percentage and MB/s)
+and `artifacts` (the browser, FFmpeg, binary and npm tarballs, a bar once
+a size is known and a spinner before). When the package finishes, that
+block is replaced by a single line with its name, version, size and time:
+
+```console
+✓ kokoro 0.1.2   812 MB   27.6s
+```
+
+The size is the bytes this pull downloaded for that package; a pull that
+downloaded nothing says `already present` instead. Sizes read in MB under
+1 GB with no decimals and in GB from there up with one (`812 MB`,
+`10.5 GB`), and the columns line up across packages. A package that was
+already installed shows `· kokoro 0.1.2   already installed`; a failure
+shows `✗ kokoro 0.1.2   failed in 12.3s: <one-line error>` and stops the
+pull there. After the last package comes the total line,
+`16 packages · 14.2 GB · 12m 41s`, counting every package of the plan,
+followed by the `skipped <name>: <reason>` lines. A host-application
+package draws no phase line.
+
+Without a terminal — a pipe or a CI log — stderr keeps one plain
+`start phase` / `end ✓ phase (X.Xs)` line per phase and no carriage-return
+animation, and the same one-line-per-package summary is printed once each
+package finishes. `--json` draws no line at all and its envelope is
+unchanged. The detailed working log, the plan and uv's resolution
+included, still goes to the run log under
+`logs/<YYYY-MM-DD>/<run-id>.log`; on stderr it appears only with
+`-v`/`--verbose`, which replaces the progress lines with that transcript.
+When a pull fails, its last 20 log lines and the `log: <path>` line are
+printed to stderr even without `--verbose`.
 
 When the packages to install need more disk than is free under the facet
 home, the pull fails before any download with `machine_cannot` (exit 5)
@@ -214,7 +230,8 @@ and its models, downloaded once into `~/.facet/models/direct/` (or the
 
 ```console
 $ facet pull --package ffmpeg
-ffmpeg 0.1.0 installed at /tmp/opencode/facet-docs/envs/ffmpeg/0.1.0 (no model downloads in 5.898 s)
+→ ffmpeg 0.1.0
+✓ ffmpeg 0.1.0   96 MB   5.9s
 ```
 
 When a package's manifest declares `uses`, its shared modules are copied
@@ -579,10 +596,11 @@ package), `--timeout SECONDS` (kill the runner's process group),
 `--ephemeral` (install for this run, remove the environment after), and
 `-v`/`--verbose`.
 
-An install this run does itself follows the `facet pull` rules: one
-progress line per phase at a terminal, one plain `start`/`end` line per
-phase without one, nothing extra on stderr with `--json`, and the
-detailed transcript — the plan and uv's resolution — on stderr only with
+An install this run does itself follows the `facet pull` rules: the live
+phase line at a terminal and the one line naming the package, its version,
+size and time when it finishes; one plain `start`/`end` line per phase
+without one; nothing extra on stderr with `--json`; and the detailed
+transcript — the plan and uv's resolution — on stderr only with
 `-v`/`--verbose`. The transcript always goes to the run log.
 
 An installed package whose files changed in the registry since the pull is

@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -27,7 +28,8 @@ from facetmedia import __version__, doctor, env, licenses, prune, record, runner
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
-from facetmedia.progress import Progress
+from facetmedia.progress import Progress, one_line
+from facetmedia.pull_summary import PullSummary
 from facetmedia.record import RecordSpec
 from facetmedia.registry import Capability, Field, Package, load_active_registry
 from facetmedia.registry_types import Model, capability_models
@@ -228,17 +230,31 @@ def _require_machine(package: Package, run_id: str) -> list[str]:
 
 
 def _ensure_installed(args: argparse.Namespace, package: Package, run_id: str) -> tuple[bool, int]:
-    """Pull the package when needed; ``--no-pull`` refuses an absent or stale env."""
+    """Pull the package when needed; ``--no-pull`` refuses an absent or stale env.
+
+    The install draws ``facet pull``'s lines: the package's header, its live
+    phases, then the one line with its name, version, size and time.
+    """
     home = Home.from_env()
     if env.is_installed(package, home) and not env.package_stale(package, home):
         return False, 0
     if not args.pull:
         raise _not_installed_error(package, home)
     wait, wait_timeout = _lock_params(args)
+    reporter = _reporter(args)
+    summary = PullSummary(reporter)
     with hold("exclusive", "facet run pull", wait, wait_timeout):
-        report = env.pull(package, home, run_id=run_id, progress=_reporter(args))
-    downloaded = report.get("downloaded_bytes", 0)
-    return True, downloaded if isinstance(downloaded, int) else 0
+        began = time.monotonic()
+        summary.begin(package.name, package.version)
+        try:
+            report = env.pull(package, home, run_id=run_id, progress=reporter)
+        except FacetError as error:
+            summary.failed(package.name, package.version, time.monotonic() - began, one_line(error))
+            raise
+        downloaded = report.get("downloaded_bytes", 0)
+        size = downloaded if isinstance(downloaded, int) else 0
+        summary.collapse(package.name, package.version, size, time.monotonic() - began)
+    return True, size
 
 
 def _reporter(args: argparse.Namespace) -> Progress | None:

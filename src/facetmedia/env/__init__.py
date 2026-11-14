@@ -75,7 +75,7 @@ from facetmedia.env.package_marker import (
 )
 from facetmedia.env.source import fetch_source, source_dir, source_present
 from facetmedia.home import Home, atomic_write_text, require_posix, uv_env
-from facetmedia.progress import Progress, verbose
+from facetmedia.progress import Progress, one_line, verbose
 from facetmedia.registry_types import (
     Model,
     Package,
@@ -208,7 +208,7 @@ def _environment_phase(
     try:
         already, downloaded = _environment(package, home, env_dir, reporter)
     except BaseException as exc:
-        reporter.phase_end(ok=False, err=_one_line(exc))
+        reporter.phase_end(ok=False, err=one_line(exc))
         raise
     reporter.phase_end(ok=True)
     return already, downloaded
@@ -264,7 +264,7 @@ def _models_phase(
     try:
         records, downloaded = _fetch_models(package, home, verify, reporter.advance)
     except BaseException as exc:
-        reporter.phase_end(ok=False, err=_one_line(exc))
+        reporter.phase_end(ok=False, err=one_line(exc))
         raise
     reporter.phase_end(ok=True)
     return records, downloaded
@@ -286,7 +286,7 @@ def _artifacts_phase(package: Package, home: Home, reporter: Progress) -> int:
         downloaded = _fetch_artifacts(package, home, reporter.advance, reporter.phase_total)
         downloaded += _fetch_engine_artifacts(package, home, reporter)
     except BaseException as exc:
-        reporter.phase_end(ok=False, err=_one_line(exc))
+        reporter.phase_end(ok=False, err=one_line(exc))
         raise
     reporter.phase_end(ok=True)
     return downloaded
@@ -305,12 +305,6 @@ def _fetch_engine_artifacts(package: Package, home: Home, reporter: Progress) ->
             if not node_package_present(spec, home):
                 downloaded += _fetch_package(spec, home, reporter.advance, reporter.phase_total)
     return downloaded
-
-
-def _one_line(exc: BaseException) -> str:
-    """The first line of a failure, for the ``✗`` progress line."""
-    text = exc.message if isinstance(exc, FacetError) else str(exc)
-    return text.splitlines()[0] if text else type(exc).__name__
 
 
 def _fetch_artifacts(

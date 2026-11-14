@@ -17,6 +17,7 @@ import pytest
 from facetmedia import env as env_module
 from facetmedia import progress
 from facetmedia.cli import build_parser, main
+from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.progress import Progress, announce_failure, set_verbose
 from facetmedia.registry import load_registry
@@ -58,7 +59,7 @@ def _registry(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- the TTY line.
 
 
-def test_tty_bar_ends_with_a_check_and_the_elapsed_time() -> None:
+def test_tty_bar_leaves_the_live_line_for_the_summary() -> None:
     stream = io.StringIO()
     reporter = Progress("tty", stream, FakeClock())
 
@@ -66,36 +67,62 @@ def test_tty_bar_ends_with_a_check_and_the_elapsed_time() -> None:
     reporter.advance(50)
     reporter.advance(50)
     reporter.phase_end(ok=True)
+    reporter.note("✓ kokoro 0.1.2   812 MB   27.6s")
 
     out = stream.getvalue()
     assert "\r" in out
     assert "[█" in out, "a known total renders a bar"
     assert "MB/s" in out
-    assert out.rstrip().endswith("s)"), "the last line carries the elapsed time"
-    assert "✓ models (" in out.split("\r")[-1]
+    assert "✓ models" not in out, "the live phase line is erased, not kept as a check"
+    assert out.splitlines()[-1] == "✓ kokoro 0.1.2   812 MB   27.6s"
 
 
-def test_tty_spinner_runs_until_the_phase_ends() -> None:
+def test_tty_spinner_is_erased_by_the_package_line() -> None:
     stream = io.StringIO()
     reporter = Progress("tty", stream, FakeClock())
 
     reporter.phase_start("environment")
     reporter.advance(1024)
     reporter.phase_end(ok=True)
+    reporter.note("· kokoro 0.1.2   already installed")
 
     out = stream.getvalue()
     assert any(frame in out for frame in progress.SPINNER)
-    assert "✓ environment (" in out.split("\r")[-1]
+    assert "environment" in out.splitlines()[0], "the live line drew the phase name"
+    assert "✓ environment" not in out
+    assert out.splitlines()[-1] == "· kokoro 0.1.2   already installed"
 
 
-def test_tty_failure_names_the_one_line_error() -> None:
+def test_tty_failure_leaves_the_error_to_the_package_line() -> None:
     stream = io.StringIO()
     reporter = Progress("tty", stream, FakeClock())
 
     reporter.phase_start("environment")
     reporter.phase_end(ok=False, err="uv sync failed")
+    reporter.note("✗ kokoro 0.1.2   failed in 12.3s: uv sync failed")
 
-    assert "✗ environment: uv sync failed\n" in stream.getvalue()
+    out = stream.getvalue()
+    assert "✗ environment" not in out
+    assert out.splitlines()[-1] == "✗ kokoro 0.1.2   failed in 12.3s: uv sync failed"
+
+
+def test_note_writes_one_plain_line_for_a_pipe() -> None:
+    stream = io.StringIO()
+    reporter = Progress("plain", stream)
+
+    reporter.note("✓ kokoro 0.1.2   812 MB   27.6s")
+
+    assert stream.getvalue() == "✓ kokoro 0.1.2   812 MB   27.6s\n"
+    assert "\r" not in stream.getvalue()
+
+
+def test_note_draws_nothing_in_off_mode() -> None:
+    stream = io.StringIO()
+    reporter = Progress("off", stream)
+
+    reporter.note("✓ kokoro 0.1.2   812 MB   27.6s")
+
+    assert stream.getvalue() == ""
 
 
 def test_a_late_content_length_turns_the_spinner_into_a_bar() -> None:
@@ -235,6 +262,14 @@ def test_pull_reports_a_failed_phase_with_its_error(
 
 
 # --- the failure tail and the log path.
+
+
+def test_one_line_keeps_the_first_line_of_a_failure() -> None:
+    error = FacetError("download_failed", "uv sync failed\nsee the log for details")
+
+    assert progress.one_line(error) == "uv sync failed"
+    assert progress.one_line(OSError("disk full")) == "disk full"
+    assert progress.one_line(ValueError("")) == "ValueError"
 
 
 def test_announce_failure_repeats_the_last_twenty_lines_and_the_path(

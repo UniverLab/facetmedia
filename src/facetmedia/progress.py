@@ -1,8 +1,9 @@
 """Progress lines for ``facet pull`` and ``facet update``: standard library only.
 
 ``pull`` drives one line per phase through a :class:`Progress`: a spinner while
-the phase has no known size, a bar when it does, and one final line that ends
-with ``✓`` and the elapsed time, or ``✗`` and the one-line error.  The detailed
+the phase has no known size and a bar when it does.  At a terminal that line is
+live and transient: ``note`` erases it to write the package's final line, the
+one that names the package with its version, size and time.  The detailed
 working log (the plan, uv's resolution, the paths) stays in the run log and is
 echoed to stderr only with ``--verbose``.
 
@@ -18,6 +19,7 @@ import time
 from collections.abc import Callable
 from typing import Final, Literal, TextIO
 
+from facetmedia.contract import FacetError
 from facetmedia.home import log_file
 
 Mode = Literal["tty", "plain", "off"]
@@ -137,7 +139,12 @@ class Progress:
         self._draw()
 
     def phase_end(self, ok: bool = True, err: str = "") -> None:
-        """Close the line: ``✓ name (Xs)``, or ``✗ name: err``."""
+        """Close the live line: a pipe gets ``end ✓ name (Xs)``, a tty just erases it.
+
+        At a terminal the phase line is replaced by the package's summary line
+        (see ``note``), so it must not land in the transcript of its own:
+        else a sixteen-package pull ends in a column of nameless checks.
+        """
         if self._mode == "off":
             return
         elapsed = self._clock() - self._started
@@ -146,6 +153,13 @@ class Progress:
             self._write_line(f"end {text}")
             return
         self._erase()
+
+    def note(self, text: str) -> None:
+        """Write one finished line, replacing the live one at a terminal."""
+        if self._mode == "off":
+            return
+        if self._mode == "tty":
+            self._erase()
         self._write_line(text)
 
     def _draw(self) -> None:
@@ -180,6 +194,12 @@ class Progress:
     def _write_line(self, text: str) -> None:
         self._out.write(text + "\n")
         self._out.flush()
+
+
+def one_line(exc: BaseException) -> str:
+    """The first line of a failure, for the ``✗`` progress and summary lines."""
+    text = exc.message if isinstance(exc, FacetError) else str(exc)
+    return text.splitlines()[0] if text else type(exc).__name__
 
 
 def announce_failure(run_id: str) -> None:

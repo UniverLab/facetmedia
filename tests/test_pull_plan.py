@@ -376,16 +376,79 @@ def test_yes_installs_the_plan_and_summarizes(use_registry, monkeypatch, capsys)
     assert [entry["name"] for entry in entries] == ["a", "b"]
 
 
-def test_summary_lists_installed_skipped_and_bytes(use_registry, monkeypatch, capsys) -> None:
+def test_summary_collapses_each_package_then_totals(use_registry, monkeypatch, capsys) -> None:
     root = use_registry(["a", "b"], Spec(gpu=True))
     write_package(root, "b")
     fake_pull(monkeypatch, [])
     set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+
     assert main(["pull", IMAGE, "--yes"]) == 0
-    out = capsys.readouterr().out
-    assert "installed b 0.1.0" in out
-    assert "skipped a: needs an NVIDIA GPU" in out
-    assert "10 bytes downloaded" in out
+
+    captured = capsys.readouterr()
+    assert "installed b 0.1.0" not in captured.out
+    assert "10 bytes downloaded" not in captured.out
+    assert "skipped a: needs an NVIDIA GPU" in captured.out
+    lines = captured.err.splitlines()
+    assert "→ b 0.1.0" in lines
+    assert "✓ b 0.1.0   0 MB   0.0s" in lines
+    assert "2 packages · 0 MB · 0.0s" in lines
+
+
+def test_an_installed_package_draws_its_installed_line(use_registry, monkeypatch, capsys) -> None:
+    root = use_registry(["ready", "other"], Spec(facet="text"))
+    make_installed(Home.from_env(), root, "ready")
+    fake_pull(monkeypatch, [])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+
+    assert main(["pull", "text", "--yes"]) == 0
+
+    lines = capsys.readouterr().err.splitlines()
+    assert "· ready 0.1.0   already installed" in lines
+    assert not any(line.startswith("✓ ready") for line in lines)
+
+
+def test_a_failed_package_keeps_its_line_and_stops_the_pull(
+    use_registry, monkeypatch, capsys
+) -> None:
+    use_registry(["a", "b"])
+    fake_pull(monkeypatch, [], fail="b")
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+
+    assert main(["pull", IMAGE, "--yes"]) == EXIT_CODES["download_failed"]
+
+    captured = capsys.readouterr()
+    lines = captured.err.splitlines()
+    assert "✓ a 0.1.0   0 MB   0.0s" in lines
+    failed = next(line for line in lines if line.startswith("✗ b"))
+    assert failed.startswith("✗ b 0.1.0   failed in ")
+    assert failed.endswith(": b broke")
+    assert "2 packages · 0 MB · " in captured.err
+
+
+def test_json_keeps_its_envelope_and_draws_no_line(use_registry, monkeypatch, capsys) -> None:
+    use_registry(["a", "b"])
+    fake_pull(monkeypatch, [])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+
+    assert main(["pull", IMAGE, "--yes", "--json"]) == 0
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["data"]["downloaded_bytes"] == TWO_PULLS_BYTES
+    assert captured.err == ""
+
+
+def test_verbose_keeps_the_old_summary_blocks(use_registry, monkeypatch, capsys) -> None:
+    use_registry(["a", "b"])
+    fake_pull(monkeypatch, [])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+
+    assert main(["pull", IMAGE, "--yes", "--verbose"]) == 0
+
+    captured = capsys.readouterr()
+    assert "installed a 0.1.0" in captured.out
+    assert "installed b 0.1.0" in captured.out
+    assert "20 bytes downloaded" in captured.out
+    assert captured.err == "", "the transcript carries no summary line"
 
 
 def test_tty_no_answer_installs_nothing(use_registry, monkeypatch, capsys) -> None:
@@ -585,16 +648,21 @@ def test_single_package_pull_keeps_todays_shape(
     fake_pull(monkeypatch, calls)
     set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
     code = main(argv)
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
     assert code == 0
     assert calls == ["solo"]
     if "--json" in argv:
-        data = json.loads(out)["data"]
+        data = json.loads(captured.out)["data"]
         assert data["already_installed"] is False
         assert "plan" not in data
         assert "installed" not in data
+        assert captured.err == "", "--json draws no progress line"
     else:
-        assert out == "solo 0.1.0 installed at env (no model downloads in 0.0 s)\n"
+        assert captured.out == "", "the summary line goes to stderr, not stdout"
+        lines = captured.err.splitlines()
+        assert "→ solo 0.1.0" in lines
+        assert "✓ solo 0.1.0   0 MB   0.0s" in lines
+        assert "installed at env" not in captured.err
 
 
 def test_single_package_with_plan_or_cpu_asks_the_plan(use_registry, monkeypatch, capsys) -> None:
