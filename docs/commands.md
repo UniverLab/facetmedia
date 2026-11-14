@@ -77,13 +77,17 @@ foreground, on the terminal's own background.
 One accent, Señal yellow, marks only what was verified: `passed` in a `run`
 or `check` result line, the `✓` of a finished pull line, `accepted` once a
 licence is accepted. Reasons, paths, sizes, times and hints are secondary
-text in Hueso tenue. A failed result stays uncoloured, and its error line on
-stderr is prefixed `✗ `; a warning — a gate that timed out, a forced tier in
+text in Hueso tenue. Package names in plan tables and pull lines, and the
+wizard's step lines, are bold; no other hue appears anywhere. A failed
+result stays uncoloured, and its error line on stderr is prefixed `✗ `; a
+warning — a gate that timed out, a forced tier in
 the plan — is prefixed `! `.
 
-With `NO_COLOR` set, without a terminal (a pipe or a CI log), or with
-`--json`, every byte is the plain text it always was: no colour and no
-`✗ ` or `! ` prefix.
+Styling follows each stream on its own: with `NO_COLOR` set, or on a stream
+that is not a terminal (a pipe or a CI log), every byte is the plain text it
+always was — no colour and no `✗ ` or `! ` prefix. `--json` leaves stdout a
+single JSON document; stderr answers for itself, so `facet run`'s gate
+warnings keep their `! ` mark at a terminal even then.
 
 ## `facet update`
 
