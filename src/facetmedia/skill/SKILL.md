@@ -51,8 +51,8 @@ the asset.
 Every verb with `--json` prints one envelope on stdout:
 
 ```json
-{"contract": 1, "ok": true, "facet": "0.1.0", "data": {...}}
-{"contract": 1, "ok": false, "facet": "0.1.0", "error": {"code": "invalid_input", "message": "...", "details": {}, "hint": null}}
+{"contract": 1, "ok": true, "facet": "0.1.0b1", "data": {...}}
+{"contract": 1, "ok": false, "facet": "0.1.0b1", "error": {"code": "invalid_input", "message": "...", "details": {}, "hint": null}}
 ```
 
 A `facet run` whose asset fails verification prints `ok:false` **with** both
