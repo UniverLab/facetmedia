@@ -470,9 +470,9 @@ Resolution tries the config key, then the package's environment variable
 
 ```console
 $ facet config set blender.path "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe" --json
-{"contract": 1, "data": {"key": "blender.path", "path": "/home/me/.facet/config.toml", "value": "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"key": "blender.path", "path": "/home/me/.facet/config.toml", "value": "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"}, "facet": "0.1.0", "ok": true}
 $ facet config list --json
-{"contract": 1, "data": {"keys": [{"app": "blender", "key": "blender.path", "set": true, "value": "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"}], "path": "/home/me/.facet/config.toml"}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"keys": [{"app": "blender", "key": "blender.path", "set": true, "value": "/mnt/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"}], "path": "/home/me/.facet/config.toml"}, "facet": "0.1.0", "ok": true}
 ```
 
 Lock: none.
@@ -537,7 +537,7 @@ facet:
   ✓ orphans: no orphaned environments, servers or models
   ✓ gpu: none
 ascii (installed):
-  ✓ compatible: requires_facet >=0.1.0b1,<0.2 satisfied by facet 0.1.0b1, protocol 1
+  ✓ compatible: requires_facet >=0.1.0b1,<0.2 satisfied by facet 0.1.0, protocol 1
   ✓ platform: linux in [linux]
   ✓ ram: total 19.53 GB, available 16.49 GB, need 1.0 GB
   ✓ disk: free 635.44 GB, need 0.00 GB (1.01 GB already installed)
@@ -553,7 +553,7 @@ ascii (installed):
   ✓ figlet_font: dos_rebel is installed with pyfiglet
   ✓ mono_font: sometype-mono 64308 bytes, opens with Pillow
 ffmpeg (installed):
-  ✓ compatible: requires_facet >=0.1.0b1,<0.2 satisfied by facet 0.1.0b1, protocol 1
+  ✓ compatible: requires_facet >=0.1.0b1,<0.2 satisfied by facet 0.1.0, protocol 1
   ✓ platform: linux in [linux]
   ✓ ram: total 19.53 GB, available 16.44 GB, need 1.0 GB
   ✓ disk: free 635.43 GB, need 0.00 GB (1.01 GB already installed)
@@ -590,7 +590,7 @@ Flags: none; the argument is the asset or its `<asset>.facet.json` record.
 $ facet check /tmp/opencode/facet-docs/assets/canopy.txt
 /tmp/opencode/facet-docs/assets/canopy.txt passed
 $ facet check /tmp/opencode/facet-docs/assets/canopy.txt --json
-{"contract": 1, "data": {"asset": "/tmp/opencode/facet-docs/assets/canopy.txt", "capability": "ascii.banner", "fresh": {"metrics": {"columns": 60, "rows": 9}, "passed": true, "thresholds": {}, "verifier": "ascii-pyfiglet"}, "passed": true, "recorded": {"metrics": {"columns": 60, "rows": 9}, "status": "passed"}}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"asset": "/tmp/opencode/facet-docs/assets/canopy.txt", "capability": "ascii.banner", "fresh": {"metrics": {"columns": 60, "rows": 9}, "passed": true, "thresholds": {}, "verifier": "ascii-pyfiglet"}, "passed": true, "recorded": {"metrics": {"columns": 60, "rows": 9}, "status": "passed"}}, "facet": "0.1.0", "ok": true}
 ```
 
 The argument is the asset or its record; the printed line and `data.asset`
@@ -672,7 +672,7 @@ $ facet run ffmpeg.normalize empty.toml
 invalid inputs for ffmpeg.normalize
 clip: required
 $ facet run ffmpeg.normalize empty.toml --json
-{"contract": 1, "error": {"code": "invalid_input", "details": {"errors": [{"field": "clip", "problem": "required"}]}, "hint": "clip: required", "message": "invalid inputs for ffmpeg.normalize"}, "facet": "0.1.0b1", "ok": false}
+{"contract": 1, "error": {"code": "invalid_input", "details": {"errors": [{"field": "clip", "problem": "required"}]}, "hint": "clip: required", "message": "invalid inputs for ffmpeg.normalize"}, "facet": "0.1.0", "ok": false}
 ```
 
 Each entry in `details.errors` carries `field` and `problem`; a `pattern`
@@ -782,15 +782,15 @@ Flags: `--no-open` (print the viewer URL only), `--port PORT`,
 
 ```console
 $ facet preview assets/canopy.txt --json
-{"contract": 1, "data": {"asset": "assets/canopy.txt", "images": [], "preview": {"fields": {"columns": 60, "font": "dos_rebel", "rows": 9}, "kind": "text", "preview": 1, "summary": "DOS Rebel · 60×9"}, "record": {"name": "canopy", "kind": "text", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"asset": "assets/canopy.txt", "images": [], "preview": {"fields": {"columns": 60, "font": "dos_rebel", "rows": 9}, "kind": "text", "preview": 1, "summary": "DOS Rebel · 60×9"}, "record": {"name": "canopy", "kind": "text", "…": "the full record"}}, "facet": "0.1.0", "ok": true}
 $ facet preview out/thesis.pdf --json              # a document: pages ride on images
-{"contract": 1, "data": {"asset": "out/thesis.pdf", "images": ["/abs/out/preview/page-01.png", "…", "/abs/out/preview/page-10.png"], "preview": {"kind": "document", "page_count": 11, "pages": ["preview/page-01.png", "…", "preview/page-11.png"], "preview": 1, "summary": "a footnoted draft", "truncated": true}, "record": {"name": "thesis", "kind": "document", "…": "the full record"}}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"asset": "out/thesis.pdf", "images": ["/abs/out/preview/page-01.png", "…", "/abs/out/preview/page-10.png"], "preview": {"kind": "document", "page_count": 11, "pages": ["preview/page-01.png", "…", "preview/page-11.png"], "preview": 1, "summary": "a footnoted draft", "truncated": true}, "record": {"name": "thesis", "kind": "document", "…": "the full record"}}, "facet": "0.1.0", "ok": true}
 $ facet preview assets/canopy.txt --no-open
 http://127.0.0.1:39651/viewer/index.html?asset=canopy.txt
 $ facet preview out/thesis.pdf --no-open           # a document: its viewer, same route
 http://127.0.0.1:39651/viewer/index.html?asset=thesis.pdf
 $ facet preview pieces --kind image --json         # a folder: one entry per asset
-{"contract": 1, "data": {"assets": [{"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image", "created": "2026-11-12T10:04:11Z", "duration_s": null, "facet": "image", "kind": "image", "preview": {"preview": 1, "…": "the parsed preview"}, "preview_state": "fresh", "verified": true}, "…"], "folder": "pieces"}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"assets": [{"asset": "caja/caja-product.png", "bytes": 48213, "capability": "conjure.image", "created": "2026-11-12T10:04:11Z", "duration_s": null, "facet": "image", "kind": "image", "preview": {"preview": 1, "…": "the parsed preview"}, "preview_state": "fresh", "verified": true}, "…"], "folder": "pieces"}, "facet": "0.1.0", "ok": true}
 $ facet preview pieces --no-open                    # the gallery page, one server
 http://127.0.0.1:39651/gallery/index.html
 ```
@@ -895,7 +895,7 @@ Flags: none; the argument is the directory.
 ```console
 $ facet registry validate ../facetmedia-registry
 $ facet registry validate ../facetmedia-registry --json
-{"contract": 1, "data": {"packages": ["ascii", "cad", "ffmpeg", "kokoro", "whisper"], "path": "../facetmedia-registry", "valid": true}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"packages": ["ascii", "cad", "ffmpeg", "kokoro", "whisper"], "path": "../facetmedia-registry", "valid": true}, "facet": "0.1.0", "ok": true}
 ```
 
 A clean registry prints nothing and exits 0 — no news is the clean news.
