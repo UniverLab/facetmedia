@@ -109,7 +109,9 @@ def test_print_text_strips_colours_under_no_color(
 def test_print_text_writes_the_banner_for_the_terminal_width(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(banner.shutil, "get_terminal_size", lambda: os.terminal_size((200, 24)))
+    monkeypatch.setattr(
+        banner.shutil, "get_terminal_size", lambda *_a, **_k: os.terminal_size((200, 24))
+    )
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     banner.print_text()
     assert capsys.readouterr().out == banner.text(200)
@@ -118,7 +120,9 @@ def test_print_text_writes_the_banner_for_the_terminal_width(
 def test_print_text_uses_the_narrow_banner_for_a_narrow_terminal(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(banner.shutil, "get_terminal_size", lambda: os.terminal_size((60, 24)))
+    monkeypatch.setattr(
+        banner.shutil, "get_terminal_size", lambda *_a, **_k: os.terminal_size((60, 24))
+    )
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     banner.print_text()
     assert capsys.readouterr().out == banner.text(60)
