@@ -1,0 +1,812 @@
+"""Read and validate a registry's index and package manifests.
+
+``RegistryLoader`` collects every problem instead of stopping at the first one,
+so a registry author sees all the broken lines at once.  ``facetmedia.registry``
+drives it.
+"""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Final
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
+
+from facetmedia.manifest.binary import read_binary
+from facetmedia.manifest.ffmpeg import read_ffmpeg
+from facetmedia.manifest.field import check_default, check_field_options, read_multiple_of
+from facetmedia.manifest.host import read_host_app
+from facetmedia.manifest.i18n import SUMMARY_LIMIT, read_facets, read_i18n
+from facetmedia.manifest.model import read_models
+from facetmedia.manifest.node import read_node
+from facetmedia.manifest.server import read_server, read_source
+from facetmedia.registry_types import (
+    CAPABILITY_KINDS,
+    DEFAULT_INVOCATION_TEMPLATE,
+    FACETS,
+    FIELD_TYPES,
+    MISSING,
+    Binary,
+    Browser,
+    Capability,
+    Field,
+    HostApp,
+    License,
+    Node,
+    Package,
+    Problem,
+    Registry,
+    Requirements,
+    Server,
+    Source,
+)
+
+_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
+_SHA256_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{64}\Z")
+_BROWSER_VERSION_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+\.\d+\.\d+\Z")
+_PYTHON_RE: Final[re.Pattern[str]] = re.compile(r"\d+\.\d+(\.\d+)?\Z")
+_USES_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9_]*\Z")
+_REQUIRES_RE: Final[re.Pattern[str]] = re.compile(r"^Requires:[ \t]*(.*)$", re.MULTILINE)
+_LIB_DIR: Final[str] = "lib"
+
+
+def _is_relative_path(value: str) -> bool:
+    """True for a non-empty relative path that stays inside its directory."""
+
+    if not value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def _canonical_name(name: str) -> str:
+    """A distribution name normalised the way PEP 503 says to compare them."""
+
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _dependency_names(path: Path) -> frozenset[str] | None:
+    """The canonical names in a ``pyproject.toml``'s dependencies, or ``None``."""
+
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    project = data.get("project")
+    dependencies = project.get("dependencies") if isinstance(project, dict) else None
+    if not isinstance(dependencies, list):
+        return frozenset()
+    names: set[str] = set()
+    for item in dependencies:
+        if isinstance(item, str) and item.strip():
+            requirement = item.strip()
+            names.add(_canonical_name(re.split(r"[<>=!~;\[(\s]", requirement, maxsplit=1)[0]))
+    return frozenset(names)
+
+
+def _read_capability_models(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str
+) -> tuple[str, ...] | None:
+    """A capability's declared manifest models, or ``None`` when undeclared.
+
+    Every entry must be the ``id`` of a ``[[models]]`` entry in the same
+    package manifest: the loader's ``model_ids`` maps each id to its file,
+    so an id from another package (or none at all) is unknown here.  An
+    empty list is valid and means the capability uses no manifest model.
+    """
+
+    raw = item.get("models")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(entry, str) for entry in raw):
+        loader.add(file, f"{prefix}models", "value")
+        return ()
+    for entry in raw:
+        if loader.model_ids.get(entry) != file:
+            loader.add(file, f"{prefix}models", f"unknown model {entry}")
+    return tuple(raw)
+
+
+def _missing_requirements(module: Path, dependencies: frozenset[str] | None) -> str | None:
+    """The first distribution a module's ``Requires:`` line names but the package lacks."""
+
+    try:
+        text = module.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    found = _REQUIRES_RE.search(text)
+    if found is None:
+        return None
+    body = found.group(1).strip()
+    if not body or body == "stdlib":
+        return None
+    known = dependencies if dependencies is not None else frozenset()
+    for part in body.split(","):
+        name = _canonical_name(part.strip())
+        if name and name not in known:
+            return name
+    return None
+
+
+_PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "name",
+        "version",
+        "requires_facet",
+        "protocol",
+        "provider",
+        "tool_name",
+        "description",
+        "facet",
+        "engine",
+        "transport",
+        "requirements",
+        "licenses",
+        "models",
+        "capabilities",
+        "uses",
+        "browser",
+        "ffmpeg",
+        "tier_group",
+        "tier",
+    }
+)
+_BROWSER_KEYS: Final[frozenset[str]] = frozenset({"channel", "revision", "version", "sha256"})
+_BROWSER_CHANNELS: Final[frozenset[str]] = frozenset({"chromium"})
+_ENGINE_KEYS: Final[frozenset[str]] = frozenset(
+    {"type", "python", "node", "server", "source", "host_app", "binary"}
+)
+_ENGINE_TYPES: Final[frozenset[str]] = frozenset({"python-env", "node", "host-app", "binary"})
+_TRANSPORT_KEYS: Final[frozenset[str]] = frozenset({"type", "entry", "invocation_template"})
+_REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "gpu",
+        "ram_gb",
+        "vram_gb",
+        "disk_gb",
+        "exclusive",
+        "platforms",
+        "host_libs",
+        "host_hint",
+    }
+)
+_LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
+_CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
+    {"summary", "kind", "inputs", "verify", "preview", "models", "verify_uses_server", "i18n"}
+)
+_VERIFY_KEYS: Final[frozenset[str]] = frozenset({"thresholds"})
+_PREVIEW_KEYS: Final[frozenset[str]] = frozenset({"viewer"})
+_FIELD_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "type",
+        "required",
+        "default",
+        "description",
+        "min",
+        "max",
+        "multiple_of",
+        "pattern",
+        "values",
+        "min_items",
+        "items",
+    }
+)
+
+
+class RegistryLoader:
+    """Collects every problem instead of stopping at the first one."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.problems: list[Problem] = []
+        self.model_ids: dict[str, str] = {}
+
+    def add(self, file: str, key: str, problem: str) -> None:
+        found = Problem(file, key, problem)
+        if found not in self.problems:
+            self.problems.append(found)
+
+    def table(
+        self, parent: Mapping[str, Any], key: str, file: str, prefix: str, *, required: bool
+    ) -> dict[str, Any] | None:
+        value = parent.get(key)
+        if value is None:
+            if required:
+                self.add(file, f"{prefix}{key}", "required")
+            return None
+        if not isinstance(value, dict):
+            self.add(file, f"{prefix}{key}", "type")
+            return None
+        return value
+
+    def string(
+        self, parent: Mapping[str, Any], key: str, file: str, prefix: str, *, required: bool
+    ) -> str | None:
+        value = parent.get(key)
+        if value is None:
+            if required:
+                self.add(file, f"{prefix}{key}", "required")
+            return None if required else ""
+        if not isinstance(value, str):
+            self.add(file, f"{prefix}{key}", "type")
+            return None
+        if required and not value:
+            self.add(file, f"{prefix}{key}", "value")
+        return value
+
+    def integer(
+        self, parent: Mapping[str, Any], key: str, file: str, prefix: str, *, required: bool
+    ) -> int | None:
+        value = parent.get(key)
+        if value is None:
+            if required:
+                self.add(file, f"{prefix}{key}", "required")
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            self.add(file, f"{prefix}{key}", "type")
+            return None
+        return value
+
+    def number(self, parent: Mapping[str, Any], key: str, file: str, prefix: str) -> float | None:
+        value = parent.get(key)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            self.add(file, f"{prefix}{key}", "type")
+            return None
+        return float(value)
+
+    def boolean(
+        self, parent: Mapping[str, Any], key: str, file: str, prefix: str, *, default: bool
+    ) -> bool:
+        value = parent.get(key)
+        if value is None:
+            return default
+        if not isinstance(value, bool):
+            self.add(file, f"{prefix}{key}", "type")
+            return default
+        return value
+
+    def string_list(
+        self, parent: Mapping[str, Any], key: str, file: str, prefix: str
+    ) -> tuple[str, ...]:
+        value = parent.get(key)
+        if value is None:
+            return ()
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            self.add(file, f"{prefix}{key}", "type")
+            return ()
+        return tuple(value)
+
+    def unknown(
+        self, table: Mapping[str, Any], allowed: frozenset[str], file: str, prefix: str
+    ) -> None:
+        for key in sorted(table):
+            if key not in allowed:
+                self.add(file, f"{prefix}{key}", "unknown")
+
+    def read_toml(self, file: str) -> dict[str, Any] | None:
+        path = self.root / file
+        try:
+            with path.open("rb") as handle:
+                data = tomllib.load(handle)
+        except FileNotFoundError:
+            self.add(file, "", "missing")
+            return None
+        except (OSError, tomllib.TOMLDecodeError):
+            self.add(file, "", "invalid_toml")
+            return None
+        if not isinstance(data, dict):
+            self.add(file, "", "type")
+            return None
+        return data
+
+    def load(self) -> Registry | None:
+        index = self.read_toml("index.toml")
+        if index is None:
+            return None
+        version = self.index_version(index)
+        facets = read_facets(self, index, "index.toml")
+        packages: dict[str, Package] = {}
+        for name in self.index_packages(index):
+            file = f"packages/{name}/package.toml"
+            data = self.read_toml(file)
+            if data is None:
+                continue
+            package = self.package(name, file, data)
+            if package is not None:
+                packages[name] = package
+        self.duplicate_tiers(packages)
+        return Registry(self.root, version, packages, facets)
+
+    def duplicate_tiers(self, packages: Mapping[str, Package]) -> None:
+        """Every ``tier`` is unique within its ``tier_group``."""
+        seen: dict[tuple[str, str], str] = {}
+        for name, package in packages.items():
+            if not package.tier_group:
+                continue
+            key = (package.tier_group, package.tier)
+            if key in seen:
+                self.add(f"packages/{name}/package.toml", "tier", "duplicate")
+                continue
+            seen[key] = name
+
+    def index_version(self, index: Mapping[str, Any]) -> int:
+        self.unknown(index, frozenset({"version", "packages", "facets"}), "index.toml", "")
+        version = self.integer(index, "version", "index.toml", "", required=True)
+        if version is None:
+            return 0
+        if version != 1:
+            self.add("index.toml", "version", "value")
+        return version
+
+    def index_packages(self, index: Mapping[str, Any]) -> tuple[str, ...]:
+        raw = index.get("packages")
+        if raw is None:
+            self.add("index.toml", "packages", "required")
+            return ()
+        if not isinstance(raw, list):
+            self.add("index.toml", "packages", "type")
+            return ()
+        if not raw:
+            self.add("index.toml", "packages", "min_items")
+            return ()
+        names: list[str] = []
+        for position, item in enumerate(raw):
+            prefix = f"packages[{position}]."
+            if not isinstance(item, dict):
+                self.add("index.toml", f"{prefix}name", "type")
+                continue
+            self.unknown(item, frozenset({"name"}), "index.toml", prefix)
+            name = self.string(item, "name", "index.toml", prefix, required=True)
+            if name is None:
+                continue
+            if not _NAME_RE.fullmatch(name):
+                self.add("index.toml", f"{prefix}name", "value")
+                continue
+            if name in names:
+                self.add("index.toml", f"{prefix}name", "duplicate")
+                continue
+            names.append(name)
+        return tuple(names)
+
+    def package(self, name: str, file: str, data: dict[str, Any]) -> Package | None:
+        before = len(self.problems)
+        self.unknown(data, _PACKAGE_KEYS, file, "")
+        manifest_name = self.string(data, "name", file, "", required=True)
+        if manifest_name is not None and manifest_name != name:
+            self.add(file, "name", "value")
+        version = self.manifest_version(data, file)
+        requires_facet = self.requires_facet(data, file)
+        protocol = self.integer(data, "protocol", file, "", required=True)
+        provider = self.string(data, "provider", file, "", required=True)
+        tool_name = self.string(data, "tool_name", file, "", required=True)
+        description = self.string(data, "description", file, "", required=True)
+        facet = self.facet(data, file)
+        transport_type, entry, template = self.transport(data, file)
+        engine_type, python, node, server, source, host_app, binary = self.engine(
+            data, file, transport_type, template
+        )
+        requirements = self.requirements(data, file)
+        licenses = self.licenses(data.get("licenses"), file)
+        models = read_models(self, data.get("models"), file)
+        capabilities = self.capabilities(data.get("capabilities"), name, file, server is not None)
+        dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
+        uses = self.uses(data.get("uses"), file, dependencies)
+        browser = self.browser(data, file)
+        ffmpeg = read_ffmpeg(self, data, file)
+        tier_group, tier = self.tier(data, file)
+        if len(self.problems) != before:
+            return None
+        if (
+            version is None
+            or requires_facet is None
+            or protocol is None
+            or provider is None
+            or tool_name is None
+            or description is None
+            or facet is None
+        ):
+            return None
+        return Package(
+            name=name,
+            version=version,
+            requires_facet=requires_facet,
+            protocol=protocol,
+            provider=provider,
+            tool_name=tool_name,
+            description=description,
+            facet=facet,
+            engine_type=engine_type,
+            python=python,
+            transport_type=transport_type,
+            entry=entry,
+            invocation_template=template,
+            requirements=requirements,
+            directory=self.root / "packages" / name,
+            licenses=licenses,
+            models=models,
+            capabilities=capabilities,
+            uses=uses,
+            browser=browser,
+            ffmpeg=ffmpeg,
+            server=server,
+            source=source,
+            node=node,
+            host_app=host_app,
+            binary=binary,
+            tier_group=tier_group,
+            tier=tier,
+        )
+
+    def tier(self, data: dict[str, Any], file: str) -> tuple[str, str]:
+        """The optional ``tier_group`` and ``tier``: both or neither."""
+        group = self.string(data, "tier_group", file, "", required=False) or ""
+        tier = self.string(data, "tier", file, "", required=False) or ""
+        if bool(group) != bool(tier):
+            self.add(file, "tier" if tier else "tier_group", "value")
+        return group, tier
+
+    def uses(self, raw: object, file: str, dependencies: frozenset[str] | None) -> tuple[str, ...]:
+        """The shared modules this package declares, validated against ``lib/``."""
+
+        if raw is None:
+            return ()
+        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+            self.add(file, "uses", "type")
+            return ()
+        found: list[str] = []
+        seen: set[str] = set()
+        for position, name in enumerate(raw):
+            key = f"uses[{position}]"
+            if not _USES_RE.fullmatch(name):
+                self.add(file, key, "value")
+                continue
+            if name in seen:
+                self.add(file, key, "duplicate")
+                continue
+            seen.add(name)
+            module = self.root / _LIB_DIR / f"{name}.py"
+            if not module.is_file():
+                self.add(file, key, "missing")
+                continue
+            missing = _missing_requirements(module, dependencies)
+            if missing is not None:
+                self.add(file, key, f"missing dependency: {missing}")
+                continue
+            found.append(name)
+        return tuple(found)
+
+    def browser(self, data: Mapping[str, Any], file: str) -> Browser | None:
+        """The optional ``[browser]`` table: one shared Chromium build."""
+        before = len(self.problems)
+        table = self.table(data, "browser", file, "", required=False)
+        if table is None:
+            return None
+        self.unknown(table, _BROWSER_KEYS, file, "browser.")
+        channel = self.string(table, "channel", file, "browser.", required=True)
+        if channel is not None and channel not in _BROWSER_CHANNELS:
+            self.add(file, "browser.channel", "value")
+        revision = self.string(table, "revision", file, "browser.", required=True)
+        version = self.string(table, "version", file, "browser.", required=True)
+        if version and not _BROWSER_VERSION_RE.fullmatch(version):
+            self.add(file, "browser.version", "value")
+        sha256 = self.string(table, "sha256", file, "browser.", required=True)
+        if sha256 and not _SHA256_RE.fullmatch(sha256):
+            self.add(file, "browser.sha256", "value")
+        if len(self.problems) != before:
+            return None
+        return Browser(
+            channel=channel or "",
+            revision=revision or "",
+            version=version or "",
+            sha256=sha256 or "",
+        )
+
+    def manifest_version(self, data: Mapping[str, Any], file: str) -> str | None:
+        version = self.string(data, "version", file, "", required=True)
+        if version is None:
+            return None
+        try:
+            Version(version)
+        except InvalidVersion:
+            self.add(file, "version", "value")
+            return None
+        return version
+
+    def requires_facet(self, data: Mapping[str, Any], file: str) -> str | None:
+        specifier = self.string(data, "requires_facet", file, "", required=True)
+        if specifier is None:
+            return None
+        try:
+            SpecifierSet(specifier)
+        except InvalidSpecifier:
+            self.add(file, "requires_facet", "value")
+            return None
+        return specifier
+
+    def facet(self, data: Mapping[str, Any], file: str) -> str | None:
+        value = self.string(data, "facet", file, "", required=True)
+        if value is None:
+            return None
+        if value not in FACETS:
+            self.add(file, "facet", f"value: one of {', '.join(FACETS)}")
+            return None
+        return value
+
+    def engine(
+        self, data: Mapping[str, Any], file: str, transport_type: str, template: str
+    ) -> tuple[str, str, Node | None, Server | None, Source | None, HostApp | None, Binary | None]:
+        table = self.table(data, "engine", file, "", required=True)
+        if table is None:
+            return "", "", None, None, None, None, None
+        self.unknown(table, _ENGINE_KEYS, file, "engine.")
+        engine_type = self.string(table, "type", file, "engine.", required=True)
+        if engine_type is not None and engine_type not in _ENGINE_TYPES:
+            self.add(file, "engine.type", "value")
+        python = self.engine_python(table, file, engine_type)
+        node = read_node(self, table, file, engine_type or "", transport_type)
+        server = read_server(self, table, file, engine_type or "", transport_type)
+        source = read_source(self, table, file, engine_type or "", transport_type)
+        host_app = read_host_app(self, table, file, engine_type or "", transport_type)
+        binary = read_binary(self, table, file, engine_type or "", transport_type, template)
+        return engine_type or "", python, node, server, source, host_app, binary
+
+    def engine_python(self, table: Mapping[str, Any], file: str, engine_type: str | None) -> str:
+        """``engine.python``: required for ``python-env``, forbidden for the rest.
+
+        ``node``, ``host-app`` and ``binary`` build no python environment.
+        """
+        if engine_type in {"node", "host-app", "binary"}:
+            if table.get("python") is not None:
+                self.add(file, "engine.python", "value")
+            return ""
+        python = self.string(table, "python", file, "engine.", required=True)
+        if python and not _PYTHON_RE.fullmatch(python):
+            self.add(file, "engine.python", "value")
+        return python or ""
+
+    def transport(self, data: Mapping[str, Any], file: str) -> tuple[str, str, str]:
+        table = self.table(data, "transport", file, "", required=True)
+        if table is None:
+            return "", "", DEFAULT_INVOCATION_TEMPLATE
+        self.unknown(table, _TRANSPORT_KEYS, file, "transport.")
+        transport_type = self.string(table, "type", file, "transport.", required=True)
+        if transport_type is not None and transport_type != "cli":
+            self.add(file, "transport.type", "value")
+        engine = data.get("engine")
+        binary = isinstance(engine, dict) and engine.get("type") == "binary"
+        raw_entry = self.string(table, "entry", file, "transport.", required=not binary)
+        entry = raw_entry or ""
+        if (binary and "entry" in table) or (bool(raw_entry) and not _is_relative_path(entry)):
+            self.add(file, "transport.entry", "value")
+        template = self.string(table, "invocation_template", file, "transport.", required=False)
+        if isinstance(template, str) and "invocation_template" in table and not template:
+            self.add(file, "transport.invocation_template", "value")
+        return transport_type or "", entry, template or DEFAULT_INVOCATION_TEMPLATE
+
+    def requirements(self, data: Mapping[str, Any], file: str) -> Requirements:
+        table = self.table(data, "requirements", file, "", required=True)
+        if table is None:
+            return Requirements()
+        self.unknown(table, _REQUIREMENT_KEYS, file, "requirements.")
+        gpu = self.boolean(table, "gpu", file, "requirements.", default=False)
+        vram_gb = self.number(table, "vram_gb", file, "requirements.") or 0.0
+        if vram_gb > 0 and not gpu:
+            self.add(file, "requirements.vram_gb", "value")
+        return Requirements(
+            gpu=gpu,
+            ram_gb=self.number(table, "ram_gb", file, "requirements.") or 0.0,
+            vram_gb=vram_gb,
+            disk_gb=self.number(table, "disk_gb", file, "requirements.") or 0.0,
+            exclusive=self.boolean(table, "exclusive", file, "requirements.", default=True),
+            platforms=self.string_list(table, "platforms", file, "requirements.") or ("linux",),
+            host_libs=self.string_list(table, "host_libs", file, "requirements."),
+            host_hint=self.string(table, "host_hint", file, "requirements.", required=False) or "",
+        )
+
+    def licenses(self, raw: object, file: str) -> tuple[License, ...]:
+        if raw is None:
+            return ()
+        if not isinstance(raw, list):
+            self.add(file, "licenses", "type")
+            return ()
+        licenses: list[License] = []
+        for position, item in enumerate(raw):
+            prefix = f"licenses[{position}]."
+            if not isinstance(item, dict):
+                self.add(file, f"{prefix}subject", "type")
+                continue
+            self.unknown(item, _LICENSE_KEYS, file, prefix)
+            subject = self.string(item, "subject", file, prefix, required=True)
+            spdx = self.string(item, "spdx", file, prefix, required=True)
+            if subject is not None and spdx is not None:
+                licenses.append(License(subject, spdx))
+        return tuple(licenses)
+
+    def capabilities(
+        self, raw: object, package: str, file: str, has_server: bool
+    ) -> tuple[Capability, ...]:
+        if raw is None:
+            return ()
+        if not isinstance(raw, dict):
+            self.add(file, "capabilities", "type")
+            return ()
+        capabilities: list[Capability] = []
+        for name in sorted(raw):
+            prefix = f"capabilities.{name}."
+            item = raw[name]
+            if not _NAME_RE.fullmatch(name):
+                self.add(file, prefix.rstrip("."), "value")
+                continue
+            if not isinstance(item, dict):
+                self.add(file, prefix.rstrip("."), "type")
+                continue
+            capability = self.capability(name, package, file, prefix, item, has_server)
+            if capability is not None:
+                capabilities.append(capability)
+        return tuple(capabilities)
+
+    def capability(
+        self,
+        name: str,
+        package: str,
+        file: str,
+        prefix: str,
+        item: Mapping[str, Any],
+        has_server: bool,
+    ) -> Capability | None:
+        before = len(self.problems)
+        self.unknown(item, _CAPABILITY_KEYS, file, prefix)
+        summary = self.string(item, "summary", file, prefix, required=True)
+        kind = self.string(item, "kind", file, prefix, required=True)
+        if kind is not None and kind not in CAPABILITY_KINDS:
+            self.add(file, f"{prefix}kind", "value")
+        inputs = self.fields(item.get("inputs"), file, f"{prefix}inputs.", allow_array=True)
+        thresholds = self.verify(item.get("verify"), file, prefix)
+        viewer = self.preview(item.get("preview"), file, prefix)
+        models = _read_capability_models(self, item, file, prefix)
+        verify_uses_server = self.boolean(item, "verify_uses_server", file, prefix, default=False)
+        if "verify_uses_server" in item and not has_server:
+            self.add(file, f"{prefix}verify_uses_server", "requires engine.server")
+        i18n = read_i18n(
+            self, item.get("i18n"), file, f"{prefix}i18n.", key="summary", limit=SUMMARY_LIMIT
+        )
+        if models is not None and any(field.name == "model" for field in inputs):
+            self.add(
+                file,
+                f"{prefix}models",
+                "a capability with a model input selects its model per piece",
+            )
+        if len(self.problems) != before or summary is None or kind is None:
+            return None
+        return Capability(
+            id=f"{package}.{name}",
+            package=package,
+            summary=summary,
+            kind=kind,
+            inputs=inputs,
+            thresholds=thresholds,
+            viewer=viewer,
+            models=models,
+            verify_uses_server=verify_uses_server,
+            i18n=i18n,
+        )
+
+    def verify(self, raw: object, file: str, prefix: str) -> Mapping[str, float]:
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            self.add(file, f"{prefix}verify", "type")
+            return {}
+        self.unknown(raw, _VERIFY_KEYS, file, f"{prefix}verify.")
+        table = self.table(raw, "thresholds", file, f"{prefix}verify.", required=False)
+        if table is None:
+            return {}
+        thresholds: dict[str, float] = {}
+        for key in sorted(table):
+            value = self.number(table, key, file, f"{prefix}verify.thresholds.")
+            if value is not None:
+                thresholds[key] = value
+        return thresholds
+
+    def preview(self, raw: object, file: str, prefix: str) -> str:
+        if raw is None:
+            self.add(file, f"{prefix}preview", "required")
+            return "generic"
+        if not isinstance(raw, dict):
+            self.add(file, f"{prefix}preview", "type")
+            return "generic"
+        self.unknown(raw, _PREVIEW_KEYS, file, f"{prefix}preview.")
+        viewer = self.string(raw, "viewer", file, f"{prefix}preview.", required=False)
+        if viewer is not None and not _NAME_RE.fullmatch(viewer):
+            self.add(file, f"{prefix}preview.viewer", "value")
+            return "generic"
+        return viewer or "generic"
+
+    def fields(
+        self, raw: object, file: str, prefix: str, *, allow_array: bool
+    ) -> tuple[Field, ...]:
+        if raw is None:
+            return ()
+        if not isinstance(raw, dict):
+            self.add(file, prefix.rstrip("."), "type")
+            return ()
+        fields: list[Field] = []
+        for name in sorted(raw):
+            spec = raw[name]
+            if not _NAME_RE.fullmatch(name):
+                self.add(file, f"{prefix}{name}", "value")
+                continue
+            if not isinstance(spec, dict):
+                self.add(file, f"{prefix}{name}", "type")
+                continue
+            field = self.field(name, spec, file, prefix, allow_array=allow_array)
+            if field is not None:
+                fields.append(field)
+        return tuple(fields)
+
+    def field(
+        self,
+        name: str,
+        spec: Mapping[str, Any],
+        file: str,
+        prefix: str,
+        *,
+        allow_array: bool,
+    ) -> Field | None:
+        before = len(self.problems)
+        key = f"{prefix}{name}"
+        self.unknown(spec, _FIELD_KEYS, file, f"{key}.")
+        field_type = self.string(spec, "type", file, f"{key}.", required=True)
+        if field_type is not None and field_type not in FIELD_TYPES:
+            self.add(file, f"{key}.type", "value")
+        if field_type == "array" and not allow_array:
+            self.add(file, f"{key}.type", "value")
+        check_field_options(self, field_type, spec, file, key)
+        multiple_of = read_multiple_of(self, spec, file, f"{key}.", field_type)
+        required = self.boolean(spec, "required", file, f"{key}.", default=False)
+        description = self.string(spec, "description", file, f"{key}.", required=False) or ""
+        values = self.string_list(spec, "values", file, f"{key}.")
+        if field_type == "enum" and not values:
+            self.add(file, f"{key}.values", "required")
+        default = spec.get("default", MISSING)
+        if default is not MISSING:
+            check_default(
+                self, field_type or "", default, values, file, f"{key}.default", multiple_of
+            )
+        minimum = self.number(spec, "min", file, f"{key}.")
+        maximum = self.number(spec, "max", file, f"{key}.")
+        pattern = self.string(spec, "pattern", file, f"{key}.", required=False)
+        if pattern:
+            try:
+                re.compile(pattern)
+            except re.error:
+                self.add(file, f"{key}.pattern", "value")
+        min_items = self.integer(spec, "min_items", file, f"{key}.", required=False)
+        items = self.fields(spec.get("items"), file, f"{key}.items.", allow_array=False)
+        if field_type == "array" and not items:
+            self.add(file, f"{key}.items", "required")
+        if field_type != "array" and spec.get("items") is not None:
+            self.add(file, f"{key}.items", "value")
+        if len(self.problems) != before or field_type is None:
+            return None
+        return Field(
+            name=name,
+            type=field_type,
+            required=required,
+            default=default,
+            description=description,
+            min=minimum,
+            max=maximum,
+            multiple_of=multiple_of,
+            pattern=pattern or None,
+            values=values,
+            min_items=min_items,
+            items=items,
+        )

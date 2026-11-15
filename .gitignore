@@ -45,6 +45,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!tests/fixtures/registry/lib/
 lib64/
 parts/
 sdist/
@@ -95,6 +96,8 @@ celerybeat.pid
 .env
 .venv
 env/
+# facetmedia's env package is source, not a virtualenv
+!src/facetmedia/env/
 venv/
 ENV/
 env.bak/

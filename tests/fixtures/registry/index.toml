@@ -1,0 +1,10 @@
+version = 1
+
+[[packages]]
+name = "echo"
+
+[[packages]]
+name = "termsy"
+
+[[packages]]
+name = "future"

@@ -1,72 +1,72 @@
-# facetmedia
+```
+    ██████                               █████    ██████   ██████              █████  ███
+   ███░░███                             ░░███    ░░██████ ██████              ░░███  ░░░
+  ░███ ░░░   ██████    ██████   ██████  ███████   ░███░█████░███   ██████   ███████  ████   ██████
+ ███████    ░░░░░███  ███░░███ ███░░███░░░███░    ░███░░███ ░███  ███░░███ ███░░███ ░░███  ░░░░░███
+░░░███░      ███████ ░███ ░░░ ░███████   ░███     ░███ ░░░  ░███ ░███████ ░███ ░███  ░███   ███████
+  ░███      ███░░███ ░███  ███░███░░░    ░███ ███ ░███      ░███ ░███░░░  ░███ ░███  ░███  ███░░███
+  █████    ░░████████░░██████ ░░██████   ░░█████  █████     █████░░██████ ░░████████ █████░░████████
+ ░░░░░      ░░░░░░░░  ░░░░░░   ░░░░░░     ░░░░░  ░░░░░     ░░░░░  ░░░░░░   ░░░░░░░░ ░░░░░  ░░░░░░░░
+```
 
-> 
+The banner is DOS Rebel from pyfiglet; a terminal too narrow for it gets the
+TheDraw font ansiltr4 from [tat3r/tdfiglet](https://github.com/tat3r/tdfiglet)
+at commit `0225b8881d06773b92d9db2c7881f03ff0bdece7`, which declares no
+licence. `scripts/make_banner.py` regenerates both.
 
-## Getting started
+facet installs each creation tool (Kokoro, Whisper, FFmpeg, CadQuery, …)
+in its own pinned uv environment, groups the tools by facet, and exposes
+them to agents through one verifiable `--json` contract and on-demand
+skills: a command that turns a data piece into an asset, a record that
+proves what made it, and a check that the asset still passes.
 
-### Prerequisites
+> Internal preview: the interface may change between betas.
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-### Install
+## Install
 
 ```bash
-uv sync
+uv tool install facetmedia
 ```
 
-### Run CLI
+Linux and WSL only. Everything facet installs or remembers lives under one
+directory, `~/.facet` (override with `FACET_HOME`): environments, models,
+shared browser builds, pinned server and source checkouts, the registry snapshots,
+per-invocation logs, state, and each package's own data. The user
+guide is [docs/index.md](docs/index.md) — install, the facets and their
+packages, the first run, and how an agent starts with `facet skill`.
 
-```bash
-uv run facetmedia --name world
-```
+## Commands
 
-### Test
+| Command | Purpose |
+|---------|---------|
+| `facet update` | download the registry at a pinned commit |
+| `facet pull` | install a facet or a package, choosing what this machine can run |
+| `facet list` | list installed and available tools |
+| `facet describe` | show a capability's inputs, verification and licences |
+| `facet skill` | print the skill for facet or one package |
+| `facet config` | store where a host application lives |
+| `facet doctor` | check facet, the tool chain and this machine's readiness |
+| `facet check` | re-verify an asset against its record |
+| `facet run` | turn a piece file into verified assets with records |
+| `facet example` | copy a capability's bundled example into a folder, optionally running and previewing it |
+| `facet preview` | show an asset, or a folder of them in one gallery, to a person or to an agent as data |
+| `facet license accept` | accept a model's terms before it may be used |
+| `facet license list` | list models that need acceptance, with status |
+| `facet registry validate` | validate a registry checkout |
+| `facet clean` | remove unused environments, server and source checkouts and caches |
+| `facet remove` | remove an installed tool |
 
-```bash
-uv run pytest
-```
+Every verb with its flags, lock behaviour and exit codes is documented in
+[docs/commands.md](docs/commands.md); the `--json` envelope and the asset
+record are in [docs/contract.md](docs/contract.md). The packages live in
+[UniverLab/facetmedia-registry](https://github.com/UniverLab/facetmedia-registry),
+pinned at one commit; adding a package to it is one directory and a pull
+request — see [docs/adding-a-package.md](docs/adding-a-package.md).
 
-## Development
-
-### Format & lint
-
-```bash
-uv run ruff format .
-uv run ruff check .
-```
-
-### Type check
-
-```bash
-uv run mypy src/
-```
-
-### Quality gate
-
-CI runs the lab's strict gate ([UniverLab/workflows](https://github.com/UniverLab/workflows/blob/main/docs/quality-gate.md)): an 80 % coverage gate, file and function size, complexity, unused dependencies, known vulnerabilities and licences. Commit `uv.lock` (`uv lock`): CI installs with `--frozen`. To run the gate locally:
-
-```bash
-uv run pytest --cov
-bash path/to/UniverLab/workflows/scripts/python-quality.sh
-```
-
-## Project structure
-
-```
-facetmedia/
-├── pyproject.toml
-├── src/
-│   └── facetmedia/
-│       ├── __init__.py
-│       ├── core.py       # Core logic
-│       └── cli.py        # CLI entry point
-├── tests/
-│   ├── test_cli.py
-│   └── test_core.py
-└── README.md
-```
+`facet` and `facetmedia` are the same command; `python -m facetmedia`
+works too. Add `--json` before or after the command for machine-readable
+output.
 
 ## License
 
-This project is licensed under the MIT License — see LICENSE for details.
+Apache-2.0. See [LICENSE](LICENSE).

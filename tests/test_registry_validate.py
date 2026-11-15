@@ -1,0 +1,531 @@
+import json
+import re
+import shutil
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from facetmedia.cli import main
+from facetmedia.registry import validate_registry
+from facetmedia.registry_types import CAPABILITY_KINDS
+
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
+EXIT_INVALID = 2
+MIN_BROKEN_PROBLEMS = 3
+
+MANIFEST_TEMPLATE = """name = "missing"
+version = "0.1.0"
+requires_facet = ">=0.1.0"
+protocol = 1
+provider = "test"
+tool_name = "Test"
+description = "test"
+facet = "text"
+
+[engine]
+type = "python-env"
+python = "3.12"
+
+[transport]
+type = "cli"
+entry = "runner.py"
+
+[requirements]
+gpu = false
+ram_gb = 0.1
+disk_gb = 0.01
+exclusive = false
+platforms = ["linux"]
+host_libs = []
+host_hint = ""
+
+[[licenses]]
+subject = "test"
+spdx = "Apache-2.0"
+"""
+
+SKILL_TEMPLATE = """---
+name: {name}
+description: A valid test skill for the {name} package fixture.
+---
+# {title}
+
+Body mentions {capabilities}.
+
+## When to use
+
+Use it in tests.
+
+## Pieces
+
+```toml
+[inputs]
+```
+
+Pieces for {capabilities}.
+
+## Judging the result
+
+Verify measures nothing; read the generic preview fields.
+
+## Pitfalls
+
+- None.
+"""
+
+
+DOCTOR_STUB = '''"""Test runner stub: only the decorator the validator looks for."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
+
+def _problems(root: Path) -> set[tuple[str, str, str]]:
+    return {(p["file"], p["key"], p["problem"]) for p in validate_registry(root)}
+
+
+def _write_package(root: Path, manifest: str) -> Path:
+    (root / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "missing"\n', encoding="utf-8"
+    )
+    pkg_dir = root / "packages" / "missing"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "package.toml").write_text(manifest, encoding="utf-8")
+    capabilities = sorted(set(re.findall(r"\[capabilities\.([a-z0-9-]+)\]", manifest)))
+    cap_ids = ", ".join(f"missing.{cap}" for cap in capabilities) or "no capabilities"
+    skill_dir = pkg_dir / "skill"
+    skill_dir.mkdir(exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        SKILL_TEMPLATE.format(name="missing", title="Missing", capabilities=cap_ids),
+        encoding="utf-8",
+    )
+    return pkg_dir
+
+
+def test_validate_clean_exit_0() -> None:
+    assert main(["registry", "validate", str(FIXTURE_ROOT)]) == 0
+
+
+def test_validate_clean_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["registry", "validate", str(FIXTURE_ROOT), "--json"]) == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["ok"] is True
+    assert envelope["data"]["valid"] is True
+    assert envelope["data"]["packages"] == ["echo", "future", "termsy"]
+
+
+def test_validate_broken_exit_2() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "index.toml").write_text(
+            'version = 1\n[[packages]]\nname = "bad"\n', encoding="utf-8"
+        )
+        pkg_dir = root / "packages" / "bad"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.toml").write_text('name = "bad"\nversion = "x"\n', encoding="utf-8")
+        assert main(["registry", "validate", str(root)]) == EXIT_INVALID
+
+
+def test_validate_broken_json_errors_in_details(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "bad"\n[[packages]]\nname = "also"\n',
+        encoding="utf-8",
+    )
+    for name in ["bad", "also"]:
+        pkg_dir = tmp_path / "packages" / name
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.toml").write_text(
+            f'name = "{name}"\nversion = "x"\nunknown = "key"\n', encoding="utf-8"
+        )
+    assert main(["registry", "validate", str(tmp_path), "--json"]) == EXIT_INVALID
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "invalid_input"
+    errors = envelope["error"]["details"]["errors"]
+    found = {(e["file"], e["key"], e["problem"]) for e in errors}
+    for name in ["bad", "also"]:
+        file = f"packages/{name}/package.toml"
+        assert (file, "unknown", "unknown") in found
+        assert (file, "version", "value") in found
+        assert (file, "description", "required") in found
+    assert len(errors) >= MIN_BROKEN_PROBLEMS
+
+
+def test_validate_broken_manifest_still_reports_missing_files(tmp_path: Path) -> None:
+    (tmp_path / "index.toml").write_text(
+        'version = 1\n[[packages]]\nname = "bad"\n', encoding="utf-8"
+    )
+    pkg_dir = tmp_path / "packages" / "bad"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "package.toml").write_text('name = "bad"\nversion = "x"\n', encoding="utf-8")
+    found = {(p["file"], p["key"], p["problem"]) for p in validate_registry(tmp_path)}
+    assert ("packages/bad/pyproject.toml", "", "missing") in found
+    assert ("packages/bad/uv.lock", "", "missing") in found
+
+
+def test_validate_missing_pyproject_toml(tmp_path: Path) -> None:
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    assert _problems(tmp_path) == {("packages/missing/pyproject.toml", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_missing_uv_lock(tmp_path: Path) -> None:
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    assert _problems(tmp_path) == {("packages/missing/uv.lock", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+@pytest.mark.parametrize("kind", sorted(CAPABILITY_KINDS))
+def test_every_kind_requires_a_preview_table(tmp_path: Path, kind: str) -> None:
+    """A capability of any kind must declare its agent preview."""
+    pkg_dir = _write_package(tmp_path, _manifest_with_capability(kind, preview=False))
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    assert _problems(tmp_path) == {
+        ("packages/missing/package.toml", "capabilities.test.preview", "required")
+    }
+
+
+@pytest.mark.parametrize("kind", sorted(CAPABILITY_KINDS))
+def test_a_declared_preview_table_satisfies_the_rule(tmp_path: Path, kind: str) -> None:
+    """A `[preview]` table is enough; ``viewer`` may default to generic."""
+    pkg_dir = _write_package(tmp_path, _manifest_with_capability(kind, preview=True))
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    _inline_viewer(tmp_path, "generic")
+    assert _problems(tmp_path) == set()
+
+
+def _inline_viewer(root: Path, name: str) -> None:
+    """A one-page viewer directory, so the manifest's viewer names a file."""
+    viewer = root / "viewers" / name
+    viewer.mkdir(parents=True)
+    (viewer / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
+
+
+def _manifest_with_capability(kind: str, *, preview: bool) -> str:
+    """The template manifest plus one `test` capability of kind `kind`."""
+    table = '\n[capabilities.test.preview]\nviewer = "generic"\n' if preview else ""
+    return (
+        MANIFEST_TEMPLATE
+        + f"""
+[capabilities.test]
+summary = "test"
+kind = "{kind}"
+{table}"""
+    )
+
+
+def test_validate_missing_runner_entry(tmp_path: Path) -> None:
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    assert _problems(tmp_path) == {("packages/missing/runner.py", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_missing_viewer_directory(tmp_path: Path) -> None:
+    manifest_with_viewer = (
+        MANIFEST_TEMPLATE
+        + """
+[capabilities.test]
+summary = "test"
+kind = "text"
+
+[capabilities.test.preview]
+viewer = "missing"
+"""
+    )
+    pkg_dir = _write_package(tmp_path, manifest_with_viewer)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    assert _problems(tmp_path) == {("viewers/missing/index.html", "", "missing")}
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def _complete_package(tmp_path: Path, runner_text: str) -> Path:
+    """A package whose environment files and manifest are complete."""
+    pkg_dir = _write_package(tmp_path, MANIFEST_TEMPLATE)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "test"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(runner_text, encoding="utf-8")
+    return pkg_dir
+
+
+def test_validate_rejects_a_runner_without_a_doctor_verb(tmp_path: Path) -> None:
+    without_doctor = DOCTOR_STUB.replace('@runner.verb("doctor")', '@runner.verb("run")')
+    _complete_package(tmp_path, without_doctor)
+    found = _problems(tmp_path)
+    assert ("packages/missing/runner.py", "runner.verb", "missing doctor verb") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def _package_with_uses(
+    tmp_path: Path,
+    uses: str,
+    *,
+    module: str | None = None,
+    dependencies: tuple[str, ...] = (),
+    module_name: str = "textnorm",
+) -> Path:
+    """A complete package that declares ``uses``, with one optional lib module."""
+    manifest = MANIFEST_TEMPLATE.replace('facet = "text"', f'facet = "text"\nuses = {uses}')
+    pkg_dir = _write_package(tmp_path, manifest)
+    listed = ", ".join(f'"{name}"' for name in dependencies)
+    (pkg_dir / "pyproject.toml").write_text(
+        f'[project]\nname = "test"\nversion = "0.1.0"\ndependencies = [{listed}]\n',
+        encoding="utf-8",
+    )
+    (pkg_dir / "uv.lock").write_text("", encoding="utf-8")
+    (pkg_dir / "runner.py").write_text(DOCTOR_STUB, encoding="utf-8")
+    (tmp_path / "lib").mkdir(exist_ok=True)
+    if module is not None:
+        (tmp_path / "lib" / f"{module_name}.py").write_text(module, encoding="utf-8")
+    return pkg_dir
+
+
+def _lib_module(requires: str) -> str:
+    return f'"""A shared helper.\n\nRequires: {requires}\n"""\n'
+
+
+def test_validate_rejects_an_unknown_shared_module(tmp_path: Path) -> None:
+    _package_with_uses(tmp_path, '["nope"]')
+
+    found = _problems(tmp_path)
+    assert ("packages/missing/package.toml", "uses[0]", "missing") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_duplicate_shared_module(tmp_path: Path) -> None:
+    _package_with_uses(tmp_path, '["textnorm", "textnorm"]', module=_lib_module("stdlib"))
+
+    found = _problems(tmp_path)
+    assert ("packages/missing/package.toml", "uses[1]", "duplicate") in found
+    assert ("packages/missing/package.toml", "uses[0]", "duplicate") not in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_module_dependency_the_package_lacks(tmp_path: Path) -> None:
+    _package_with_uses(tmp_path, '["textnorm"]', module=_lib_module("notadep"))
+
+    found = _problems(tmp_path)
+    assert ("packages/missing/package.toml", "uses[0]", "missing dependency: notadep") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+def test_validate_compares_dependency_names_the_pep_503_way(tmp_path: Path) -> None:
+    _package_with_uses(
+        tmp_path,
+        '["textnorm"]',
+        module=_lib_module("Charset_Normalizer"),
+        dependencies=("charset-normalizer>=3",),
+    )
+
+    assert _problems(tmp_path) == set()
+    assert main(["registry", "validate", str(tmp_path)]) == 0
+
+
+def test_validate_rejects_a_runner_that_still_registers_probe(tmp_path: Path) -> None:
+    probe_runner = (
+        DOCTOR_STUB + '\n@runner.verb("probe")\ndef probe(req: object) -> dict:\n    return {}\n'
+    )
+    _complete_package(tmp_path, probe_runner)
+    found = _problems(tmp_path)
+    assert ("packages/missing/runner.py", "runner.verb", "rename probe to doctor") in found
+    assert main(["registry", "validate", str(tmp_path)]) == EXIT_INVALID
+
+
+# --- the optional ``[browser]`` table: one shared, verified Chromium build.
+
+BROWSER_SHA256 = "a" * 64
+
+
+def _echo_with_browser(tmp_path: Path, browser_toml: str) -> set[tuple[str, str, str]]:
+    """The fixture registry with ``[browser]`` appended to echo's manifest."""
+    root = tmp_path / "registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    manifest = root / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + browser_toml,
+        encoding="utf-8",
+    )
+    return _problems(root)
+
+
+def test_validate_accepts_a_declared_browser(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\n'
+        f'version = "158.0.8127.18"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert found == set()
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == 0
+
+
+def test_validate_rejects_an_unknown_browser_channel(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "firefox"\nrevision = "1248"\n'
+        f'version = "158.0.8127.18"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.channel", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_browser_without_a_revision(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\n'
+        f'version = "158.0.8127.18"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.revision", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_malformed_browser_sha256(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        '\n[browser]\nchannel = "chromium"\nrevision = "1248"\n'
+        'version = "158.0.8127.18"\nsha256 = "not-a-sha"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.sha256", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_browser_without_a_version(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.version", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_malformed_browser_version(tmp_path: Path) -> None:
+    found = _echo_with_browser(
+        tmp_path,
+        f'\n[browser]\nchannel = "chromium"\nrevision = "1248"\n'
+        f'version = "158.0.1"\nsha256 = "{BROWSER_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "browser.version", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+# --- the optional ``[ffmpeg]`` table: one shared, verified static build.
+
+FFMPEG_SHA256 = "b" * 64
+FFMPEG_URL = "https://example.com/ffmpeg-n8.1.3-27-g8dca1586f4-linux64-gpl-8.1.tar.xz"
+
+
+def _echo_with_ffmpeg(tmp_path: Path, ffmpeg_toml: str) -> set[tuple[str, str, str]]:
+    """The fixture registry with ``[ffmpeg]`` appended to echo's manifest."""
+    root = tmp_path / "registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    manifest = root / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + ffmpeg_toml,
+        encoding="utf-8",
+    )
+    return _problems(root)
+
+
+def _valid_ffmpeg_toml() -> str:
+    return (
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\n'
+        f'url = "{FFMPEG_URL}"\nsha256 = "{FFMPEG_SHA256}"\n'
+    )
+
+
+def test_validate_accepts_a_declared_ffmpeg(tmp_path: Path) -> None:
+    assert _echo_with_ffmpeg(tmp_path, _valid_ffmpeg_toml()) == set()
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == 0
+
+
+def test_validate_rejects_an_ffmpeg_without_a_version(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nurl = "{FFMPEG_URL}"\nsha256 = "{FFMPEG_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.version", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_an_ffmpeg_without_a_url(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\nsha256 = "{FFMPEG_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.url", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_an_ffmpeg_without_a_sha256(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\nurl = "{FFMPEG_URL}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.sha256", "required") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_non_https_ffmpeg_url(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        '\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\n'
+        'url = "http://example.com/ffmpeg.tar.xz"\n'
+        f'sha256 = "{FFMPEG_SHA256}"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.url", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_a_malformed_ffmpeg_sha256(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(
+        tmp_path,
+        f'\n[ffmpeg]\nversion = "n8.1.3-27-g8dca1586f4"\nurl = "{FFMPEG_URL}"\n'
+        'sha256 = "not-a-sha"\n',
+    )
+    assert ("packages/echo/package.toml", "ffmpeg.sha256", "value") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID
+
+
+def test_validate_rejects_an_unknown_ffmpeg_key(tmp_path: Path) -> None:
+    found = _echo_with_ffmpeg(tmp_path, _valid_ffmpeg_toml() + 'channel = "gpl"\n')
+    assert ("packages/echo/package.toml", "ffmpeg.channel", "unknown") in found
+    assert main(["registry", "validate", str(tmp_path / "registry")]) == EXIT_INVALID

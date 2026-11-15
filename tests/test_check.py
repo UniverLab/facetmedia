@@ -1,0 +1,491 @@
+"""``facet check``: re-verification of an asset against its record.
+
+Readiness moved to ``test_doctor.py`` with the command it now belongs to.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from facetmedia import check as check_module
+from facetmedia import cli as cli_module
+from facetmedia import record as record_module
+from facetmedia import runner as runner_module
+from facetmedia.check import _relative_to_asset
+from facetmedia.cli import main
+from facetmedia.home import Home
+from facetmedia.record import RecordSpec
+from facetmedia.registry import load_registry
+from facetmedia.registry_types import Server
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
+EXIT_INVALID_INPUT = 2
+EXIT_VERIFICATION_FAILED = 3
+EXIT_NOT_INSTALLED = 7
+
+
+def _registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+
+
+def _envelope(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    """The single JSON document facet printed on stdout."""
+    parsed: Any = json.loads(capsys.readouterr().out)
+    assert isinstance(parsed, dict)
+    return parsed
+
+
+def _data(envelope: dict[str, Any]) -> dict[str, Any]:
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    assert isinstance(data, dict)
+    return data
+
+
+def _error(envelope: dict[str, Any]) -> dict[str, Any]:
+    assert envelope["ok"] is False
+    error: dict[str, Any] = envelope["error"]
+    return error
+
+
+@pytest.fixture(scope="module")
+def seed_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One home with echo installed; shared by every test in this module."""
+    root = tmp_path_factory.mktemp("facet-home-seed")
+    previous = {name: os.environ.get(name) for name in ("FACET_HOME", "FACET_REGISTRY")}
+    os.environ["FACET_HOME"] = str(root)
+    os.environ["FACET_REGISTRY"] = str(FIXTURES)
+    try:
+        assert main(["pull", "echo", "--json"]) == 0
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return root
+
+
+@pytest.fixture
+def facet_home(seed_home: Path, monkeypatch: pytest.MonkeyPatch, _facet_home_tmp: None) -> Path:
+    """The shared home, after the per-test temp home has been set and replaced."""
+    monkeypatch.setenv("FACET_HOME", str(seed_home))
+    monkeypatch.setenv("FACET_REGISTRY", str(FIXTURES))
+    return seed_home
+
+
+def _piece(directory: Path) -> Path:
+    piece = directory / "piece.toml"
+    piece.write_text('[inputs]\ntext = "hello"\nrepeat = 2\n', encoding="utf-8")
+    return piece
+
+
+def _write_echo_record(asset: Path, capability: str = "echo.text") -> None:
+    spec = RecordSpec(
+        name="echo",
+        kind="text",
+        mime="text/plain",
+        facet="0.1.0b1",
+        capability=capability,
+        package={"name": "echo", "version": "0.1.0", "lock_sha256": "abc"},
+        tool={"name": "echo", "version": "0.1.0"},
+        params={"text": "hello", "repeat": 2},
+    )
+    asset.write_text("hellohello", encoding="utf-8")
+    record_module.write_record(asset, record_module.build_record(asset, spec))
+
+
+def _spy_hold(calls: list[tuple[str, str, bool, float]]) -> Any:
+    """A ``lock.hold`` that records its arguments and then takes the real lock."""
+    real = cli_module.lock.hold
+
+    @contextlib.contextmanager
+    def hold(mode: str, purpose: str, wait: bool = True, timeout_s: float = 3600.0) -> Any:
+        calls.append((mode, purpose, wait, timeout_s))
+        with real(mode, purpose, wait, timeout_s):
+            yield
+
+    return hold
+
+
+def test_relative_to_asset_resolves_next_to_asset(tmp_path: Path) -> None:
+    """Record params naming files next to the asset go back to absolute paths.
+
+    The record stores those paths relative to its own directory, so a runner
+    invoked from any other working directory cannot open them verbatim.
+    """
+    asset_dir = tmp_path / "assets"
+    nested = asset_dir / "nested"
+    nested.mkdir(parents=True)
+    (asset_dir / "one.wav").write_text("one", encoding="utf-8")
+    (nested / "two.wav").write_text("two", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere.wav"
+    elsewhere.write_text("three", encoding="utf-8")
+
+    params: dict[str, object] = {
+        "input": "one.wav",
+        "nested": {"deep": ["nested/two.wav", "gone.wav"], "keep": "not-a-path"},
+        "absolute": str(elsewhere),
+        "missing": "missing.wav",
+        "text": "hello",
+    }
+
+    resolved = _relative_to_asset(params, asset_dir)
+
+    assert resolved["input"] == str((asset_dir / "one.wav").resolve())
+    nested_value = resolved["nested"]
+    assert isinstance(nested_value, dict)
+    assert nested_value["keep"] == "not-a-path"
+    deep = nested_value["deep"]
+    assert isinstance(deep, list)
+    assert deep == [
+        str((nested / "two.wav").resolve()),
+        "gone.wav",
+    ]
+    # Absolute strings, missing files and plain text stay untouched.
+    assert resolved["absolute"] == str(elsewhere)
+    assert resolved["missing"] == "missing.wav"
+    assert resolved["text"] == "hello"
+
+
+def test_check_from_unrelated_directory_no_regression(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+) -> None:
+    """``check`` works from any directory; echo's params carry no paths.
+
+    This passes before and after the fix and guards the working-directory
+    independence ``check`` must keep.
+    """
+    assert facet_home.is_dir()
+    out = tmp_path / "out"
+    assert main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"]) == 0
+    _envelope(capsys)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    code = main(["check", str(out / "echo.txt"), "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["passed"] is True
+
+
+def test_reverify_untouched_asset_passes(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    out = tmp_path / "out"
+    code = main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"])
+    assert code == 0
+    _envelope(capsys)
+    asset = out / "echo.txt"
+    before = (out / "echo.txt.facet.json").read_bytes()
+
+    code = main(["check", str(asset), "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["capability"] == "echo.text"
+    assert data["passed"] is True
+    assert data["fresh"]["metrics"] == {"match": 1}
+    assert data["fresh"]["metrics"] == data["recorded"]["metrics"]
+    # The record file itself is untouched by the re-verification.
+    record_path = out / "echo.txt.facet.json"
+    assert record_path.is_file()
+    assert record_path.read_bytes() == before
+
+
+def test_reverify_from_the_record_file_itself(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    """The record path names the same asset as the asset path does."""
+    out = tmp_path / "out"
+    assert main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"]) == 0
+    _envelope(capsys)
+
+    code = main(["check", str(out / "echo.txt.facet.json"), "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["asset"] == str(out / "echo.txt")
+    assert data["passed"] is True
+
+
+def test_reverify_edited_bytes_fails_with_exit_3(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    out = tmp_path / "out"
+    code = main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"])
+    assert code == 0
+    _envelope(capsys)
+    asset = out / "echo.txt"
+    with asset.open("ab") as handle:
+        handle.write(b"x")
+
+    code = main(["check", str(asset), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_VERIFICATION_FAILED
+    assert error["code"] == "verification_failed"
+
+
+def test_reverify_refuses_a_package_changed_since_install(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    out = tmp_path / "out"
+    code = main(["run", "echo.text", str(_piece(tmp_path)), "--out", str(out), "--json"])
+    assert code == 0
+    _envelope(capsys)
+    home = Home.from_env()
+    marker = home.env_dir("echo", "0.1.0") / ".package"
+    original = marker.read_bytes()
+    marker.write_text("bogus", encoding="utf-8")
+    try:
+        code = main(["check", str(out / "echo.txt"), "--json"])
+        error = _error(_envelope(capsys))
+    finally:
+        marker.write_bytes(original)
+    assert code == EXIT_NOT_INSTALLED
+    assert error["code"] == "not_installed"
+    assert error["message"] == "echo 0.1.0 changed in the registry since it was installed"
+    assert error["hint"] == "run facet pull echo"
+
+
+def test_reverify_missing_record_is_invalid_input(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    asset = tmp_path / "lonely.txt"
+    asset.write_text("hello", encoding="utf-8")
+
+    code = main(["check", str(asset), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+
+
+def test_check_without_an_existing_file_is_invalid_input(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+
+    code = main(["check", str(tmp_path / "nope.txt"), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+    assert "no such asset file" in error["message"]
+
+
+def test_check_a_capability_id_points_at_doctor(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    """The old `<capability-id>` form fails and names the new command."""
+    assert facet_home.is_dir()
+
+    code = main(["check", "echo.text", "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+    assert error["hint"] == "facet doctor echo.text"
+
+
+def test_check_unknown_argument_is_invalid_input(
+    capsys: pytest.CaptureFixture[str], facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+
+    code = main(["check", "nope.thing", "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+    assert error["hint"] is None
+
+
+def test_reverify_record_without_provenance_is_invalid_input(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    assert facet_home.is_dir()
+    asset = tmp_path / "echo.txt"
+    asset.write_text("hellohello", encoding="utf-8")
+    (tmp_path / "echo.txt.facet.json").write_text('{"record": 1}', encoding="utf-8")
+
+    code = main(["check", str(asset), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_INVALID_INPUT
+    assert error["code"] == "invalid_input"
+
+
+def test_reverify_without_an_installed_environment_is_not_installed(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "fresh-home"))
+    _registry(monkeypatch)
+    asset = tmp_path / "echo.txt"
+    _write_echo_record(asset)
+
+    code = main(["check", str(asset), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_NOT_INSTALLED
+    assert error["code"] == "not_installed"
+
+
+def test_check_asset_takes_a_shared_lock_for_a_light_package(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+) -> None:
+    assert facet_home.is_dir()
+    calls: list[tuple[str, str, bool, float]] = []
+    monkeypatch.setattr(cli_module.lock, "hold", _spy_hold(calls))
+    asset = tmp_path / "echo.txt"
+    _write_echo_record(asset)
+
+    code = main(["check", str(asset), "--json"])
+    assert code == 0
+    _envelope(capsys)
+    assert calls == [("shared", "facet check", True, 3600.0)]
+
+
+def test_check_asset_takes_an_exclusive_lock_and_reports_not_installed(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+) -> None:
+    """An exclusive package's record holds the lock, then fails not_installed."""
+    assert facet_home.is_dir()
+    calls: list[tuple[str, str, bool, float]] = []
+    monkeypatch.setattr(cli_module.lock, "hold", _spy_hold(calls))
+    asset = tmp_path / "termsy.txt"
+    _write_echo_record(asset, capability="termsy.make")
+
+    code = main(["check", str(asset), "--json"])
+    error = _error(_envelope(capsys))
+    assert code == EXIT_NOT_INSTALLED
+    assert error["code"] == "not_installed"
+    assert calls == [("exclusive", "facet check", True, 3600.0)]
+
+
+def test_check_request_carries_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative asset still sends absolute request directories to the runner."""
+    monkeypatch.chdir(tmp_path)
+    home = Home(tmp_path / "home")
+    package = load_registry(FIXTURES).packages["echo"]
+    (tmp_path / "asset.txt").write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_call(invocation: object, verb: str, request: dict[str, object]) -> object:
+        captured.update(request)
+        return runner_module.Outcome({"assets": [{"file": "asset.txt", "passed": True}]}, "")
+
+    monkeypatch.setattr(runner_module, "call", fake_call)
+    verdict = check_module._verify_asset(
+        package, home, tmp_path / "env", "run-1", "echo.text", {}, Path("asset.txt")
+    )
+    assert verdict.passed is True
+    assert captured["piece_dir"] == str(tmp_path)
+    assert Path(str(captured["out_dir"])).is_absolute()
+
+
+def _fake_verify_call(captured: dict[str, object]) -> Any:
+    """A runner ``call`` that records ``start_server`` and passes every asset."""
+
+    def fake_call(
+        invocation: runner_module.Invocation, verb: str, request: dict[str, object]
+    ) -> object:
+        captured["start_server"] = invocation.start_server
+        captured["verb"] = verb
+        return runner_module.Outcome({"assets": [{"file": "asset.txt", "passed": True}]}, "")
+
+    return fake_call
+
+
+def test_check_starts_no_server_without_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``check`` verifies with ``start_server`` off when the capability opts out."""
+    home = Home(tmp_path / "home")
+    package = load_registry(FIXTURES).packages["echo"]
+    asset = tmp_path / "asset.txt"
+    asset.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(runner_module, "call", _fake_verify_call(captured))
+    verdict = check_module._verify_asset(
+        package, home, tmp_path / "env", "run-1", "echo.text", {}, asset
+    )
+    assert verdict.passed is True
+    assert captured == {"start_server": False, "verb": "verify"}
+
+
+def _flagged_package() -> Any:
+    """The echo package with a server and a ``verify_uses_server`` capability."""
+    package = load_registry(FIXTURES).packages["echo"]
+    (capability,) = [cap for cap in package.capabilities if cap.id == "echo.text"]
+    return dataclasses.replace(
+        package,
+        server=Server(
+            repo="https://example.com/tool",
+            rev="a" * 40,
+            requirements="requirements.txt",
+            launch=("python", "main.py", "--port", "{{port}}"),
+            health_url="http://127.0.0.1:{{port}}/health",
+        ),
+        capabilities=(dataclasses.replace(capability, verify_uses_server=True),),
+    )
+
+
+def test_check_starts_server_when_capability_opts_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``check`` verifies with ``start_server`` on for a flagged capability."""
+    home = Home(tmp_path / "home")
+    asset = tmp_path / "asset.txt"
+    asset.write_text("x", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(runner_module, "call", _fake_verify_call(captured))
+    verdict = check_module._verify_asset(
+        _flagged_package(), home, tmp_path / "env", "run-1", "echo.text", {}, asset
+    )
+    assert verdict.passed is True
+    assert captured == {"start_server": True, "verb": "verify"}
+
+
+def test_check_long_prompt(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, facet_home: Path
+) -> None:
+    """A 600-character prompt stays text; ``check`` returns a fresh verdict."""
+    assert facet_home.is_dir()
+    long_text = "x" * 600
+    piece = tmp_path / "piece.toml"
+    piece.write_text(f'[inputs]\ntext = "{long_text}"\nrepeat = 1\n', encoding="utf-8")
+    out = tmp_path / "out"
+    assert main(["run", "echo.text", str(piece), "--out", str(out), "--json"]) == 0
+    _envelope(capsys)
+
+    code = main(["check", str(out / "echo.txt"), "--json"])
+    data = _data(_envelope(capsys))
+    assert code == 0
+    assert data["passed"] is True
+
+
+def test_resolve_relative_odd_text(tmp_path: Path) -> None:
+    """Overlong, NUL and directory strings stay unchanged by ``check``."""
+    asset_dir = tmp_path / "assets"
+    (asset_dir / "sub").mkdir(parents=True)
+    long_text = "x" * 600
+    resolved = _relative_to_asset({"long": long_text, "nul": "a\x00b", "dir": "sub"}, asset_dir)
+    assert resolved["long"] == long_text
+    assert resolved["nul"] == "a\x00b"
+    assert resolved["dir"] == "sub"

@@ -1,0 +1,42 @@
+name: Acceptance
+
+# The v0.1 success metric on a fresh runner, which is a clean Linux by
+# construction: only uv, an empty home, no GPU. The same script a person runs.
+#
+# workflow_dispatch only. GitHub offers the button once this workflow is on the
+# default branch, so the first green run happens by hand after the merge.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Clean-home acceptance
+    runs-on: ubuntu-latest
+    # The voice run is budgeted at five minutes; the rest downloads models.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Run the acceptance script
+        env:
+          # Avoids the API's anonymous limit (60 requests an hour per IP); the
+          # script passes it through and never prints it.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/acceptance.sh --keep --root "$RUNNER_TEMP/acceptance"
+
+      - name: Upload the envelope and the run logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance
+          path: |
+            ${{ runner.temp }}/acceptance/kokoro.json
+            ${{ runner.temp }}/acceptance/facet/logs
+          if-no-files-found: warn

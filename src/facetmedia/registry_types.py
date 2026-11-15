@@ -1,0 +1,403 @@
+"""The registry's value types: packages, models, capabilities and input fields.
+
+Everything here is frozen data.  Reading and validating a registry checkout is
+``facetmedia.manifest`` and ``facetmedia.registry``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from dataclasses import field as dc_field
+from decimal import Decimal
+from pathlib import Path
+from typing import Final
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import Version
+
+from facetmedia import __version__
+from facetmedia.contract import FacetError
+
+PROTOCOL_VERSION: Final[int] = 1
+DEFAULT_INVOCATION_TEMPLATE: Final[str] = (
+    "{{python}} -I {{entry}} {{verb}} --input {{input}} --result {{result}}"
+)
+
+CAPABILITY_KINDS: Final[frozenset[str]] = frozenset(
+    {"audio", "video", "image", "cad", "presentation", "text", "document"}
+)
+FACETS: Final[tuple[str, ...]] = (
+    "voice",
+    "audio",
+    "image",
+    "video",
+    "cad",
+    "text",
+    "presentation",
+)
+WEIGHT_LIMIT: Final[int] = 100_000_000
+FIELD_TYPES: Final[frozenset[str]] = frozenset(
+    {"string", "integer", "number", "boolean", "enum", "path", "array"}
+)
+
+MISSING: Final[object] = object()
+
+
+@dataclass(frozen=True, order=True)
+class Problem:
+    """One validation problem, located by file and dotted key."""
+
+    file: str
+    key: str
+    problem: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"file": self.file, "key": self.key, "problem": self.problem}
+
+
+@dataclass(frozen=True)
+class Field:
+    """One input field of a capability, in the registry's small schema language."""
+
+    name: str
+    type: str
+    required: bool = False
+    default: object = MISSING
+    description: str = ""
+    min: float | None = None
+    max: float | None = None
+    multiple_of: int | float | None = None
+    pattern: str | None = None
+    values: tuple[str, ...] = ()
+    min_items: int | None = None
+    items: tuple[Field, ...] = ()
+
+    @property
+    def has_default(self) -> bool:
+        return self.default is not MISSING
+
+
+def is_multiple(value: int | float, multiple: int | float) -> bool:
+    """True when value is an exact multiple, compared in decimal.
+
+    ``float`` remainder lies (``0.3 % 0.1 != 0``), so compare the decimal
+    expansions instead; callers only pass type-checked numbers, never bools.
+    An infinite or NaN value is no multiple, and taking its remainder raises.
+    """
+
+    decimal_value = Decimal(str(value))
+    if not decimal_value.is_finite():
+        return False
+    return decimal_value % Decimal(str(multiple)) == 0
+
+
+@dataclass(frozen=True)
+class Requirements:
+    """What a package needs from the machine and the lock."""
+
+    gpu: bool = False
+    ram_gb: float = 0.0
+    vram_gb: float = 0.0
+    disk_gb: float = 0.0
+    exclusive: bool = True
+    platforms: tuple[str, ...] = ("linux",)
+    host_libs: tuple[str, ...] = ()
+    host_hint: str = ""
+
+
+@dataclass(frozen=True)
+class License:
+    """The license of the tool or one notable dependency."""
+
+    subject: str
+    spdx: str
+
+
+@dataclass(frozen=True)
+class Model:
+    """One model: downloadable (direct URL or Hugging Face) or backend-owned.
+
+    A backend-owned model (``backend=True``) is declared without a
+    downloadable source: the backend serves it, so facet never fetches or
+    hash-checks it, but its terms still gate the pieces that select it.
+    """
+
+    id: str
+    spdx: str
+    commercial_use: bool
+    requires_acceptance: bool
+    bytes: int
+    terms_url: str = ""
+    url: str = ""
+    sha256: str = ""
+    path: str = ""
+    hf_repo: str = ""
+    revision: str = ""
+    backend: bool = False
+
+    @property
+    def source(self) -> str:
+        if self.url:
+            return self.url
+        return f"hf:{self.hf_repo}@{self.revision}"
+
+
+@dataclass(frozen=True)
+class Browser:
+    """The shared browser build a package declares in ``[browser]``."""
+
+    channel: str
+    revision: str
+    version: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class FFmpeg:
+    """The shared FFmpeg build a package declares in ``[ffmpeg]``."""
+
+    version: str
+    url: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class Server:
+    """The repo-based tool a package declares in ``[engine.server]``."""
+
+    repo: str
+    rev: str
+    requirements: str
+    launch: tuple[str, ...]
+    health_url: str
+    timeout_s: int = 120
+    env: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class Source:
+    """The repo-based source checkout a package declares in ``[engine.source]``."""
+
+    repo: str
+    rev: str
+
+
+@dataclass(frozen=True)
+class NodePackage:
+    """One pinned npm tarball a ``node`` engine package declares."""
+
+    name: str
+    version: str
+    tarball: str
+    integrity: str
+
+
+@dataclass(frozen=True)
+class Node:
+    """The facet-managed Node runtime and packages of ``[engine.node]``."""
+
+    runtime: str
+    runtime_sha256: str
+    packages: tuple[NodePackage, ...]
+
+
+@dataclass(frozen=True)
+class HostApp:
+    """The host application a ``host-app`` package drives, from ``[engine.host_app]``."""
+
+    app: str
+    min_version: str
+    config_key: str
+    env: str
+
+
+@dataclass(frozen=True)
+class Binary:
+    """The managed executable a ``binary`` package declares in ``[engine.binary]``."""
+
+    name: str
+    version: str
+    url: str
+    sha256: str
+    bin: str
+    version_arg: str = "--version"
+
+
+@dataclass(frozen=True)
+class Capability:
+    """One thing a package can make: ``<package>.<name>``."""
+
+    id: str
+    package: str
+    summary: str
+    kind: str
+    inputs: tuple[Field, ...] = ()
+    thresholds: Mapping[str, float] = dc_field(default_factory=dict)
+    viewer: str = "generic"
+    models: tuple[str, ...] | None = None
+    verify_uses_server: bool = False
+    i18n: Mapping[str, str] = dc_field(default_factory=dict)
+
+    def input(self, name: str) -> Field | None:
+        for field in self.inputs:
+            if field.name == name:
+                return field
+        return None
+
+
+@dataclass(frozen=True)
+class Package:
+    """One package directory: its manifest, lock and capabilities."""
+
+    name: str
+    version: str
+    requires_facet: str
+    protocol: int
+    provider: str
+    tool_name: str
+    description: str
+    facet: str
+    engine_type: str
+    python: str
+    transport_type: str
+    entry: str
+    invocation_template: str
+    requirements: Requirements
+    directory: Path
+    licenses: tuple[License, ...] = ()
+    models: tuple[Model, ...] = ()
+    capabilities: tuple[Capability, ...] = ()
+    uses: tuple[str, ...] = ()
+    browser: Browser | None = None
+    ffmpeg: FFmpeg | None = None
+    server: Server | None = None
+    source: Source | None = None
+    node: Node | None = None
+    host_app: HostApp | None = None
+    binary: Binary | None = None
+    tier_group: str = ""
+    tier: str = ""
+
+    @property
+    def dir(self) -> Path:
+        return self.directory
+
+    @property
+    def lock_path(self) -> Path:
+        return self.directory / "uv.lock"
+
+    @property
+    def lock_sha256(self) -> str:
+        try:
+            data = self.lock_path.read_bytes()
+        except OSError:
+            return ""
+        return hashlib.sha256(data).hexdigest()
+
+    @property
+    def compatible(self) -> bool:
+        if self.protocol != PROTOCOL_VERSION:
+            return False
+        try:
+            specifier = SpecifierSet(self.requires_facet)
+            return specifier.contains(Version(__version__), prereleases=True)
+        except InvalidSpecifier:
+            return False
+
+    def require_compatible(self) -> None:
+        if self.compatible:
+            return
+        raise FacetError(
+            "machine_cannot",
+            f"package {self.name} cannot run with facet {__version__}",
+            hint="facet update, or upgrade facet",
+            details={
+                "package": self.name,
+                "requires_facet": self.requires_facet,
+                "protocol": self.protocol,
+            },
+        )
+
+
+def capability_models(package: Package, capability: Capability) -> list[Model]:
+    """The manifest models a capability lists and gates on without a piece.
+
+    A capability with a ``model`` input keeps the package-wide listing, since
+    a piece may select any of those models; a capability declaring ``models``
+    lists exactly those, so an empty declaration lists nothing; otherwise the
+    package-wide listing applies.
+    """
+
+    if capability.input("model") is not None:
+        return list(package.models)
+    if capability.models is None:
+        return list(package.models)
+    wanted = set(capability.models)
+    return [model for model in package.models if model.id in wanted]
+
+
+def is_backend(model: Model) -> bool:
+    """Whether ``model`` is backend-owned: declared without a source, never fetched."""
+    return model.backend
+
+
+def weight(package: Package) -> str:
+    """The package's weight: ``light``, ``cpu-heavy`` or ``gpu``.
+
+    Derived from the manifest, never declared: a GPU package is ``gpu``;
+    otherwise a package that needs the lock alone (``exclusive``) or ships
+    more than :data:`WEIGHT_LIMIT` model bytes is ``cpu-heavy``.
+    """
+    if package.requirements.gpu:
+        return "gpu"
+    if package.requirements.exclusive:
+        return "cpu-heavy"
+    if sum(model.bytes for model in package.models) > WEIGHT_LIMIT:
+        return "cpu-heavy"
+    return "light"
+
+
+@dataclass(frozen=True)
+class FacetLabel:
+    """One facet's English label and its localized labels, from ``index.toml``."""
+
+    label: str
+    i18n: Mapping[str, str] = dc_field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Registry:
+    """A validated registry checkout, indexed by package name."""
+
+    root: Path
+    version: int
+    packages: Mapping[str, Package]
+    facets: Mapping[str, FacetLabel] = dc_field(default_factory=dict)
+
+    def package(self, name: str) -> Package | None:
+        return self.packages.get(name)
+
+    def capabilities(self) -> tuple[Capability, ...]:
+        found = [cap for package in self.packages.values() for cap in package.capabilities]
+        return tuple(sorted(found, key=lambda cap: cap.id))
+
+    def capability(self, cap_id: str) -> Capability:
+        for cap in self.capabilities():
+            if cap.id == cap_id:
+                return cap
+        package = self.package(cap_id)
+        if package is not None and package.capabilities:
+            ids = sorted(cap.id for cap in package.capabilities)
+            raise FacetError(
+                "invalid_input",
+                f"{cap_id} is a package; name one of its capabilities: {', '.join(ids)}",
+                details={"capabilities": ids},
+            )
+        known = [cap.id for cap in self.capabilities()]
+        raise FacetError(
+            "invalid_input",
+            f"unknown capability: {cap_id}",
+            details={"known": known},
+        )

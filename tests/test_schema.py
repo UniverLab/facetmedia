@@ -1,0 +1,393 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from facetmedia.contract import FacetError
+from facetmedia.registry import Capability, Field, load_registry
+from facetmedia.schema import to_json_schema, validate
+
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
+GOLDEN_ROOT = Path(__file__).parent / "golden" / "schema"
+REPEAT_MAX = 10
+WIDTH_MULTIPLE = 64
+
+
+def _capability(*fields: Field) -> Capability:
+    return Capability(
+        id="test.cap",
+        package="test",
+        summary="test capability",
+        kind="text",
+        inputs=tuple(fields),
+    )
+
+
+def test_validate_fills_defaults() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {"text": "hello"}
+    result = validate(cap, piece, Path.cwd())
+    assert result == {"text": "hello", "repeat": 1}
+
+
+def test_validate_required_field_missing_raises() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, piece, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "text" and e["problem"] == "required" for e in errors)
+
+
+def test_validate_unknown_key_raises() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {"text": "hello", "unknown": "value"}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, piece, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "unknown" and e["problem"] == "unknown" for e in errors)
+
+
+def test_validate_type_check_string() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {"text": 123}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, piece, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "text" and e["problem"] == "type" for e in errors)
+
+
+def test_validate_type_check_integer() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {"text": "hello", "repeat": "not an int"}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, piece, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "repeat" and e["problem"] == "type" for e in errors)
+
+
+def test_validate_min_constraint() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {"text": "hello", "repeat": 0}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, piece, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "repeat" and e["problem"] == "min" for e in errors)
+
+
+def test_validate_max_constraint() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    piece = {"text": "hello", "repeat": 11}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, piece, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "repeat" and e["problem"] == "max" for e in errors)
+
+
+def test_validate_pattern_constraint() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    field_with_pattern = Field(
+        name="test",
+        type="string",
+        pattern=r"^[a-z]+$",
+        description="no capitals",
+    )
+    cap_with_pattern = type(cap)(
+        id=cap.id,
+        package=cap.package,
+        summary=cap.summary,
+        kind=cap.kind,
+        inputs=(field_with_pattern,),
+        thresholds=cap.thresholds,
+        viewer=cap.viewer,
+    )
+    with pytest.raises(FacetError) as exc:
+        validate(cap_with_pattern, {"test": "ABC123"}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "test" and e["problem"] == "pattern" for e in errors)
+    assert errors[0]["rule"] == "no capitals"
+    assert exc.value.hint == "test: no capitals"
+
+
+def test_validate_pattern_without_description() -> None:
+    cap = _capability(Field(name="test", type="string", pattern=r"^[a-z]+$"))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"test": "ABC123"}, Path.cwd())
+    errors = exc.value.details["errors"]
+    assert "rule" not in errors[0]
+    assert exc.value.hint == "test: pattern"
+
+
+def test_validate_required_hint() -> None:
+    cap = _capability(Field(name="test", type="string", required=True))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {}, Path.cwd())
+    assert exc.value.hint == "test: required"
+
+
+def test_validate_path_field_resolves() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    field = Field(name="file", type="path", required=True)
+    cap = type(registry.capability("echo.text"))(
+        id="test.path",
+        package="test",
+        summary="test",
+        kind="text",
+        inputs=(field,),
+        thresholds={},
+        viewer="generic",
+    )
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"file": "nonexistent.txt"}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "file" and e["problem"] == "not_found" for e in errors)
+
+
+def test_validate_path_field_resolves_existing(tmp_path: Path) -> None:
+    piece_file = tmp_path / "piece.txt"
+    piece_file.write_text("hello", encoding="utf-8")
+    cap = _capability(Field(name="file", type="path", required=True))
+    result = validate(cap, {"file": "piece.txt"}, tmp_path)
+    assert result == {"file": str(piece_file.resolve())}
+
+
+def test_validate_path_default_resolves_and_must_exist(tmp_path: Path) -> None:
+    (tmp_path / "default.txt").write_text("hello", encoding="utf-8")
+    present = _capability(Field(name="file", type="path", default="default.txt"))
+    assert validate(present, {}, tmp_path) == {"file": str((tmp_path / "default.txt").resolve())}
+    absent = _capability(Field(name="file", type="path", default="absent.txt"))
+    with pytest.raises(FacetError) as exc:
+        validate(absent, {}, tmp_path)
+    assert exc.value.details["errors"] == [{"field": "file", "problem": "not_found"}]
+
+
+def test_validate_reports_every_problem() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"text": 123, "unknown": "value"}, Path.cwd())
+    errors = {(e["field"], e["problem"]) for e in exc.value.details["errors"]}
+    assert errors == {("text", "type"), ("unknown", "unknown")}
+
+
+def test_validate_pattern_on_integer_does_not_crash() -> None:
+    cap = _capability(Field(name="count", type="integer", pattern=r"\d+"))
+    assert validate(cap, {"count": 3}, Path.cwd()) == {"count": 3}
+
+
+def test_validate_array_one_level() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    item_field = Field(name="text", type="string", required=True)
+    array_field = Field(name="items", type="array", items=(item_field,), min_items=1)
+    cap = type(registry.capability("echo.text"))(
+        id="test.array",
+        package="test",
+        summary="test",
+        kind="text",
+        inputs=(array_field,),
+        thresholds={},
+        viewer="generic",
+    )
+    result = validate(cap, {"items": [{"text": "a"}, {"text": "b"}]}, Path.cwd())
+    assert result == {"items": [{"text": "a"}, {"text": "b"}]}
+
+
+def test_validate_array_min_items() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    item_field = Field(name="text", type="string", required=True)
+    array_field = Field(name="items", type="array", items=(item_field,), min_items=2)
+    cap = type(registry.capability("echo.text"))(
+        id="test.array",
+        package="test",
+        summary="test",
+        kind="text",
+        inputs=(array_field,),
+        thresholds={},
+        viewer="generic",
+    )
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"items": [{"text": "a"}]}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "items" and e["problem"] == "min_items" for e in errors)
+
+
+def test_validate_array_nested_error_path() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    item_field = Field(name="text", type="string", required=True)
+    array_field = Field(name="items", type="array", items=(item_field,))
+    cap = type(registry.capability("echo.text"))(
+        id="test.array",
+        package="test",
+        summary="test",
+        kind="text",
+        inputs=(array_field,),
+        thresholds={},
+        viewer="generic",
+    )
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"items": [{"text": "a"}, {"text": 123}]}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert any(e["field"] == "items[1].text" and e["problem"] == "type" for e in errors)
+
+
+def test_to_json_schema_echo_text_matches_golden() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    schema = to_json_schema(cap)
+    golden = json.loads((GOLDEN_ROOT / "echo-text.json").read_text(encoding="utf-8"))
+    assert schema == golden
+
+
+def test_to_json_schema_draft_version() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    schema = to_json_schema(cap)
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+
+
+def test_to_json_schema_additional_properties_false() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    schema = to_json_schema(cap)
+    assert schema["additionalProperties"] is False
+
+
+def test_to_json_schema_includes_defaults() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    schema = to_json_schema(cap)
+    assert schema["properties"]["repeat"]["default"] == 1
+
+
+def test_to_json_schema_includes_min_max() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    schema = to_json_schema(cap)
+    assert schema["properties"]["repeat"]["minimum"] == 1
+    assert schema["properties"]["repeat"]["maximum"] == REPEAT_MAX
+
+
+def test_to_json_schema_required_list() -> None:
+    registry = load_registry(FIXTURE_ROOT)
+    cap = registry.capability("echo.text")
+    schema = to_json_schema(cap)
+    assert schema["required"] == ["text"]
+
+
+def test_validate_multiple_of_accepts_multiple() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64))
+    assert validate(cap, {"width": 128}, Path.cwd()) == {"width": 128}
+
+
+def test_validate_multiple_of_refuses_with_candidates() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": 100}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    assert exc.value.details["errors"] == [
+        {
+            "field": "width",
+            "problem": "multiple_of",
+            "rule": "not a multiple of 64; nearest valid: 64, 128",
+        }
+    ]
+    assert exc.value.hint == "width: not a multiple of 64; nearest valid: 64, 128"
+
+
+def test_validate_multiple_of_drops_candidate_above_max() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64, max=100))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": 100}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 64; nearest valid: 64"
+
+
+def test_validate_multiple_of_no_candidate_survives() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64, min=70, max=100))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": 90}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 64; no valid value within 70..100"
+
+
+def test_validate_multiple_of_array_item() -> None:
+    item = Field(name="w", type="integer", multiple_of=64)
+    cap = _capability(Field(name="items", type="array", items=(item,)))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"items": [{"w": 100}]}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors == [
+        {
+            "field": "items[0].w",
+            "problem": "multiple_of",
+            "rule": "not a multiple of 64; nearest valid: 64, 128",
+        }
+    ]
+
+
+def test_validate_multiple_of_number_field() -> None:
+    cap = _capability(Field(name="scale", type="number", multiple_of=0.5))
+    assert validate(cap, {"scale": 1.5}, Path.cwd()) == {"scale": 1.5}
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"scale": 1.2}, Path.cwd())
+    assert exc.value.code == "invalid_input"
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 0.5; nearest valid: 1, 1.5"
+
+
+def test_validate_multiple_of_keeps_candidate_below_a_negative_value() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=64))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"width": -100}, Path.cwd())
+    errors = exc.value.details["errors"]
+    assert errors[0]["rule"] == "not a multiple of 64; nearest valid: -128, -64"
+
+
+def test_validate_multiple_of_refuses_a_non_finite_number() -> None:
+    cap = _capability(Field(name="scale", type="number", multiple_of=0.5))
+    for value in (float("inf"), float("nan")):
+        with pytest.raises(FacetError) as exc:
+            validate(cap, {"scale": value}, Path.cwd())
+        assert exc.value.code == "invalid_input"
+        assert exc.value.details["errors"][0]["problem"] == "multiple_of"
+
+
+def test_validate_multiple_of_number_tolerates_float_arithmetic() -> None:
+    cap = _capability(Field(name="scale", type="number", multiple_of=0.1))
+    assert validate(cap, {"scale": 0.3}, Path.cwd()) == {"scale": 0.3}
+
+
+def test_to_json_schema_includes_multiple_of() -> None:
+    cap = _capability(Field(name="width", type="integer", multiple_of=WIDTH_MULTIPLE))
+    assert to_json_schema(cap)["properties"]["width"]["multiple_of"] == WIDTH_MULTIPLE
+
+
+def test_validate_enum_refusal_lists_the_values() -> None:
+    cap = _capability(Field(name="metre", type="enum", values=("3/4", "4/4")))
+    with pytest.raises(FacetError) as exc:
+        validate(cap, {"metre": "5/4"}, Path.cwd())
+    assert exc.value.details["errors"] == [
+        {"field": "metre", "problem": "enum", "rule": "must be one of: 3/4, 4/4"}
+    ]
+    assert exc.value.hint == "metre: must be one of: 3/4, 4/4"

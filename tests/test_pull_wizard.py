@@ -1,0 +1,379 @@
+"""``facet pull`` with no argument: the wizard at a TTY, the error elsewhere.
+
+Everything here builds its own tiny registry and drives the wizard with
+fake TTYs: questionary prompts read keystrokes from prompt_toolkit pipe
+input, one entry per prompt in order.  Nothing downloads.  ``make_installed``
+is copied from ``tests.test_pull_plan`` so this file reads alone.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import questionary
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from facetmedia import plan, probes, wizard
+from facetmedia.cli import main
+from facetmedia.contract import EXIT_CODES
+from facetmedia.env.package_marker import package_fingerprint
+from facetmedia.home import Home
+from facetmedia.registry import load_registry
+from facetmedia.registry_types import FACETS
+from tests.test_pull_plan import Spec, fake_pull, set_machine, write_package, write_registry
+
+GPU_INFO = "RTX 3060, 12288 MiB, 100 MiB"
+EXIT_INVALID_INPUT = 2
+EXIT_CANCELLED = 130
+SelectRegistry = Callable[..., Path]
+
+
+@pytest.fixture
+def use_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SelectRegistry:
+    """Point facet at a registry built inside the test."""
+
+    def select(packages: list[str], spec: Spec | None = None) -> Path:
+        root = write_registry(tmp_path / "registry", packages, spec)
+        monkeypatch.setenv("FACET_REGISTRY", str(root))
+        return root
+
+    return select
+
+
+def make_installed(home: Home, registry_root: Path, name: str) -> None:
+    """The markers an installed package carries, so the plan sees a no-op."""
+    package = load_registry(registry_root).packages[name]
+    env_dir = home.env_dir(package.name, package.version)
+    env_dir.mkdir(parents=True)
+    (env_dir / ".complete").write_text(package.lock_sha256, encoding="utf-8")
+    (env_dir / ".package").write_text(package_fingerprint(package), encoding="utf-8")
+
+
+class _TtyProxy:
+    """Wrap a stream so ``isatty()`` is True while writes still get captured."""
+
+    def __init__(self, wrapped: object) -> None:
+        self._wrapped = wrapped
+
+    def isatty(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+
+class _TtyIn(io.StringIO):
+    """A stdin whose only truth is ``isatty()``; prompts read pipe input."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def fake_tty(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
+    """Fake TTYs on both stdio; each questionary prompt reads one pipe entry."""
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(probes, "gpu_info", lambda: GPU_INFO)
+    pending = list(answers)
+    real = {name: getattr(questionary, name) for name in ("checkbox", "select", "confirm", "text")}
+
+    def factory(name: str) -> Callable[..., questionary.Question]:
+        def make(*args: object, **kwargs: object) -> questionary.Question:
+            question = real[name](*args, **kwargs)
+            entered = create_pipe_input()
+            pipe = entered.__enter__()
+            pipe.send_text(pending.pop(0))
+            dummy = DummyOutput()
+            question.application.input = pipe
+            question.application.output = dummy
+            question.application.renderer.output = dummy
+            original = question.unsafe_ask
+
+            def run(*args: object, **kwargs: object) -> object:
+                try:
+                    return original(*args, **kwargs)
+                finally:
+                    entered.__exit__(None, None, None)
+
+            question.unsafe_ask = run  # type: ignore[method-assign]
+            return question
+
+        return make
+
+    for name in real:
+        monkeypatch.setattr(questionary, name, factory(name))
+
+
+def no_blender(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never probe the real machine for blender: it is always missing."""
+    missing = SimpleNamespace(
+        message="blender 4.0+ not found",
+        fix="facet config set blender.path /path/to/blender",
+    )
+    monkeypatch.setattr("facetmedia.config.host_app_problem", lambda _app, _home: missing)
+
+
+def mixed_root(select: SelectRegistry, home: Home) -> Path:
+    """Voice fitting plus installed, audio GPU-bound, video on a host app."""
+    root = select(["a", "b", "g", "blendery"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "b", Spec(facet="voice"))
+    write_package(root, "g", Spec(facet="audio", gpu=True, vram_gb=24))
+    write_package(root, "blendery", Spec(facet="video", host_app=True))
+    make_installed(home, root, "b")
+    return root
+
+
+def test_no_arg_with_json_fails_invalid_input(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    use_registry(["a"])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    code = main(["pull", "--json"])
+    out = capsys.readouterr().out
+    envelope = json.loads(out)
+    assert code == EXIT_CODES["invalid_input"] == EXIT_INVALID_INPUT
+    error = envelope["error"]
+    assert error["code"] == "invalid_input"
+    assert "facet pull <facet>" in error["message"]
+    assert "facet pull --package <name>" in error["message"]
+    assert "image" in error["message"]
+    assert error["details"]["facets"] == list(FACETS)
+    assert error["details"]["packages"] == ["a"]
+    assert "█" not in out
+
+
+def test_no_arg_without_tty_fails_invalid_input(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    use_registry(["a"])
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    code = main(["pull"])
+    captured = capsys.readouterr()
+    assert code == EXIT_CODES["invalid_input"] == EXIT_INVALID_INPUT
+    assert "facet pull <facet>" in captured.err
+    assert "facet pull --package <name>" in captured.err
+    assert "image" in captured.err
+    assert "█" not in captured.out
+
+
+def test_wizard_shows_machine_and_installs_default(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mixed_root(use_registry, Home.from_env())
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r"])
+    assert main(["pull"]) == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "█" in out
+    assert "RTX 3060" in out
+    assert "12.0 GB" in out
+    assert "RAM" in out
+    assert "free disk" in out
+    assert "host app blender" in out
+    assert "Step 1 of 4" in out
+    assert "Step 2 of 4" in out
+    assert "Step 3 of 4" in out
+    assert "Step 4 of 4" in out
+    assert calls == ["a"]
+    assert "→ a 0.1.0" in captured.err.splitlines()
+    assert "✓ a 0.1.0   0 MB   0.0s" in captured.err.splitlines()
+
+
+def test_checkbox_lists_facets_with_disk_and_install_marks(
+    use_registry: SelectRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = mixed_root(use_registry, Home.from_env())
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    home = Home.from_env()
+    choices = wizard._choices(load_registry(root), home, False, None)
+    lines = [wizard._facet_line(choice) for choice in choices]
+    assert len(lines) == len(FACETS)
+    voice = next(line for line in lines if line.startswith("voice:"))
+    assert "a (" in voice
+    assert "b (installed)" in voice
+    assert "total" in voice
+    assert "GB" in voice
+
+
+def test_wizard_uncheck_all_selects_nothing(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mixed_root(use_registry, Home.from_env())
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, [" \r"])
+    assert main(["pull"]) == 0
+    assert "nothing selected" in capsys.readouterr().out
+    assert calls == []
+
+
+def test_wizard_ctrl_c_at_choice_exits_130(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mixed_root(use_registry, Home.from_env())
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\x03"])
+    assert main(["pull"]) == EXIT_CANCELLED
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+    assert "Traceback" not in out
+    assert calls == []
+
+
+def test_wizard_two_facets_ask_once_and_install(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a", "c"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "c", Spec(facet="audio"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r", "y\r"])
+    assert main(["pull"]) == 0
+    out = capsys.readouterr().out
+    assert "Plan" in out
+    assert calls == ["a", "c"]
+
+
+def test_confirm_defaults_to_no() -> None:
+    assert plan.confirm_prompt(2) == "install 2 packages? [default: no]"
+
+
+def test_wizard_two_facets_decline_installs_nothing(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a", "c"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "c", Spec(facet="audio"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r", "\r"])
+    assert main(["pull"]) == 0
+    out = capsys.readouterr().out
+    assert "nothing installed" in out
+    assert calls == []
+
+
+def test_wizard_ctrl_c_at_confirm_exits_130(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a", "c"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "c", Spec(facet="audio"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r", "\x03"])
+    assert main(["pull"]) == EXIT_CANCELLED
+    out = capsys.readouterr().out
+    assert "cancelled" in out
+    assert "Traceback" not in out
+    assert calls == []
+
+
+def test_wizard_single_installable_skips_the_confirm(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a"])
+    write_package(root, "a", Spec(facet="voice"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r"])
+    assert main(["pull"]) == 0
+    out = capsys.readouterr().out
+    assert "[default: no]" not in out
+    assert calls == ["a"]
+
+
+def test_wizard_plan_flag_prints_the_plan_and_installs_nothing(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["a", "c"])
+    write_package(root, "a", Spec(facet="voice"))
+    write_package(root, "c", Spec(facet="audio"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=12288, ram_gb=8.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r"])
+    assert main(["pull", "--plan"]) == 0
+    out = capsys.readouterr().out
+    assert "Plan" in out
+    assert calls == []
+
+
+def test_wizard_tier_group_installs_chosen_member(
+    use_registry: SelectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = use_registry(["comfy", "comfy-xl"], Spec(tier_group="comfy", tier="standard"))
+    write_package(root, "comfy-xl", Spec(gpu=True, vram_gb=24, tier_group="comfy", tier="xl"))
+    calls: list[str] = []
+    fake_pull(monkeypatch, calls)
+    set_machine(monkeypatch, gpu_mib=8 * 1024, ram_gb=64.0)
+    no_blender(monkeypatch)
+    fake_tty(monkeypatch, ["\r"])
+    monkeypatch.setattr(probes, "gpu_info", lambda: "RTX 3060, 8192 MiB, 100 MiB")
+    assert main(["pull"]) == 0
+    out = capsys.readouterr().out
+    assert "tier: chose comfy" in " ".join(out.split())
+    assert calls == ["comfy"]
+
+
+def test_wizard_app_line_reports_ready(
+    use_registry: SelectRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = use_registry(["blendery"])
+    write_package(root, "blendery", Spec(host_app=True))
+    monkeypatch.setattr("facetmedia.config.host_app_problem", lambda _app, _home: None)
+    lines = wizard._app_lines(load_registry(root), Home.from_env())
+    assert any("host app blender" in line and "ready" in line for line in lines)
