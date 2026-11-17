@@ -403,7 +403,7 @@ instead, and `example_path` is then `null`; when there is one it is the
 example's path relative to the package directory
 (`examples/demo.toml`). `i18n` carries the capability's localized
 summaries by language tag (`{"es": {"summary": "…"}}`), `{}` when the
-manifest declares none; `summary` stays the English default. Lock: none.
+manifest declares none; `summary` stays the English default. `secrets` carries one `{name, description, required, set}` row per credential the capability's package declares — never a value. Lock: none.
 
 Exit codes: `0`; `2` an unknown capability id, listing the known ids in
 `details.known`; a package name lists its capability ids in
@@ -609,6 +609,7 @@ ascii (installed):
   ✓ host_libs: the package needs no host libraries
   ✓ installed: installed at /tmp/opencode/facet-docs/envs/ascii/0.1.0
   ✓ licenses: no model requires acceptance
+  ✓ secrets: no secrets declared
   ✓ models: 1 model(s) present
   ✓ browser: no browser declared
   ✓ ffmpeg: no ffmpeg declared
@@ -625,6 +626,7 @@ ffmpeg (installed):
   ✓ host_libs: the package needs no host libraries
   ✓ installed: installed at /tmp/opencode/facet-docs/envs/ffmpeg/0.1.0
   ✓ licenses: no model requires acceptance
+  ✓ secrets: no secrets declared
   ✓ models: the package has no models
   ✓ browser: no browser declared
   ✓ ffmpeg: no ffmpeg declared
