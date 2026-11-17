@@ -145,6 +145,20 @@ class Model:
 
 
 @dataclass(frozen=True)
+class Secret:
+    """One credential a package declares in ``[[secrets]]``.
+
+    Only the name, a one-line description and whether a run needs it ever
+    reach a surface: a stored value never leaves the store, the runner's
+    environment and the masked output.
+    """
+
+    name: str
+    description: str
+    required: bool = False
+
+
+@dataclass(frozen=True)
 class Browser:
     """The shared browser build a package declares in ``[browser]``."""
 
@@ -268,6 +282,7 @@ class Package:
     directory: Path
     licenses: tuple[License, ...] = ()
     models: tuple[Model, ...] = ()
+    secrets: tuple[Secret, ...] = ()
     capabilities: tuple[Capability, ...] = ()
     uses: tuple[str, ...] = ()
     browser: Browser | None = None

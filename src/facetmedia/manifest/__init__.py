@@ -23,6 +23,7 @@ from facetmedia.manifest.host import read_host_app
 from facetmedia.manifest.i18n import SUMMARY_LIMIT, read_facets, read_i18n
 from facetmedia.manifest.model import read_models
 from facetmedia.manifest.node import read_node
+from facetmedia.manifest.secret import read_secrets
 from facetmedia.manifest.server import read_server, read_source
 from facetmedia.registry_types import (
     CAPABILITY_KINDS,
@@ -148,6 +149,7 @@ _PACKAGE_KEYS: Final[frozenset[str]] = frozenset(
         "requirements",
         "licenses",
         "models",
+        "secrets",
         "capabilities",
         "uses",
         "browser",
@@ -395,6 +397,7 @@ class RegistryLoader:
         requirements = self.requirements(data, file)
         licenses = self.licenses(data.get("licenses"), file)
         models = read_models(self, data.get("models"), file)
+        secrets = read_secrets(self, data.get("secrets"), file)
         capabilities = self.capabilities(data.get("capabilities"), name, file, server is not None)
         dependencies = _dependency_names(self.root / "packages" / name / "pyproject.toml")
         uses = self.uses(data.get("uses"), file, dependencies)
@@ -431,6 +434,7 @@ class RegistryLoader:
             directory=self.root / "packages" / name,
             licenses=licenses,
             models=models,
+            secrets=secrets,
             capabilities=capabilities,
             uses=uses,
             browser=browser,

@@ -28,6 +28,8 @@ The two verbs that look similar answer two different questions:
 | `facet describe` | show a capability's full contract | none |
 | `facet skill` | print the skill for facet or one package | none |
 | `facet config` | store where a host application lives | none |
+| `facet secret` | store, list and remove a tool's credentials | `set` and `rm` exclusive; `list` none |
+| `facet auth` | run a tool's browser sign-in and store its tokens | exclusive |
 | `facet doctor` | check facet, the tool chain and this machine | shared |
 | `facet check` | re-verify an asset against its record | per manifest |
 | `facet run` | turn a piece into verified assets with records | per manifest |
@@ -480,6 +482,65 @@ Lock: none.
 Exit codes: `0`; `2` an unknown key, an empty value, or a config file that
 is not valid TOML.
 
+## `facet secret`
+
+Holds the credentials a tool needs: an app password, API keys, OAuth tokens.
+A package declares the credentials it uses in its manifest (`[[secrets]]`,
+see [adding-a-package.md](adding-a-package.md#secrets)), and the values live
+under the facet home in `<home>/secrets/<package>.json` — mode `0600`,
+outside every environment, piece and record. Nothing deletes them but
+`facet secret rm`: not `facet remove`, not `facet clean`.
+
+- `facet secret set <package> <name>` — store one declared secret. The value
+  is read from a hidden prompt at a terminal and from stdin otherwise; it is
+  never taken from the command line, where the shell's history and the
+  process list would keep it.
+- `facet secret list [<package>]` — every declared secret of one package, or
+  of every package that declares any, with whether each is set.
+- `facet secret rm <package> <name>` — remove one; a secret that is not
+  stored is a no-op with exit 0.
+
+```console
+$ printf '%s' "$BLUESKY_APP_PASSWORD" | facet secret set bluesky app-password
+bluesky app-password set
+$ facet secret list bluesky
+bluesky app-password required set: the app password from the Bluesky settings
+```
+
+A name the package did not declare is `invalid_input`, and so is an empty
+value. Neither `list` nor any failure ever prints a stored value: a row
+carries the name, the description, whether the secret is required, and
+whether it is set.
+
+Lock: `set` and `rm` take it exclusively; `list` takes none.
+
+Exit codes: `0`; `2` an unknown package, a name the package did not declare,
+or an empty value.
+
+## `facet auth`
+
+Runs a tool's interactive sign-in. A package may provide an `auth` verb for
+flows that need a browser — OAuth for X, YouTube or TikTok: the verb prints a
+URL, opens the browser, listens on a loopback port, and writes the tokens it
+obtained. `facet auth <package>` runs it interactively and stores what it
+returns, under the package's declared secret names. A name the manifest did
+not declare fails the whole flow with `invalid_input`: a sign-in can never
+store a credential the package did not declare.
+
+A tool with no `auth` verb is refused, naming `facet secret set` instead, and
+so is a package that is not installed (`not_installed`, exit 7, with
+`facet pull <package>`). The verb's temporary directory is removed in every
+case, so the tokens it wrote exist only in the `0600` store afterwards.
+
+```console
+$ facet auth youtube
+youtube: stored oauth-token
+```
+
+Lock: exclusive. Exit codes: `0`; `2` an unknown package, a package with no
+`auth` verb, or a returned name the manifest did not declare; `7` the package
+is not installed; `9` the verb crashed or returned no `secrets` map.
+
 ## `facet doctor`
 
 Questions about the tool: facet's nine own checks, then, per target, the
@@ -492,7 +553,10 @@ repairs.
 Flags: `--full` (the full depth), `--quick` (accepted; the default; both
 flags together are `invalid_input`, exit 2), plus a target: nothing (facet
 and every installed package), a package name, or a capability id. The
-readiness list ends with `shared_modules`, which reports a stale `facet_lib`
+`secrets` check lists every credential the package declares with whether it
+is set — never a value — and fails on a required one that is not stored with
+the exact `facet secret set` or `facet auth` command; it never gates a pull
+or a run. The readiness list ends with `shared_modules`, which reports a stale `facet_lib`
 copy with the fix `facet pull <package>`; just before it, `browser` reports a
 declared Chromium extraction whose `.facet-verified` marker does not hold the
 declared sha256 or whose executable is missing, with the same fix, and
@@ -649,6 +713,15 @@ For a package that declares `[engine.source]`, the runner's environment
 carries `FACET_SOURCE_DIR` with the path of its pinned checkout; the runner
 puts it on `sys.path` itself.
 
+A package that declares a required secret (`[[secrets]]` with
+`required = true`) refuses a run whose value is not stored, before any pull
+and before the runner starts: `machine_cannot` (exit 5) naming the missing
+secret and the exact `facet secret set <package> <name>` — or
+`facet auth <package>` when the package provides that verb. The runner
+receives its own set secrets as `FACET_SECRET_<NAME>` variables and never
+another package's, and any stored value it prints is replaced with `***`
+before facet keeps or shows that output.
+
 ```console
 $ facet run ffmpeg.normalize normalize.toml
 take-voice.wav take-voice passed
@@ -694,7 +767,8 @@ check; `2` bad arguments, an invalid piece, an unknown capability, or an
 asset that would overwrite a path input of the same run; `4` a model the
 piece selects needs acceptance — only the gated models the piece actually
 selects are required (see [licenses.md](licenses.md)); `5` the machine
-gate refuses; `7` `--no-pull` on an
+gate refuses, including a required secret that is not set (the hint names
+`facet secret set` or `facet auth`); `7` `--no-pull` on an
 absent or changed package; `9` the runner crashed or broke the protocol.
 
 ## `facet example`

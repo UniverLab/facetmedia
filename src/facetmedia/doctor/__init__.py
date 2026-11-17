@@ -95,6 +95,7 @@ CHECK_ORDER: Final[tuple[str, ...]] = (
     "host_libs",
     "installed",
     "licenses",
+    "secrets",
     "models",
     "browser",
     "ffmpeg",
@@ -234,6 +235,7 @@ def machine_checks(
         "host_libs": _host_libs(package),
         "installed": _installed(package, home),
         "licenses": _licenses(package),
+        "secrets": _secrets(package, home),
         "models": _models(package, home),
         "browser": _browser(package, home),
         "ffmpeg": _ffmpeg(package, home),
@@ -435,6 +437,31 @@ def _license_detail(wanted: list[Model], missing: set[str]) -> str:
         f"{model.id} ({model.spdx}): {'not accepted' if model.id in missing else 'accepted'}"
         for model in wanted
     )
+
+
+def _secrets(package: Package, home: Home) -> Check:
+    """Declared credentials: their names and whether each is set, never a value.
+
+    A required secret that is not stored fails the check with the exact
+    ``facet secret set`` or ``facet auth`` command; it never enters
+    ``CAN_RUN_CHECKS`` because it gates neither a pull nor a run's readiness.
+    """
+    from facetmedia import secrets as secrets_module  # noqa: PLC0415
+
+    if not package.secrets:
+        return Check(True, "no secrets declared")
+    values = secrets_module.rows(home, [package])
+    parts = [
+        f"{row['name']}: {'set' if row['set'] is True else 'not set'}"
+        + (" (required)" if row["required"] is True else "")
+        for row in values
+    ]
+    detail = "; ".join(parts)
+    missing = secrets_module.missing_required(home, package)
+    if missing:
+        fix = secrets_module.auth_hint(package, missing[0].name)
+        return Check(False, detail, fix)
+    return Check(True, detail)
 
 
 def _models(package: Package, home: Home) -> Check:

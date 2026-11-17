@@ -237,6 +237,86 @@ backend = true                  # served by the backend: never fetched, never ha
 `backend-owned`; `run` still requires acceptance for the pieces that select
 it (see [licenses.md](licenses.md)).
 
+## Secrets
+
+A package that talks to a network service needs credentials: an app
+password, API keys, or OAuth tokens a browser sign-in produces. It declares
+them — never a value — in an optional top-level `[[secrets]]` list, the same
+per-entry shape `[[models]]` uses:
+
+```toml
+[[secrets]]
+name = "app-password"                # [a-z][a-z0-9-]*, unique in the package
+description = "The app password from the account's settings, not the login one"
+required = false                     # default false; true refuses a run without it
+```
+
+`description` is one line, non-empty, and is what `facet secret list` and
+`facet describe` print beside the name. `facet registry validate` rejects a
+malformed or duplicate `name`, a missing or empty `description`, a
+non-boolean `required`, and any unknown key inside an entry.
+
+A value is stored by a person, never by the package: `facet secret set
+<package> <name>` reads it from a hidden prompt or from stdin, `facet secret
+list [<package>]` shows only names and whether each is set, and `facet
+secret rm <package> <name>` removes one. The value lives in
+`<home>/secrets/<package>.json` with mode `0600`; it survives every
+`facet remove` and `facet clean`, and only `facet secret rm` deletes it.
+
+### The `auth` verb
+
+A flow that needs a browser registers an `auth` verb, and `facet auth
+<package>` runs it interactively:
+
+```python
+from facet_runner_sdk import Request, Runner
+
+runner = Runner()
+
+
+@runner.verb("auth")
+def auth(req: Request) -> dict:
+    token = sign_in_through_the_browser()  # print a URL, open it, listen on loopback
+    return {"secrets": {"oauth-token": token}}
+```
+
+The verb's only channel back is the result file, so it returns a `secrets`
+map: each key must be a name the manifest declared, and a key it did not
+declare fails the whole flow with `invalid_input` and stores nothing. facet
+writes the returned values into the `0600` store and removes the verb's
+temporary directory in every case, so nothing the flow wrote survives
+outside the store. `facet auth` requires the package to be installed and
+holds the lock exclusively; it is never gated by the required-secret check,
+because producing the secrets is its whole job.
+
+### Reading a secret in a runner
+
+The runner of a package that declares secrets receives its own set values as
+environment variables, named `FACET_SECRET_<NAME>`: the manifest's
+`app-password` becomes `FACET_SECRET_APP_PASSWORD`. It never sees another
+package's secrets. Read one through the SDK instead of spelling the variable
+out, so a name's spelling stays facet's business:
+
+```python
+from facet_runner_sdk import Request, Runner, secret
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict:
+    token = secret("app-password")  # KeyError naming the fix when it is not set
+    ...
+```
+
+`secret(name)` raises `KeyError` when the value is not set, so a runner never
+sends an empty credential. When a package declares a required secret that is
+not stored, `facet run` fails before the runner starts with
+`machine_cannot`, naming the exact `facet secret set` or `facet auth`
+command. Any occurrence of one of the package's stored values in what its
+runner prints is replaced with the fixed mask `***` before facet keeps or
+shows it.
+
 ## Shared modules
 
 Packages run in separate environments, so a helper they both need is kept
@@ -868,7 +948,8 @@ file protocol. facet writes a **request file**,
 "models", "assets"}` (a `doctor` request adds `"depth": "quick" |
 "full"`), and the runner writes a **result file**: for `run`, its tool and
 one entry per asset; for `verify`, one verdict per asset; for `doctor`, a
-`{"name", "ok", "detail", "fix"}`-list of checks. A `file` is one bare
+`{"name", "ok", "detail", "fix"}`-list of checks; for `auth`, a `secrets`
+map of the values it obtained (see [Secrets](#secrets)). A `file` is one bare
 name inside the run's temporary directory, never a path and never the
 reserved `.facet-` prefix. The runner is invoked through the manifest's
 `transport.invocation_template` with `{{python}}` (the environment's own
@@ -915,7 +996,9 @@ runner.main()
 
 `req` carries the request: `inputs` (validated, defaults filled, paths
 absolute), `out_dir`, `piece_dir`, `assets` (on `verify` and `preview`),
-`depth` (on `doctor`) and `model_path(id)`. An unknown verb or an
+`depth` (on `doctor`) and `model_path(id)`; the module-level
+`secret(name)` reads one declared credential (see [Secrets](#secrets)). An
+unknown verb or an
 exception exits 1 with the reason on stderr, which facet turns into
 `runner_failed` — with the one exception of a missing `doctor` verb,
 which the SDK answers politely so `facet doctor` can name the fix.

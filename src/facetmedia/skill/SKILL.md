@@ -31,7 +31,12 @@ Start with `facet list --available`: packages grouped by facet with their
 weight. Filter with `facet list --available --facet voice`. With `--json`
 each package row adds `facet` and `weight`. `facet describe <capability>
 --json` adds `facet` beside `kind`, `weight`, and `skill` (the command that
-prints that package's how-to).
+prints that package's how-to), plus `secrets`: one
+`{name, description, required, set}` row per credential the package declares
+— never a value. When a required secret is missing, store it with
+`facet secret set <package> <name>` (hidden prompt at a terminal, stdin
+otherwise) or `facet auth <package>` when the package offers a browser
+sign-in.
 
 `summary` and a facet's name are English by default. When the registry
 declares localized texts, `facet describe --json` carries them under
@@ -79,7 +84,7 @@ Branch on the exit code, not the prose:
 | 2 | `invalid_input` | bad arguments, an invalid piece, an unknown capability |
 | 3 | `verification_failed` | the asset was made but its check failed |
 | 4 | `license_not_accepted` | a model needs acceptance first |
-| 5 | `machine_cannot` | RAM, disk, platform or a doctor check fails |
+| 5 | `machine_cannot` | RAM, disk, platform, a doctor check, or a missing required secret fails |
 | 6 | `lock_busy` | the lock is held and `--no-wait` was given |
 | 7 | `not_installed` | the package is not installed |
 | 8 | `download_failed` | a download failed or its sha256 did not match |

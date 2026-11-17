@@ -42,17 +42,19 @@ _VERB_HELP: dict[str, str] = {
     "remove": "remove an installed tool",
     "clean": "remove unused environments and caches",
     "skill": "print the skill for facet or one package",
+    "auth": "sign in to a tool that needs a browser",
 }
 
 _GROUP_HELP: dict[str, str] = {
     "license": "manage tool licenses",
     "config": "set, get and list host application paths",
+    "secret": "set, list and remove a tool's credentials",
 }
 
 _VERB_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("start", ("update", "pull", "list", "describe", "example")),
     ("make and check", ("run", "check", "preview")),
-    ("maintain", ("doctor", "license", "config", "remove", "clean", "skill")),
+    ("maintain", ("doctor", "license", "config", "secret", "auth", "remove", "clean", "skill")),
 )
 
 _GROUP_VERBS: frozenset[str] = frozenset(_GROUP_HELP)
@@ -72,11 +74,17 @@ _CONFIG_VERBS: tuple[tuple[str, str], ...] = (
     ("list", "list the host application config keys"),
 )
 
+_SECRET_VERBS: tuple[tuple[str, str], ...] = (
+    ("set", "store one of a tool's credentials"),
+    ("list", "list a tool's credentials and whether each is set"),
+    ("rm", "remove one of a tool's credentials"),
+)
+
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
 # describe, preview, license list) take no lock and reject them. `check`
 # holds the lock itself, so it also rejects the flags.
 _LOCK_VERBS: frozenset[str] = frozenset(
-    {"doctor", "clean", "pull", "remove", "run", "update", "example"}
+    {"doctor", "clean", "pull", "remove", "run", "update", "example", "auth"}
 )
 
 
@@ -409,6 +417,35 @@ def _add_config_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
     )
 
 
+def _add_secret_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
+    for parsers_key in ("set", "rm"):
+        parsers[parsers_key].add_argument(
+            "package",
+            metavar="<package>",
+            help="an installed package name from `facet list`",
+        )
+        parsers[parsers_key].add_argument(
+            "name",
+            metavar="<name>",
+            help="a secret the package declares, from `facet secret list <package>`",
+        )
+    parsers["list"].add_argument(
+        "package",
+        nargs="?",
+        default=None,
+        metavar="<package>",
+        help="one package's secrets; omit it for every installed package",
+    )
+
+
+def _add_auth_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "package",
+        metavar="<package>",
+        help="an installed package whose auth verb opens a browser sign-in",
+    )
+
+
 def _add_pull_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "names",
@@ -597,6 +634,7 @@ _FLAG_BUILDERS: dict[str, Callable[[argparse.ArgumentParser], None]] = {
     "remove": _add_rm_flags,
     "clean": _add_gc_flags,
     "skill": _add_skill_flags,
+    "auth": _add_auth_flags,
 }
 
 
@@ -604,6 +642,7 @@ def build_parser(
     handlers: Mapping[str, Handler],
     license_handlers: Mapping[str, Handler],
     config_handlers: Mapping[str, Handler],
+    secret_handlers: Mapping[str, Handler],
     registry_validate: Handler,
     examples: Examples,
 ) -> FacetParser:
@@ -649,5 +688,15 @@ def build_parser(
         config_handlers,
     )
     _add_config_flags(config_parsers)
+    secret_parsers = _add_group(
+        subparsers,
+        "secret",
+        _GROUP_HELP["secret"],
+        _SECRET_VERBS,
+        examples,
+        secret_handlers,
+        lock_verbs=frozenset({"set", "rm"}),
+    )
+    _add_secret_flags(secret_parsers)
     _add_registry_group(subparsers, examples, registry_validate)
     return parser

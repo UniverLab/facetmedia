@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import os
 import sys
@@ -13,6 +14,7 @@ from typing import Final
 from rich.markup import escape
 
 from facetmedia import (
+    auth,
     check,
     config,
     contract,
@@ -29,6 +31,7 @@ from facetmedia import (
     record,
     registry,
     run,
+    secrets,
     theme,
     update,
     updates,
@@ -38,6 +41,7 @@ from facetmedia.cli_parser import build_parser as _build_parser
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file, new_run_id, require_linux
 from facetmedia.registry import load_active_registry, validate_registry
+from facetmedia.registry_types import Package
 
 #: The verification verdict that Señal marks: the rest of a verdict stays calm.
 PASSED: Final[str] = "passed"
@@ -90,6 +94,102 @@ _CONFIG_HANDLERS: dict[str, Handler] = {
     "get": _handle_config_get,
     "list": _handle_config_list,
 }
+
+
+def _secret_package(name: str) -> Package:
+    """One package by name; unknown names list what the registry has."""
+    active = load_active_registry()
+    package = active.package(name)
+    if package is None:
+        raise FacetError(
+            "invalid_input",
+            f"unknown package: {name}",
+            details={"known": sorted(active.packages)},
+        )
+    return package
+
+
+def _secret_value(args: argparse.Namespace) -> str:
+    """The value from the terminal's hidden prompt, or from stdin — never argv.
+
+    A value on the command line would land in the shell's history and in the
+    process list, so facet never looks for one there.
+    """
+    if sys.stdin.isatty():
+        value = getpass.getpass(f"{args.package} {args.name}: ")
+    else:
+        value = sys.stdin.readline().rstrip("\n")
+    if not value:
+        raise FacetError("invalid_input", f"{args.package} {args.name}: the value is empty")
+    return value
+
+
+def _handle_secret_set(args: argparse.Namespace) -> int:
+    """Exclusive: prompt for one credential and store it under the facet home."""
+    package = _secret_package(args.package)
+    with lock.hold("exclusive", "facet secret set", *_lock_params(args)):
+        data = secrets.set_value(Home.from_env(), package, args.name, _secret_value(args))
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        print(f"{data['package']} {data['name']} set")
+    return 0
+
+
+def _handle_secret_rm(args: argparse.Namespace) -> int:
+    """Exclusive: remove one credential; a credential that is not stored is a no-op."""
+    package = _secret_package(args.package)
+    with lock.hold("exclusive", "facet secret rm", *_lock_params(args)):
+        data = secrets.remove(Home.from_env(), package, args.name)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        state = "removed" if data["removed"] is True else "was not set"
+        print(f"{data['package']} {data['name']} {state}")
+    return 0
+
+
+def _handle_secret_list(args: argparse.Namespace) -> int:
+    """A light verb: names, descriptions and set/unset — never a value."""
+    package = _secret_package(args.package) if args.package else None
+    home = Home.from_env()
+    if package is not None:
+        packages = [package]
+    else:
+        packages = [entry for entry in load_active_registry().packages.values() if entry.secrets]
+    rows = secrets.rows(home, packages)
+    data: dict[str, object] = {"secrets": rows}
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        _announce_secret_list(rows)
+    return 0
+
+
+def _announce_secret_list(rows: list[dict[str, object]]) -> None:
+    if not rows:
+        print("no secrets declared; a package declares its secrets in its manifest")
+        return
+    for row in rows:
+        state = "set" if row.get("set") is True else "not set"
+        required = " required" if row.get("required") is True else ""
+        print(f"{row['package']} {row['name']}{required} {state}: {row['description']}")
+
+
+_SECRET_HANDLERS: dict[str, Handler] = {
+    "set": _handle_secret_set,
+    "list": _handle_secret_list,
+    "rm": _handle_secret_rm,
+}
+
+
+def _handle_auth(args: argparse.Namespace) -> int:
+    """Exclusive: run a package's browser sign-in and store what it returns."""
+    with lock.hold("exclusive", "facet auth", *_lock_params(args)):
+        data = auth.handle(args.package, args.run_id)
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        stored = data["secrets"]
+        names = ", ".join(stored) if isinstance(stored, list) else ""
+        print(f"{data['package']}: stored {names}")
+    return 0
 
 
 def _handle_update(args: argparse.Namespace) -> int:
@@ -395,6 +495,7 @@ def _handle_skill(args: argparse.Namespace) -> int:
 
 
 _HANDLERS: dict[str, Handler] = {
+    "auth": _handle_auth,
     "check": _handle_check,
     "describe": _handle_describe,
     "doctor": _handle_doctor,
@@ -462,6 +563,12 @@ _EXAMPLES: dict[tuple[str, ...], tuple[str, ...]] = {
         "facet config set blender.path /usr/bin/blender",
         "facet config get blender.path",
     ),
+    ("secret",): (
+        "facet secret list",
+        "facet secret set bluesky app-password",
+        "facet secret rm bluesky app-password",
+    ),
+    ("auth",): ("facet auth youtube", "facet auth youtube --json"),
     ("registry",): (
         "facet registry validate ../registry",
         "facet registry validate ../registry --json",
@@ -477,6 +584,19 @@ _EXAMPLES: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("config", "get"): ("facet config get blender.path", "facet config get blender.path --json"),
     ("config", "list"): ("facet config list", "facet config list --json"),
+    ("secret", "set"): (
+        "facet secret set bluesky app-password",
+        "facet secret set youtube oauth-token",
+    ),
+    ("secret", "list"): (
+        "facet secret list",
+        "facet secret list bluesky",
+        "facet secret list --json",
+    ),
+    ("secret", "rm"): (
+        "facet secret rm bluesky app-password",
+        "facet secret rm youtube oauth-token",
+    ),
     ("registry", "validate"): (
         "facet registry validate ../registry",
         "facet registry validate ../registry --json",
@@ -490,6 +610,7 @@ def build_parser() -> FacetParser:
         handlers=_HANDLERS,
         license_handlers=_LICENSE_HANDLERS,
         config_handlers=_CONFIG_HANDLERS,
+        secret_handlers=_SECRET_HANDLERS,
         registry_validate=_handle_registry_validate,
         examples=_EXAMPLES,
     )

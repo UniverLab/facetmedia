@@ -14,15 +14,18 @@ must never be needed to speak the protocol.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
-__all__ = ["Request", "Runner"]
+__all__ = ["Request", "Runner", "secret"]
 
 PROTOCOL_VERSION: Final[int] = 1
+#: The environment prefix ``facet`` exports a declared secret under.
+SECRET_PREFIX: Final[str] = "FACET_SECRET_"
 #: The default depth for a request that carries none (older callers).
 DEFAULT_DEPTH: Final[str] = "quick"
 #: What the SDK answers when a package never registered its ``doctor`` verb.
@@ -151,6 +154,22 @@ def _parse_argv(argv: list[str]) -> tuple[str, Path, Path]:
     if missing:
         raise ValueError(f"missing {', '.join(missing)}")
     return verb, values["--input"], values["--result"]
+
+
+def secret(name: str) -> str:
+    """The value of the declared secret ``name``, as facet exported it.
+
+    ``name`` is the manifest spelling (``app-password``); the variable is
+    ``FACET_SECRET_APP_PASSWORD``.  A secret the manifest declares but nobody
+    stored is absent, and so is one the manifest never declared: both raise
+    ``KeyError`` naming what to run, so a runner never sends an empty
+    credential.
+    """
+    variable = f"{SECRET_PREFIX}{name.upper().replace('-', '_')}"
+    try:
+        return os.environ[variable]
+    except KeyError:
+        raise KeyError(f"secret {name} is not set; run facet secret set or facet auth") from None
 
 
 def _mapping(value: Any) -> dict[str, Any]:

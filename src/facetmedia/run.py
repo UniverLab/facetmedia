@@ -26,7 +26,18 @@ from typing import Any
 
 from rich.markup import escape
 
-from facetmedia import __version__, doctor, env, licenses, prune, record, runner, schema, theme
+from facetmedia import (
+    __version__,
+    doctor,
+    env,
+    licenses,
+    prune,
+    record,
+    runner,
+    schema,
+    secrets,
+    theme,
+)
 from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.lock import LockMode, hold
@@ -79,6 +90,9 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     capability, package = _resolve_capability(args.capability)
     gate_warnings = _require_machine(package, run_id)
     home = Home.from_env()
+    # A capability that needs a required secret fails here, before any pull and
+    # before the runner starts; ``facet auth`` is never gated, it makes them.
+    secrets.require_ready(home, package)
     ephemeral = _ephemeral(args, package, home)
     pulled, downloaded = _ensure_installed(args, package, run_id)
     try:

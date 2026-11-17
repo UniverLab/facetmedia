@@ -16,11 +16,34 @@ $ facet list --json
 The keys above are the examples, not the whole `data`: `facet describe`
 adds `i18n` (localized summaries keyed by language tag, `{}` when none),
 `piece_example` (the capability's first bundled example piece as TOML
-text, or a synthetic minimal piece when it ships none) and `example_path`
+text, or a synthetic minimal piece when it ships none), `example_path`
 (that example's path relative to the package directory, `null` when the
-text is synthetic), and `facet list --available` adds a `facets` map with
-each facet's `label` and `i18n` when `index.toml` declares them. Both are
-additive, so no consumer written against this version needs to change.
+text is synthetic) and `secrets` (one `{name, description, required, set}`
+row per credential the package declares — never a value), and `facet list
+--available` adds a `facets` map with each facet's `label` and `i18n` when
+`index.toml` declares them. Both are additive, so no consumer written
+against this version needs to change.
+
+## Credentials
+
+A stored secret never appears in any output: not in `data`, not in an
+error's `message`, `hint` or `details`, not in a record, a preview or a log.
+Every surface reports a secret's name, its one-line description and whether
+it is set — nothing else. `facet secret list` answers
+`{"secrets": [{"description": "…", "name": "app-password", "package": "bluesky", "required": true, "set": true}]}`,
+and `facet describe` carries the same `name`/`description`/`required`/`set`
+fields under `data.secrets` for the capability's package.
+
+A `facet run` whose package declares a required secret that is not stored
+fails with `machine_cannot` **before the runner starts**:
+`error.message` names the missing secret or secrets, `error.hint` is the
+exact `facet secret set <package> <name>` (or `facet auth <package>` when
+the package provides that verb), and `error.details` carries
+`{"package": "…", "missing": ["…"]}`. The runner of that package receives
+its own set secrets as `FACET_SECRET_<NAME>` environment variables and no
+other package's; any occurrence of one of those values in the runner's
+stdout or stderr is replaced with the fixed mask `***` before facet keeps,
+logs or shows it.
 
 With `--json`, stdout carries exactly one JSON document: an **envelope**
 with the contract version. Progress goes to stderr, and every invocation
@@ -99,7 +122,7 @@ Branch on the exit code without parsing prose:
 | `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate`, a `run` asset that would overwrite one of the run's inputs |
 | `verification_failed` | 3 | the asset was made but its check did not pass |
 | `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
-| `machine_cannot` | 5 | the machine or facet's own health does not meet the requirements (RAM, disk, platform, a failing `facet doctor` check) |
+| `machine_cannot` | 5 | the machine or facet's own health does not meet the requirements (RAM, disk, platform, a failing `facet doctor` check), or a `run` whose package needs a required secret that is not stored |
 | `lock_busy` | 6 | the lock is held and `--no-wait` was given, or the wait timed out |
 | `not_installed` | 7 | the package is not installed, or its files changed in the registry since it was installed: `run --no-pull`, re-verifying an asset of it, or a `facet doctor` target |
 | `download_failed` | 8 | a model, environment, server or source, or registry download failed, or its sha256 did not match |

@@ -345,10 +345,13 @@ def make_request(
 
 
 def runner_env(home: Home, package: Package) -> dict[str, str]:
-    """The runner's environment: uv's, plus the models dir and the GPU flag."""
+    """The runner's environment: uv's, the models dir, the GPU flag, its secrets."""
     from facetmedia import env as env_module  # noqa: PLC0415
+    from facetmedia import secrets as secrets_module  # noqa: PLC0415
 
     env_vars = uv_env(home)
+    # Only the owning package's declared, stored values: never another package's.
+    env_vars.update(secrets_module.env_for(home, package))
     env_vars["FACET_MODELS"] = str(home.models_dir / "direct")
     if package.source is not None:
         env_vars["FACET_SOURCE_DIR"] = str(env_module.source_dir(package, home))
@@ -458,7 +461,9 @@ def _run_client(
     except OSError as exc:
         raise _failure(inv, tail, f"cannot start the runner: {exc}") from exc
     assert process.stdout is not None
-    reader = threading.Thread(target=_stream, args=(process.stdout, tail), daemon=True)
+    reader = threading.Thread(
+        target=_stream, args=(process.stdout, tail, _secret_values(inv)), daemon=True
+    )
     reader.start()
     try:
         return _wait(inv, process, verb, tail)
@@ -543,7 +548,9 @@ def _launch_server(
     except OSError as exc:
         raise _failure(inv, tail, f"cannot start the server: {exc}") from exc
     assert process.stdout is not None
-    reader = threading.Thread(target=_stream, args=(process.stdout, tail), daemon=True)
+    reader = threading.Thread(
+        target=_stream, args=(process.stdout, tail, _secret_values(inv)), daemon=True
+    )
     reader.start()
     try:
         healthy = _await_healthy(process, url, server.timeout_s)
@@ -655,13 +662,28 @@ def _trapped() -> Iterator[None]:
             signal.signal(sig, handler)
 
 
-def _stream(stream: IO[str], tail: deque[str]) -> None:
-    """Drain the runner's merged output into the tail, stderr and the log."""
+def _stream(stream: IO[str], tail: deque[str], values: Sequence[str] = ()) -> None:
+    """Drain the runner's merged output into the tail, stderr and the log.
+
+    Every stored value the runner received is replaced with the fixed mask
+    before the line is kept, shown or logged: output the runner prints can
+    never carry a credential out of facet.
+    """
+    from facetmedia import secrets as secrets_module  # noqa: PLC0415
+
     with stream:
         for line in stream:
-            tail.append(line)
-            sys.stderr.write(line)
-            logger.info("%s", line.rstrip("\n"))
+            masked = secrets_module.mask(line, values)
+            tail.append(masked)
+            sys.stderr.write(masked)
+            logger.info("%s", masked.rstrip("\n"))
+
+
+def _secret_values(inv: Invocation) -> tuple[str, ...]:
+    """The owning package's stored values: what its output must be masked with."""
+    from facetmedia import secrets as secrets_module  # noqa: PLC0415
+
+    return secrets_module.mask_values(inv.home, inv.package)
 
 
 def _wait(inv: Invocation, process: subprocess.Popen[str], verb: str, tail: deque[str]) -> int:

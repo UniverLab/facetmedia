@@ -30,6 +30,9 @@ LOCKING_VERBS = [
     ["remove", "echo"],
     ["clean"],
     ["license", "accept", "termsy-weights"],
+    ["secret", "set", "poster", "app-password"],
+    ["secret", "rm", "poster", "app-password"],
+    ["auth", "poster"],
 ]
 
 LIGHT_VERBS = [
@@ -40,6 +43,7 @@ LIGHT_VERBS = [
     ["check", "echo.text"],
     ["preview"],
     ["license", "list"],
+    ["secret", "list"],
 ]
 
 HolderStart = Callable[[str, str], tuple[mp.Process, Any]]

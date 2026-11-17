@@ -13,6 +13,7 @@ from facetmedia.cli_parser import (
     _CONFIG_VERBS,
     _GROUP_HELP,
     _LICENSE_VERBS,
+    _SECRET_VERBS,
     _VERB_HELP,
 )
 
@@ -38,6 +39,12 @@ PLACEHOLDERS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("config", "set"), "<key>"),
     (("config", "set"), "<value>"),
     (("config", "get"), "<key>"),
+    (("secret", "set"), "<package>"),
+    (("secret", "set"), "<name>"),
+    (("secret", "rm"), "<package>"),
+    (("secret", "rm"), "<name>"),
+    (("secret", "list"), "<package>"),
+    (("auth",), "<package>"),
 )
 
 
@@ -52,7 +59,11 @@ def _help(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:
 def _expected_keys() -> set[tuple[str, ...]]:
     sub_verbs = {
         (name, verb)
-        for name, verbs in (("license", _LICENSE_VERBS), ("config", _CONFIG_VERBS))
+        for name, verbs in (
+            ("license", _LICENSE_VERBS),
+            ("config", _CONFIG_VERBS),
+            ("secret", _SECRET_VERBS),
+        )
         for verb, _help_text in verbs
     }
     groups = {(name,) for name in _GROUP_HELP} | {("registry",)}
@@ -145,7 +156,10 @@ def test_top_level_help_groups_the_everyday_verbs(
     groups = [
         ("start", ("update", "pull", "list", "describe", "example")),
         ("make and check", ("run", "check", "preview")),
-        ("maintain", ("doctor", "license", "config", "remove", "clean", "skill")),
+        (
+            "maintain",
+            ("doctor", "license", "config", "secret", "auth", "remove", "clean", "skill"),
+        ),
     ]
     positions = [out.index(f"{title}:") for title, _verbs in groups]
     assert positions == sorted(positions)
@@ -171,6 +185,7 @@ def test_top_level_help_keeps_registry_on_the_maintainers_line(
     [
         ("license", "manage tool licenses"),
         ("config", "set, get and list host application paths"),
+        ("secret", "set, list and remove a tool's credentials"),
         ("registry", "inspect the package registry (maintainers)"),
     ],
 )
@@ -184,7 +199,7 @@ def test_group_without_a_sub_verb_prints_its_help(
     assert "the following arguments are required" not in err
 
 
-@pytest.mark.parametrize("group", ["license", "config", "registry"])
+@pytest.mark.parametrize("group", ["license", "config", "secret", "registry"])
 def test_group_without_a_sub_verb_keeps_the_json_failure(
     group: str, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -18,7 +18,18 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
-from facetmedia import check, doctor, env, example, installed, licenses, schema, skill, update
+from facetmedia import (
+    check,
+    doctor,
+    env,
+    example,
+    installed,
+    licenses,
+    schema,
+    secrets,
+    skill,
+    update,
+)
 from facetmedia.contract import CONTRACT_VERSION, FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_active_registry, snapshot_identity
@@ -219,6 +230,15 @@ def describe_data(capability_id: str) -> dict[str, Any]:
         "verify_uses_server": capability.verify_uses_server,
         "preview": {"viewer": capability.viewer},
         "requirements": _requirements(package),
+        "secrets": [
+            {
+                "name": row["name"],
+                "description": row["description"],
+                "required": row["required"],
+                "set": row["set"],
+            }
+            for row in secrets.rows(home, [package])
+        ],
         "licenses": {
             "tools": [{"subject": lic.subject, "spdx": lic.spdx} for lic in package.licenses],
             "models": [

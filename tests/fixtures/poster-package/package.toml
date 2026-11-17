@@ -1,0 +1,51 @@
+name = "poster"
+version = "0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
+protocol = 1
+provider = "facet"
+tool_name = "Poster"
+description = "A credential fixture: posts text using declared secrets."
+facet = "text"
+
+[engine]
+type = "python-env"
+python = "3.12"
+
+[transport]
+type = "cli"
+entry = "runner.py"
+
+[requirements]
+gpu = false
+ram_gb = 0.1
+disk_gb = 0.01
+exclusive = false
+platforms = ["linux"]
+host_libs = []
+host_hint = ""
+
+[[licenses]]
+subject = "poster"
+spdx = "Apache-2.0"
+
+[[secrets]]
+name = "app-password"
+description = "The app password from the account's settings."
+required = true
+
+[[secrets]]
+name = "handle"
+description = "The account handle to post as."
+required = false
+
+[capabilities.text]
+summary = "Post text with the account's app password."
+kind = "text"
+
+[capabilities.text.inputs.text]
+type = "string"
+required = true
+description = "Text to post."
+
+[capabilities.text.preview]
+viewer = "generic"

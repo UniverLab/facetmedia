@@ -1,0 +1,66 @@
+"""Read and validate a package's ``[[secrets]]`` declarations.
+
+``facetmedia.manifest`` keeps the package grammar; the secret grammar lives
+here so the manifest module stays inside the lab's per-file size cap, the
+same split ``facetmedia.manifest.model`` makes for ``[[models]]``.  The
+loader passed in is :class:`facetmedia.manifest.RegistryLoader`, which
+collects every problem instead of stopping at the first one.
+
+A declaration names a credential, never a value: the description is what
+``facet secret list`` prints, and ``required`` is what makes a run refuse
+before the runner starts when the value is not stored.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Final
+
+from facetmedia.registry_types import Secret
+
+if TYPE_CHECKING:
+    from facetmedia.manifest import RegistryLoader
+
+_SECRET_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
+_SECRET_KEYS: Final[frozenset[str]] = frozenset({"name", "description", "required"})
+
+
+def read_secrets(loader: RegistryLoader, raw: object, file: str) -> tuple[Secret, ...]:
+    """Every ``[[secrets]]`` entry of one package manifest, in declared order."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        loader.add(file, "secrets", "type")
+        return ()
+    secrets: list[Secret] = []
+    seen: set[str] = set()
+    for position, item in enumerate(raw):
+        prefix = f"secrets[{position}]."
+        if not isinstance(item, dict):
+            loader.add(file, f"{prefix}name", "type")
+            continue
+        secret = _read_secret(loader, item, file, prefix, seen)
+        if secret is not None:
+            secrets.append(secret)
+    return tuple(secrets)
+
+
+def _read_secret(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str, seen: set[str]
+) -> Secret | None:
+    before = len(loader.problems)
+    loader.unknown(item, _SECRET_KEYS, file, prefix)
+    name = loader.string(item, "name", file, prefix, required=True)
+    if name is not None:
+        if not _SECRET_NAME_RE.fullmatch(name):
+            loader.add(file, f"{prefix}name", "value")
+        elif name in seen:
+            loader.add(file, f"{prefix}name", "duplicate")
+        else:
+            seen.add(name)
+    description = loader.string(item, "description", file, prefix, required=True)
+    required = loader.boolean(item, "required", file, prefix, default=False)
+    if len(loader.problems) != before or name is None or description is None:
+        return None
+    return Secret(name=name, description=description, required=required)

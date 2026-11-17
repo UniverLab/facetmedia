@@ -58,6 +58,7 @@
     "ram_gb": 0.1,
     "vram_gb": 0.0
   },
+  "secrets": [],
   "skill": "facet skill echo",
   "summary": "Echo text back, repeated.",
   "verify": {
