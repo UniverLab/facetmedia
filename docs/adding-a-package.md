@@ -84,7 +84,7 @@ are unique and match `[a-z][a-z0-9-]*`, and the directory's `package.toml`
 `name` must equal it.
 
 Each facet in facet's own list (`voice`, `audio`, `image`, `video`, `cad`,
-`text`, `presentation`) may carry a `[facets.<facet>]` table with the
+`text`, `presentation`, `publish`) may carry a `[facets.<facet>]` table with the
 facet's English `label` (1 to 40 characters). An optional
 `[facets.<facet>.i18n.<lang>]` table adds one `label` per language, with
 `<lang>` a lowercase language tag (`es`, `pt`). `facet registry validate`
@@ -107,7 +107,7 @@ protocol = 1                          # runner protocol version
 provider = "the upstream project · the library"   # both, separated by ·
 tool_name = "Textured"
 description = "One line: what this package makes."
-facet = "text"                        # voice | audio | image | video | cad | text | presentation
+facet = "text"                        # voice | audio | image | video | cad | text | presentation | publish
 ```
 
 Every key above is required, and text values may not be empty; unknown
