@@ -35,6 +35,7 @@ def test_load_fixture_registry() -> None:
     registry = load_registry(FIXTURE_ROOT)
     assert registry.version == 1
     assert set(registry.packages.keys()) == {"echo", "termsy", "future"}
+    assert registry.skipped == ()
 
 
 def test_packages_sorted() -> None:
@@ -112,15 +113,22 @@ def test_termsy_fixture() -> None:
     assert termsy.requirements.exclusive is True
 
 
-def test_future_incompatible() -> None:
-    registry = load_registry(FIXTURE_ROOT)
-    future = registry.package("future")
-    assert future is not None
-    assert future.compatible is False
-    with pytest.raises(FacetError) as exc:
-        future.require_compatible()
-    assert exc.value.code == "machine_cannot"
-    assert "facet update" in exc.value.hint
+def test_loader_skips_newer_package_before_manifest_validation(ahead_registry: Path) -> None:
+    registry = load_registry(ahead_registry)
+    assert "ahead" not in registry.packages
+    assert [(item.name, item.requires_facet) for item in registry.skipped] == [("ahead", ">=9")]
+    assert "hologram" not in registry.facets
+
+
+def test_compatible_broken_package_remains_a_hard_problem(tmp_path: Path) -> None:
+    root = tmp_path / "registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    manifest = root / "packages" / "echo" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\nunknown_section = true\n", encoding="utf-8"
+    )
+    with pytest.raises(FacetError, match="unknown_section"):
+        load_registry(root)
 
 
 def test_echo_compatible() -> None:

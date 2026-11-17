@@ -89,7 +89,9 @@ facet's English `label` (1 to 40 characters). An optional
 `[facets.<facet>.i18n.<lang>]` table adds one `label` per language, with
 `<lang>` a lowercase language tag (`es`, `pt`). `facet registry validate`
 rejects a facet name outside that list, a missing or over-long `label`, a
-malformed language tag, and any unknown key. Declaring neither is valid.
+malformed language tag, and any unknown key. Older cores ignore facet label
+tables they do not know, including their localized labels. Declaring neither
+is valid.
 `facet list --available --json` reports what `index.toml` declares under
 `data.facets`, keyed by facet name:
 
@@ -115,10 +117,12 @@ keys are an error at every level, named by their dotted key. Two of them
 carry facet's compatibility rules:
 
 - `requires_facet` is evaluated with `packaging` against facet's version,
-  prereleases included. An incompatible package stays in the registry but
-  cannot be pulled or run: facet answers `machine_cannot` (exit 5) with
-  the hint `facet update, or upgrade facet`. `facet update` also lists
-  compatibility per package.
+  prereleases included. A package that uses a new core feature raises this
+  floor to the facet release that brought the feature; older cores skip that
+  package before reading the rest of its manifest. `facet list` and `facet
+  pull` name skipped packages and say `uv tool upgrade facetmedia`. An
+  explicitly named skipped package fails with `machine_cannot` (exit 5).
+  `facet update` also lists compatibility per package.
 - `protocol` must equal `1`, the runner protocol this facet speaks.
 
 `facet` names the domain of creation the package belongs to; a package

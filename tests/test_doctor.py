@@ -502,18 +502,26 @@ def test_doctor_low_ram_fails_with_exit_5_and_a_fix(
     assert entry["fix"] == "echo needs 0.1 GB of RAM"
 
 
-def test_doctor_incompatible_package_fails_with_exit_5(
+def test_doctor_omits_package_for_a_newer_facet(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _fresh_home(monkeypatch, tmp_path)
+    registry = tmp_path / "registry"
+    shutil.copytree(FIXTURES, registry)
+    manifest = registry / "packages" / "future" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            'requires_facet = ">=0.1.0b1,<0.2"', 'requires_facet = ">=9"'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
 
     code = main(["doctor", "future.thing", "--json"])
-    data = _data(_envelope(capsys))
-    assert code == EXIT_MACHINE_CANNOT
-    entry = data["packages"]["future"]["readiness"]["compatible"]
-    assert entry["ok"] is False
-    assert entry["fix"] == "facet update, or upgrade facet"
-    assert data["can_run"] is False
+    envelope = _envelope(capsys)
+    assert code == EXIT_INVALID_INPUT
+    assert envelope["error"]["code"] == "invalid_input"
+    assert envelope["error"]["details"]["known"] == ["echo", "termsy"]
 
 
 def test_doctor_unsupported_platform_fails_with_exit_5(

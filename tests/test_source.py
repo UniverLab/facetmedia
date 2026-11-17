@@ -30,7 +30,7 @@ SHORT_REV = 12
 
 BASE = """name = "pkg"
 version = "0.1.0"
-requires_facet = ">=0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "test"
 tool_name = "Test"

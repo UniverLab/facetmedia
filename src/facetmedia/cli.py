@@ -446,10 +446,12 @@ def _handle_list(args: argparse.Namespace) -> int:
     The update check this invocation may have run is the only network it
     touches, and its answer never changes this output.
     """
-    data = introspect.list_data(args.available, args.facet)
+    active = load_active_registry()
+    data = introspect.list_data(args.available, args.facet, active=active)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         introspect.announce_list(data, args.available, args.facet)
+        introspect.announce_skipped(active.skipped)
     return 0
 
 

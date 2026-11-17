@@ -263,6 +263,22 @@ class Capability:
         return None
 
 
+@dataclass(frozen=True, order=True)
+class SkippedPackage:
+    """A registry package this facet cannot load yet."""
+
+    name: str
+    requires_facet: str
+
+
+def admits_facet(requires_facet: str) -> bool:
+    """Whether a PEP 440 facet requirement admits this installed version."""
+    try:
+        return SpecifierSet(requires_facet).contains(Version(__version__), prereleases=True)
+    except InvalidSpecifier:
+        return False
+
+
 @dataclass(frozen=True)
 class Package:
     """One package directory: its manifest, lock and capabilities."""
@@ -315,13 +331,7 @@ class Package:
 
     @property
     def compatible(self) -> bool:
-        if self.protocol != PROTOCOL_VERSION:
-            return False
-        try:
-            specifier = SpecifierSet(self.requires_facet)
-            return specifier.contains(Version(__version__), prereleases=True)
-        except InvalidSpecifier:
-            return False
+        return self.protocol == PROTOCOL_VERSION and admits_facet(self.requires_facet)
 
     def require_compatible(self) -> None:
         if self.compatible:
@@ -392,6 +402,7 @@ class Registry:
     version: int
     packages: Mapping[str, Package]
     facets: Mapping[str, FacetLabel] = dc_field(default_factory=dict)
+    skipped: tuple[SkippedPackage, ...] = ()
 
     def package(self, name: str) -> Package | None:
         return self.packages.get(name)

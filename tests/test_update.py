@@ -135,7 +135,7 @@ def test_package_records_carry_the_manifest_fields(fake_github: FakeGitHub) -> N
         "compatible": True,
         "changed": True,
     }
-    assert by_name["future"]["compatible"] is False
+    assert by_name["future"]["compatible"] is True
 
 
 def test_second_update_to_the_same_commit_only_switches(fake_github: FakeGitHub) -> None:
@@ -197,6 +197,16 @@ def test_archive_with_a_device_member_is_refused(fake_github: FakeGitHub) -> Non
     assert exc.value.code == "download_failed"
     assert "device" in exc.value.message
     assert _registry_dirs() == []
+
+
+def test_update_accepts_snapshot_with_packages_for_newer_facet(
+    fake_github: FakeGitHub, ahead_registry: Path
+) -> None:
+    fake_github.archive = build_archive(ahead_registry)
+    data = update.update_registry(Home.from_env(), "main")
+    assert [package["name"] for package in data["packages"]] == ["echo", "future", "termsy"]
+    loaded = load_active_registry()
+    assert [package.name for package in loaded.skipped] == ["ahead"]
 
 
 def test_archive_whose_manifests_do_not_validate_is_refused(

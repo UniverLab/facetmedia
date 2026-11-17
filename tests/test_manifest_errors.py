@@ -7,7 +7,7 @@ from facetmedia.registry import load_registry, validate_registry
 
 BASE = """name = "pkg"
 version = "0.1.0"
-requires_facet = ">=0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "test"
 tool_name = "Test"
@@ -98,7 +98,7 @@ CASES = [
         id="facet-missing",
     ),
     pytest.param(
-        BASE.replace('requires_facet = ">=0.1.0"', 'requires_facet = ""'),
+        BASE.replace('requires_facet = ">=0.1.0b1,<0.2"', 'requires_facet = ""'),
         "requires_facet",
         "value",
         id="requires-facet-empty",
@@ -611,7 +611,7 @@ FACET_INDEX_CASES = [
     pytest.param(
         '[facets.song]\nlabel = "Song"\n',
         "facets.song",
-        "value: one of voice, audio, image, video, cad, text, presentation, publish",
+        "unknown to facet 0.1.0b1",
         id="facet-name",
     ),
     pytest.param("[facets.text]\n", "facets.text.label", "required", id="facet-label-missing"),

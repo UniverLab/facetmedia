@@ -41,15 +41,18 @@ from facetmedia.registry_types import (
     Model,
     Package,
     Registry,
+    SkippedPackage,
     capability_models,
     is_multiple,
     weight,
 )
 
-__all__ = ["announce_list", "describe_data", "list_data", "skill_data"]
+__all__ = ["announce_list", "announce_skipped", "describe_data", "list_data", "skill_data"]
 
 
-def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
+def list_data(
+    available: bool, facet: str | None = None, *, active: Registry | None = None
+) -> dict[str, Any]:
     """The ``facet list`` payload: the snapshot in use and its packages.
 
     Only installed packages are listed unless ``available`` asks for every
@@ -62,7 +65,7 @@ def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
             f"unknown facet: {facet}",
             details={"known": list(FACETS)},
         )
-    active = load_active_registry()
+    active = active or load_active_registry()
     home = Home.peek_env()
     recorded = installed.entries(home)
     rows = [
@@ -79,6 +82,15 @@ def list_data(available: bool, facet: str | None = None) -> dict[str, Any]:
     if not available:
         data["available"] = _available_summary(active)
     return data
+
+
+def announce_skipped(packages: tuple[SkippedPackage, ...]) -> None:
+    """Name packages omitted because they need a newer facet release."""
+    for package in packages:
+        print(
+            f"skipped {package.name}: needs facet {package.requires_facet}; "
+            "run uv tool upgrade facetmedia"
+        )
 
 
 def _facet_row(facet: FacetLabel) -> dict[str, Any]:

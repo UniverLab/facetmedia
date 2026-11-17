@@ -196,6 +196,11 @@ completed. Without a terminal, or with `--json`, the bare pull fails with
 `invalid_input` (exit 2), naming the facets and the two forms
 `facet pull <facet>` and `facet pull --package <name>`.
 
+A registry package whose `requires_facet` excludes this core is skipped before
+its manifest is read. Human output names each skipped package and the facet
+version it needs, with `uv tool upgrade facetmedia`; explicitly pulling one
+fails with `machine_cannot` (exit 5). JSON envelopes are unchanged.
+
 Flags: `--package NAME` (repeatable, installs that package explicitly and
 cannot be mixed with positional names), `--tier NAME`, `--cpu`, `--yes`,
 `--plan` (print the plan and install nothing; with `--json` it returns
@@ -342,8 +347,10 @@ Packages grouped by facet. Each package line carries its name, its weight
 installed package adds `installed <version>` and, when the snapshot's
 version is newer, `update: <installed> → <snapshot>`.
 
-Flags: `--available` (also list packages not installed; incompatible ones
-appear only in this form), `--facet NAME` (one facet's packages).
+Flags: `--available` (also list packages not installed), `--facet NAME` (one
+facet's packages). A package requiring a newer facet is omitted; human output
+names it, the facet version it needs and `uv tool upgrade facetmedia`. JSON
+continues to list only packages this core loaded, with no new envelope key.
 
 ```console
 $ facet list --available

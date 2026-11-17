@@ -63,7 +63,7 @@ def write_package(root: Path, name: str, spec: Spec | None = None) -> None:
     lines = [
         f'name = "{name}"',
         'version = "0.1.0"',
-        'requires_facet = ">=0.1.0"',
+        'requires_facet = ">=0.1.0b1,<0.2"',
         "protocol = 1",
         'provider = "test"',
         'tool_name = "Test"',
@@ -778,6 +778,28 @@ def _mark_tier(root: Path, group: str, tier: str) -> None:
         'facet = "image"', f'facet = "image"\ntier_group = "{group}"\ntier = "{tier}"'
     )
     (directory / "package.toml").write_text(text, encoding="utf-8")
+
+
+def test_pull_skipped_package_reports_machine_cannot_and_upgrade(
+    ahead_registry: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(ahead_registry))
+    code = main(["pull", "ahead", "--json"])
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert code == EXIT_MACHINE_CANNOT
+    assert error["code"] == "machine_cannot"
+    assert error["details"] == {"package": "ahead", "requires_facet": ">=9"}
+    assert error["hint"] == "run uv tool upgrade facetmedia"
+
+
+def test_pull_human_output_announces_each_skipped_package_once(
+    ahead_registry: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(ahead_registry))
+    set_machine(monkeypatch, gpu_mib=None, ram_gb=8.0)
+    assert main(["pull", "text", "--plan"]) == 0
+    output = capsys.readouterr().out
+    assert output.count("skipped ahead: needs facet >=9; run uv tool upgrade facetmedia") == 1
 
 
 def test_pull_with_nothing_fitting_is_machine_cannot(use_registry, monkeypatch, capsys) -> None:

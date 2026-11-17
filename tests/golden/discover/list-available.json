@@ -30,7 +30,7 @@
           "summary": "A capability from the future."
         }
       ],
-      "compatible": false,
+      "compatible": true,
       "env_bytes": 0,
       "facet": "text",
       "installed": false,

@@ -1,4 +1,5 @@
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -6,7 +7,31 @@ import pytest
 
 from tests.registry_server import FakeGitHub
 
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "registry"
 HEAVY_REASON = "needs network and real models; run with FACET_HEAVY=1"
+
+
+@pytest.fixture
+def ahead_registry(tmp_path: Path) -> Path:
+    """A registry with a future facet, label and otherwise unknown package."""
+    root = tmp_path / "ahead-registry"
+    shutil.copytree(FIXTURE_ROOT, root)
+    index = root / "index.toml"
+    with index.open("a", encoding="utf-8") as handle:
+        handle.write(
+            '\n[facets.hologram]\nlabel = "Hologram"\n'
+            '[facets.hologram.i18n.es]\nlabel = "Holograma"\n'
+            '\n[[packages]]\nname = "ahead"\n'
+        )
+    package = root / "packages" / "ahead"
+    package.mkdir()
+    (package / "package.toml").write_text(
+        'name = "ahead"\nrequires_facet = ">=9"\nfacet = "hologram"\n'
+        '[capabilities.future]\nkind = "hologram"\nunknown = true\n'
+        "[future.section]\nunknown = true\n",
+        encoding="utf-8",
+    )
+    return root
 
 
 def pytest_configure(config: pytest.Config) -> None:

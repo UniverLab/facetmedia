@@ -24,6 +24,7 @@ from rich.table import Table
 from facetmedia import config, env, lock, probes, theme
 from facetmedia.contract import FacetError, emit, ok
 from facetmedia.home import Home
+from facetmedia.introspect import announce_skipped
 from facetmedia.progress import Progress, announce_failure, one_line
 from facetmedia.pull_summary import PullSummary
 from facetmedia.registry import load_active_registry
@@ -82,6 +83,16 @@ class PlanEntry:
         }
 
 
+def _skipped_error(registry: Registry, name: str) -> FacetError:
+    skipped = next(package for package in registry.skipped if package.name == name)
+    return FacetError(
+        "machine_cannot",
+        f"package {name} needs facet {skipped.requires_facet}",
+        hint="run uv tool upgrade facetmedia",
+        details={"package": name, "requires_facet": skipped.requires_facet},
+    )
+
+
 def resolve(registry: Registry, names: list[str], packages: list[str]) -> list[Package]:
     """The packages a pull names: facets or packages, ``--package`` explicit."""
     if names and packages:
@@ -105,6 +116,8 @@ def resolve(registry: Registry, names: list[str], packages: list[str]) -> list[P
     for name in packages:
         package = registry.package(name)
         if package is None:
+            if any(skipped.name == name for skipped in registry.skipped):
+                raise _skipped_error(registry, name)
             raise FacetError(
                 "invalid_input",
                 f"unknown package: {name}",
@@ -133,6 +146,8 @@ def _from_name(registry: Registry, name: str) -> list[Package]:
         return [package for package in registry.packages.values() if package.facet == name]
     package = registry.package(name)
     if package is None:
+        if any(skipped.name == name for skipped in registry.skipped):
+            raise _skipped_error(registry, name)
         raise FacetError(
             "invalid_input",
             f"unknown facet or package: {name}",
@@ -292,6 +307,8 @@ def handle_pull(args: argparse.Namespace) -> int:
     """``facet pull``: one package as today, or a planned facet."""
     registry = load_active_registry()
     home = Home.from_env()
+    if not bool(getattr(args, "json", False)):
+        announce_skipped(registry.skipped)
     names = list(getattr(args, "names", ()) or ())
     packages = list(getattr(args, "package", ()) or ())
     if not names and not packages:

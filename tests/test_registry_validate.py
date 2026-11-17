@@ -16,7 +16,7 @@ MIN_BROKEN_PROBLEMS = 3
 
 MANIFEST_TEMPLATE = """name = "missing"
 version = "0.1.0"
-requires_facet = ">=0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "test"
 tool_name = "Test"
@@ -127,6 +127,24 @@ def test_validate_clean_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert envelope["ok"] is True
     assert envelope["data"]["valid"] is True
     assert envelope["data"]["packages"] == ["echo", "future", "termsy"]
+
+
+def test_validate_ahead_registry_reports_floor_and_unknown_index_facet(
+    ahead_registry: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["registry", "validate", str(ahead_registry), "--json"]) == EXIT_INVALID
+    envelope = json.loads(capsys.readouterr().out)
+    errors = envelope["error"]["details"]["errors"]
+    found = {(item["file"], item["key"], item["problem"]) for item in errors}
+    assert (
+        "packages/ahead/package.toml",
+        "requires_facet",
+        "needs facet >=9",
+    ) in found
+    assert ("index.toml", "facets.hologram", "unknown to facet 0.1.0b1") in found
+    assert not any(item["key"] == "facet" for item in errors)
+    assert not any(item["key"] == "capabilities.future.kind" for item in errors)
+    assert not any(item["key"] == "future.section" for item in errors)
 
 
 def test_validate_broken_exit_2() -> None:

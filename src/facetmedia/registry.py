@@ -62,8 +62,8 @@ PROBE_VERB_RE: re.Pattern[str] = re.compile(r"""@runner\.verb\(\s*['"]probe['"]\
 RUNNER_VERB_KEY: str = "runner.verb"
 
 
-def _load(root: Path) -> tuple[Registry | None, list[Problem]]:
-    loader = RegistryLoader(root)
+def _load(root: Path, *, strict: bool = False) -> tuple[Registry | None, list[Problem]]:
+    loader = RegistryLoader(root, strict=strict)
     registry = loader.load()
     return registry, sorted(loader.problems)
 
@@ -96,7 +96,7 @@ def validate_registry(path: Path) -> list[dict[str, str]]:
     """Return every problem in the registry at ``path``, sorted, never raising."""
 
     root = Path(path)
-    registry, problems = _load(root)
+    registry, problems = _load(root, strict=True)
     found = [*problems, *_package_file_problems(root, registry)]
     return [problem.as_dict() for problem in sorted(found)]
 
@@ -113,9 +113,11 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
     # is broken: their names do not depend on the manifest. The entry and the
     # viewers are only known from a valid manifest, so those are checked for
     # loaded packages alone.
+    skipped = {package.name for package in registry.skipped} if registry is not None else set()
     problems = [
         Problem(f"packages/{directory.name}/{name}", "", "missing")
         for directory in _package_dirs(root)
+        if directory.name not in skipped
         for name in ("pyproject.toml", "uv.lock")
         if not (directory / name).is_file()
     ]
@@ -125,7 +127,7 @@ def _package_file_problems(root: Path, registry: Registry | None) -> list[Proble
         package.name
         for package in registry.packages.values()
         if package.engine_type in {"node", "host-app", "binary"}
-    }
+    } | skipped
     if envless:
         # A node package has no python environment, a host-app package has no
         # environment at all, and a binary package's files come from its

@@ -15,6 +15,7 @@ import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
 
+from facetmedia import __version__
 from facetmedia.registry_types import FACETS, FacetLabel
 
 if TYPE_CHECKING:
@@ -100,7 +101,8 @@ def read_facets(
     for name in sorted(raw):
         item = raw[name]
         if name not in FACETS:
-            loader.add(file, f"facets.{name}", f"value: one of {', '.join(FACETS)}")
+            if loader.strict:
+                loader.add(file, f"facets.{name}", f"unknown to facet {__version__}")
             continue
         if not isinstance(item, dict):
             loader.add(file, f"facets.{name}", "type")

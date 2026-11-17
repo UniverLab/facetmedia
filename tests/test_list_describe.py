@@ -80,14 +80,38 @@ def test_list_and_describe_report_vram_gb(
     assert _data(capsys)["requirements"]["vram_gb"] == 0.0
 
 
-def test_the_future_fixture_is_incompatible(
+def test_available_list_omits_ahead_package_and_announces_upgrade(
+    ahead_registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(ahead_registry))
+    assert main(["list", "--available"]) == 0
+    output = capsys.readouterr().out
+    assert "  ahead  " not in output
+    assert output.count("skipped ahead: needs facet >=9; run uv tool upgrade facetmedia") == 1
+
+
+def test_available_list_json_omits_skipped_package_without_new_envelope_key(
+    ahead_registry: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FACET_REGISTRY", str(ahead_registry))
+    assert main(["list", "--available", "--json"]) == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert {row["name"] for row in envelope["data"]["packages"]} == {
+        "echo",
+        "future",
+        "termsy",
+    }
+    assert "skipped" not in envelope["data"]
+
+
+def test_the_future_fixture_is_compatible(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _registry(monkeypatch)
     assert main(["list", "--available", "--json"]) == 0
     rows = _data(capsys)["packages"]
     by_name = {row["name"]: row for row in rows}
-    assert by_name["future"]["compatible"] is False
+    assert by_name["future"]["compatible"] is True
     assert by_name["echo"]["compatible"] is True
     assert by_name["termsy"]["compatible"] is True
 

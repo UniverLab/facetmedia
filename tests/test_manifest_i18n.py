@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from facetmedia.registry import load_registry
+from facetmedia.registry import load_registry, validate_registry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 
@@ -73,6 +73,18 @@ def test_facet_label_without_i18n_is_read(tmp_path: Path) -> None:
     loaded = load_registry(registry)
     assert loaded.facets["text"].label == "Text"
     assert loaded.facets["text"].i18n == {}
+
+
+def test_unknown_facet_label_and_i18n_are_ignored_on_user_load(ahead_registry: Path) -> None:
+    registry = load_registry(ahead_registry)
+    assert "hologram" not in registry.facets
+    assert registry.skipped[0].name == "ahead"
+
+
+def test_strict_validation_reports_unknown_facet_label(ahead_registry: Path) -> None:
+    problems = validate_registry(ahead_registry)
+    found = {(item["file"], item["key"], item["problem"]) for item in problems}
+    assert ("index.toml", "facets.hologram", "unknown to facet 0.1.0b1") in found
 
 
 def test_facets_absent_is_empty(tmp_path: Path) -> None:

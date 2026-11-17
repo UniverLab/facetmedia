@@ -17,6 +17,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from facetmedia.manifest.binary import read_binary
+from facetmedia.manifest.compat import leaves_out
 from facetmedia.manifest.ffmpeg import read_ffmpeg
 from facetmedia.manifest.field import check_default, check_field_options, read_multiple_of
 from facetmedia.manifest.host import read_host_app
@@ -43,6 +44,7 @@ from facetmedia.registry_types import (
     Registry,
     Requirements,
     Server,
+    SkippedPackage,
     Source,
 )
 
@@ -213,10 +215,12 @@ _FIELD_KEYS: Final[frozenset[str]] = frozenset(
 class RegistryLoader:
     """Collects every problem instead of stopping at the first one."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, strict: bool = False) -> None:
         self.root = root
+        self.strict = strict
         self.problems: list[Problem] = []
         self.model_ids: dict[str, str] = {}
+        self.skipped: list[SkippedPackage] = []
 
     def add(self, file: str, key: str, problem: str) -> None:
         found = Problem(file, key, problem)
@@ -328,13 +332,13 @@ class RegistryLoader:
         for name in self.index_packages(index):
             file = f"packages/{name}/package.toml"
             data = self.read_toml(file)
-            if data is None:
+            if data is None or leaves_out(self, name, file, data):
                 continue
             package = self.package(name, file, data)
             if package is not None:
                 packages[name] = package
         self.duplicate_tiers(packages)
-        return Registry(self.root, version, packages, facets)
+        return Registry(self.root, version, packages, facets, tuple(sorted(self.skipped)))
 
     def duplicate_tiers(self, packages: Mapping[str, Package]) -> None:
         """Every ``tier`` is unique within its ``tier_group``."""

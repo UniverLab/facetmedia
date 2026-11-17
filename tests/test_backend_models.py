@@ -507,7 +507,7 @@ def test_manifest_rejects_a_backend_model_with_a_source(tmp_path: Path) -> None:
     (pkg_dir / "package.toml").write_text(
         """name = "pkg"
 version = "0.1.0"
-requires_facet = ">=0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "test"
 tool_name = "Test"
@@ -558,7 +558,7 @@ def test_manifest_requires_terms_url_for_a_gated_backend_model(tmp_path: Path) -
     (pkg_dir / "package.toml").write_text(
         """name = "pkg"
 version = "0.1.0"
-requires_facet = ">=0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
 protocol = 1
 provider = "test"
 tool_name = "Test"
