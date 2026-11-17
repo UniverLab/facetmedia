@@ -1033,6 +1033,10 @@ $ facet registry validate ../facetmedia-registry --json
 
 A clean registry prints nothing and exits 0 — no news is the clean news.
 Problems print to stderr as `file: key: problem`, and with `--json` the
-same list is in `details.errors`. Lock: none.
+same list is in `details.errors`. Unlike the user commands, which skip what
+they cannot load, validate stays strict: a package needing a newer facet is
+reported as `package.toml: requires_facet: needs facet ...`, and an unknown
+facet label table as `index.toml: facets.<name>: unknown to facet ...`.
+Lock: none.
 
 Exit codes: `0` clean; `2` problems found.
