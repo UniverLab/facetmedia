@@ -691,8 +691,58 @@ environment, verifies every asset, and writes the records.
 Flags: `--out DIR` (default: the piece's directory), `--no-verify`,
 `--no-pull` (fail `not_installed` instead of pulling an absent or changed
 package), `--timeout SECONDS` (kill the runner's process group),
-`--ephemeral` (install for this run, remove the environment after), and
+`--ephemeral` (install for this run, remove the environment after),
+`--dry-run` and `--yes` (outward capabilities only, see below), and
 `-v`/`--verbose`.
+
+### An outward capability
+
+A capability of kind `post` is outward: it sends the piece out rather than
+writing a file. Two flags shape a run of one, and both are refused on any
+other capability with `invalid_input` (exit 2):
+
+- `--dry-run` calls the runner's `dry-run` verb. It sends nothing, writes
+  nothing into the output folder, and shows what would be sent per post: the
+  rendered text, the media, the target account, warnings (the network's
+  length, a link that raises the cost) and the runner's cost estimate. At a
+  terminal it prints those lines; with `--json` it is `data.preview` and
+  `data.dry_run: true`.
+- `--yes` sends without asking. Without it, a run at a terminal shows the
+  dry-run preview and asks; anything but yes prints `nothing sent` and exits
+  `0`. With `--json` or without a terminal it fails with
+  `confirmation_required` (exit 11) and the preview in `error.details`.
+  No other flag or setting implies `--yes`.
+
+A real outward run writes a **receipt** beside the piece's other outputs —
+`<piece>.post.json`, or `<capability>.post.json` for a piece read from
+stdin — and its record, exactly like any other asset:
+
+```console
+$ facet run bluesky.send talk.toml --yes
+talk.post.json talk.post passed
+out .
+```
+
+The receipt names the network, the account, the post ids and URLs, the state
+the network answered (`published`, `draft`, `private`, `scheduled`), the
+source assets with their record hashes, the cost as the runner reported it,
+and `sent_at`/`verified_at` as ISO 8601 in UTC. Verification reads the post
+back: it passes only when the state and the media count match, so a post the
+network holds as a draft is never reported as published. `--no-verify` is
+refused for an outward capability (exit 2).
+
+Before anything is confirmed or sent, a real run refuses an output folder
+that already holds its receipt: `invalid_input` (exit 2), the hint naming
+both ways to send it again on purpose — remove the receipt, or choose
+another output folder with `--out`. A dry run still renders its preview and
+adds a warning. facet never retries an outward run; when the runner reports
+that a request left but a later step failed, the receipt is kept with
+`state: "unknown"` and the error says the post may exist and where to
+check.
+
+A package that talks to a network declares its credentials (see
+[adding-a-package.md](adding-a-package.md#secrets)); the run refuses one
+whose required secret is not stored before the runner starts.
 
 An install this run does itself follows the `facet pull` rules: the live
 phase line at a terminal and the one line naming the package, its version,

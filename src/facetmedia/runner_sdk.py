@@ -46,6 +46,11 @@ class Request:
     ``doctor`` verb's requested depth, ``"quick"`` (imports, files, versions;
     about 10 s, writes nothing) or ``"full"`` (may run the tool once on a
     throwaway output; up to 30 s).
+
+    An outward capability's request also carries ``sources`` — the assets the
+    post carries, each with its record ``id`` and whether a model
+    ``generated`` it — and, for a read-back, ``post``: what the receipt
+    says the network holds.
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -58,6 +63,8 @@ class Request:
         self.out_dir: Path = Path(str(data.get("out_dir", "")))
         self.piece_dir: Path = Path(str(data.get("piece_dir", "")))
         self.assets: list[Path] = [Path(str(item)) for item in _list(data.get("assets"))]
+        self.sources: list[dict[str, Any]] = _sources(data.get("sources"))
+        self.post: dict[str, Any] = _mapping(data.get("post"))
         self._models: dict[str, Path] = {
             str(key): Path(str(value)) for key, value in _mapping(data.get("models")).items()
         }
@@ -176,6 +183,12 @@ def _mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+def _sources(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _list(value: Any) -> list[Any]:

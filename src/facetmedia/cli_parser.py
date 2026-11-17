@@ -583,6 +583,16 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="install the package for this run only, then remove its environment",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="outward capabilities only: ask what would be sent and send nothing",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="outward capabilities only: send without asking at the terminal",
+    )
     _add_verbose_flag(parser)
 
 

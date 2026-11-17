@@ -1,0 +1,58 @@
+name = "bluesky"
+version = "0.1.0"
+requires_facet = ">=0.1.0b1,<0.2"
+protocol = 1
+provider = "facet"
+tool_name = "Bluesky"
+description = "Post text with images; the outward registry fixture, no network."
+facet = "publish"
+
+[engine]
+type = "python-env"
+python = "3.12"
+
+[transport]
+type = "cli"
+entry = "runner.py"
+
+[requirements]
+gpu = false
+ram_gb = 0.1
+disk_gb = 0.01
+exclusive = false
+platforms = ["linux"]
+host_libs = []
+host_hint = ""
+
+[[licenses]]
+subject = "bluesky"
+spdx = "Apache-2.0"
+
+[[secrets]]
+name = "app-password"
+description = "The app password from the account's settings, never the login one"
+required = true
+
+[capabilities.send]
+summary = "Send text with media to the lab's brand account."
+kind = "post"
+outward = true
+
+[capabilities.send.preview]
+viewer = "generic"
+
+[capabilities.send.inputs.text]
+type = "string"
+required = true
+description = "The post's text."
+
+[capabilities.send.inputs.media]
+type = "array"
+required = true
+description = "The assets the post carries."
+min_items = 1
+
+[capabilities.send.inputs.media.items.image]
+type = "path"
+required = true
+description = "One source asset."

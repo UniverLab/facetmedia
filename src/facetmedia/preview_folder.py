@@ -52,7 +52,15 @@ STALE: Final[str] = "stale"
 MISSING: Final[str] = "missing"
 
 #: The asset kinds ``--kind`` accepts.
-KINDS: Final[tuple[str, ...]] = ("audio", "cad", "document", "image", "text", "video")
+KINDS: Final[tuple[str, ...]] = (
+    "audio",
+    "cad",
+    "document",
+    "image",
+    "post",
+    "text",
+    "video",
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,9 @@ class FolderAsset:
     preview: Mapping[str, object] | None
     asset_names: frozenset[str]
     thumb: Path | None
+    network: str | None = None
+    post_state: str | None = None
+    url: str | None = None
 
 
 def collect(folder: Path, kinds: frozenset[str] | None = None) -> tuple[FolderAsset, ...]:
@@ -151,7 +162,18 @@ def refreshed(entry: FolderAsset) -> FolderAsset:
 
 def text_table(entries: Sequence[FolderAsset], folder_name: str) -> str:
     """The requirement-3 list as a plain table, for a registry without gallery."""
-    header = ("n", "state", "kind", "verified", "bytes", "duration", "asset")
+    header = (
+        "n",
+        "state",
+        "kind",
+        "verified",
+        "bytes",
+        "duration",
+        "network",
+        "post",
+        "url",
+        "asset",
+    )
     rows = [_table_entry(entry) for entry in entries]
     widths = [max(len(row[column]) for row in (header, *rows)) for column in range(len(header))]
     lines = [f"{folder_name}/ ({len(rows)} assets)", _table_row(header, widths)]
@@ -160,7 +182,11 @@ def text_table(entries: Sequence[FolderAsset], folder_name: str) -> str:
 
 
 def _table_entry(entry: FolderAsset) -> tuple[str, ...]:
-    """One table row: the card's short fields, then its asset path."""
+    """One table row: the card's short fields, then its asset path.
+
+    A ``post`` row carries the network, the state the network holds and the
+    public URL on one line, the way every other kind shows its own fields.
+    """
     duration = f"{entry.duration_s:g}s" if entry.duration_s is not None else "-"
     return (
         str(entry.n),
@@ -169,6 +195,9 @@ def _table_entry(entry: FolderAsset) -> tuple[str, ...]:
         "yes" if entry.verified else "no",
         str(entry.bytes) if entry.bytes is not None else "-",
         duration,
+        entry.network or "-",
+        entry.post_state or "-",
+        entry.url or "-",
         entry.asset,
     )
 
@@ -179,7 +208,12 @@ def _table_row(row: tuple[str, ...], widths: list[int]) -> str:
 
 
 def _fields(entry: FolderAsset) -> dict[str, object]:
-    """The fields requirements 3 and 4 share, without the preview."""
+    """The fields requirements 3 and 4 share, without the preview.
+
+    A ``post`` adds the network, the state the network holds and its public
+    URL; every other kind reports them as ``None``, so one gallery serves
+    every kind and a consumer reads the same keys throughout.
+    """
     return {
         "asset": entry.asset,
         "kind": entry.kind,
@@ -190,6 +224,9 @@ def _fields(entry: FolderAsset) -> dict[str, object]:
         "bytes": entry.bytes,
         "duration_s": entry.duration_s,
         "preview_state": entry.state,
+        "network": entry.network,
+        "post_state": entry.post_state,
+        "url": entry.url,
     }
 
 
@@ -228,7 +265,18 @@ def _entry(folder: Path, path: Path) -> FolderAsset:
         preview=preview,
         asset_names=_asset_names(path, preview_file, preview),
         thumb=_thumb(kind, state, path, preview),
+        network=_property_text(stored, "network"),
+        post_state=_property_text(stored, "state"),
+        url=_property_text(stored, "url"),
     )
+
+
+def _property_text(stored: Mapping[str, object], key: str) -> str | None:
+    """One text property of a record, as a ``post`` keeps its network, state and URL."""
+    properties = stored.get("properties")
+    if not isinstance(properties, Mapping):
+        return None
+    return _text(properties, key)
 
 
 def _capability(stored: Mapping[str, object], path: Path) -> str:

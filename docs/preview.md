@@ -140,7 +140,7 @@ is classified, and nothing else runs.
 - `stale` — the preview file is older than the asset;
 - `missing` — there is no preview file.
 
-`--kind image|audio|video|document|text|cad` keeps one kind. A folder that
+`--kind image|audio|video|document|text|cad|post` keeps one kind. A folder that
 holds no assets — after the filter — is `invalid_input`, exit 2, and the
 message names the folder.
 
@@ -171,7 +171,10 @@ facet id of the record's package in the active registry snapshot, null when
 the snapshot names no such package or cannot be read at all — it is that
 id, not the facet version the envelope's own `facet` key carries; `verified`
 is true only when the record's check passed; `preview` is the parsed preview
-file for a fresh asset and null otherwise.
+file for a fresh asset and null otherwise. `network`, `post_state` and `url`
+come from the record's properties, so a `post` receipt shows the network, the
+state the network holds and its public URL on one line; every other kind
+reports them as null.
 
 ### The gallery
 

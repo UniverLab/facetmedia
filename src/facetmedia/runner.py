@@ -54,6 +54,8 @@ __all__ = [
     "model_paths",
     "parse_run_result",
     "parse_verify_result",
+    "with_post",
+    "with_sources",
 ]
 
 logger = logging.getLogger("facetmedia")
@@ -342,6 +344,26 @@ def make_request(
         "models": {key: str(models[key]) for key in sorted(models)},
         "assets": listed,
     }
+
+
+def with_sources(
+    request: dict[str, object], sources: Sequence[Mapping[str, object]]
+) -> dict[str, object]:
+    """Add the assets an outward capability carries to a request, and return it.
+
+    Each source names the asset, the record hash facet hashed and whether a
+    model generated it; an empty list leaves the request exactly as it was.
+    """
+    if sources:
+        request["sources"] = [dict(source) for source in sources]
+    return request
+
+
+def with_post(request: dict[str, object], post: Mapping[str, object] | None) -> dict[str, object]:
+    """Add the facts a read-back needs to a request, and return it."""
+    if post is not None:
+        request["post"] = dict(post)
+    return request
 
 
 def runner_env(home: Home, package: Package) -> dict[str, str]:

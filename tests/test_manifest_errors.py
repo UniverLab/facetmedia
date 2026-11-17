@@ -88,7 +88,7 @@ CASES = [
     pytest.param(
         BASE.replace('facet = "text"', 'facet = "song"'),
         "facet",
-        "value: one of voice, audio, image, video, cad, text, presentation",
+        "value: one of voice, audio, image, video, cad, text, presentation, publish",
         id="facet-unknown",
     ),
     pytest.param(
@@ -611,7 +611,7 @@ FACET_INDEX_CASES = [
     pytest.param(
         '[facets.song]\nlabel = "Song"\n',
         "facets.song",
-        "value: one of voice, audio, image, video, cad, text, presentation",
+        "value: one of voice, audio, image, video, cad, text, presentation, publish",
         id="facet-name",
     ),
     pytest.param("[facets.text]\n", "facets.text.label", "required", id="facet-label-missing"),

@@ -111,6 +111,79 @@ An unhealthy `facet doctor` is the one envelope that reports `ok:false`
 **with** `data` and no `error`: `data.healthy` is `false`, and the exit
 code is the first failing class.
 
+### An outward run: dry run, yes, and the receipt
+
+A capability of kind `post` is **outward**: it sends a request out instead
+of writing a file. The network may keep the post as a draft or private, and
+the request cannot be undone and may cost money, so the envelope carries
+four additions and nothing else changes for a file capability.
+
+`facet run <piece> --dry-run` calls the runner's `dry-run` verb, which sends
+nothing and writes nothing into the output folder. `data.dry_run` is `true`
+and `data.preview` is what would be sent: one entry per post with its
+`text`, `account`, `media`, `warnings` and the runner's `cost` estimate
+(`null` when the network does not charge). `data.assets` is absent.
+
+A real outward run needs `--yes`. At a terminal without it, facet shows the
+dry-run preview and asks; anything but yes prints `nothing sent` and exits
+`0`, as a declined `facet pull` does. With `--json` or without a terminal it
+fails with `confirmation_required` (exit 11), `details.preview` carrying the
+same preview. `--yes` is never implied by another flag or setting.
+`data.sent` is `false` for a declined run.
+
+Before any confirmation or runner call, a real outward run checks whether the
+receipt it would write already exists in the output folder — the
+**receipt-exists rule**. If it does, the run fails with `invalid_input`
+(exit 2): `details.receipt` is the path, and the hint says the piece was
+already sent and how to send it again on purpose (remove the receipt, or
+choose another output folder with `--out`). A dry run in that situation still
+prints its preview and adds a warning about the receipt. The rule applies to
+outward capabilities only; other capabilities keep their behaviour.
+
+A real outward run's envelope carries one entry in `data.assets` with
+`kind: "post"`, and the receipt is that asset. `data.sent` is `true` for a
+real run and absent for a dry run:
+
+```jsonc
+{
+  "receipt": 1,                       // receipt format version
+  "network": "bluesky",               // the network, as the runner named it
+  "account": "lab.test",              // the account that sent it
+  "state": "published",               // published | draft | private | scheduled | unknown
+  "posts": [{"id": "at://…", "url": "https://…"}],
+  "sources": [                        // the assets the post carried
+    {"path": "card.png", "id": "sha256:…", "generated": false}
+  ],
+  "cost": {"amount": "0", "currency": "USD"},   // as the runner reported it; null when free
+  "sent_at": "2026-11-17T19:44:03Z",  // ISO 8601, UTC
+  "verified_at": "2026-11-17T19:44:03Z"         // null when no read-back happened
+}
+```
+
+The receipt's file name comes from the piece, never from the run id: the
+piece `talk.toml` writes `talk.post.json` beside its other outputs (a piece
+read from stdin uses the capability's short name). `sources[].generated` is
+derived from the source's own record: a non-empty `provenance.models` list
+means a model generated it, and a source without a record is not generated.
+`cost` is passed through without interpretation. The receipt is recorded like
+any asset, with `verification.metrics` carrying the read-back's `state` and
+`media` count.
+
+A real outward run is never retried by facet. Once the runner reports that a
+request left, facet keeps the receipt even if a later step fails: the receipt
+then carries `state: "unknown"` and `verified_at: null`, and the error says
+the post may exist and where to check (`details.urls`). That includes a `run`
+verb that exits 0 but answers outside the protocol: the receipt facet writes
+still exists, so the receipt-exists rule can refuse a second send, and it
+says only `unknown` — the package's name as the network and the account the
+dry run named, because the runner said nothing facet could read.
+
+Verification of a `post` asset reads the post back from the network. It
+passes only when the state read back equals the receipt's state and the media
+count matches, so facet never reports `published` for a post the network
+holds as a draft or private. `--no-verify` is refused for an outward
+capability with `invalid_input` (exit 2).
+
 ### Exit codes
 
 Branch on the exit code without parsing prose:
@@ -119,8 +192,8 @@ Branch on the exit code without parsing prose:
 |------|------|------|
 | (success) | 0 | |
 | `internal` | 1 | unexpected error; the traceback goes to the run log under `~/.facet/logs/<YYYY-MM-DD>/`, and `message`/`details.log` name the file |
-| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate`, a `run` asset that would overwrite one of the run's inputs |
-| `verification_failed` | 3 | the asset was made but its check did not pass |
+| `invalid_input` | 2 | bad arguments, a piece file that fails validation, an unknown capability, a registry checkout that fails `facet registry validate`, a `run` asset that would overwrite one of the run's inputs, `--dry-run` or `--yes` on a capability that is not outward, `--no-verify` on one that is, and a real outward run whose receipt already exists |
+| `verification_failed` | 3 | the asset was made but its check did not pass; for a `post`, the state the network holds is not the state the receipt reports |
 | `license_not_accepted` | 4 | a model needs a person's acceptance that is not recorded |
 | `machine_cannot` | 5 | the machine or facet's own health does not meet the requirements (RAM, disk, platform, a failing `facet doctor` check), or a `run` whose package needs a required secret that is not stored |
 | `lock_busy` | 6 | the lock is held and `--no-wait` was given, or the wait timed out |
@@ -128,7 +201,7 @@ Branch on the exit code without parsing prose:
 | `download_failed` | 8 | a model, environment, server or source, or registry download failed, or its sha256 did not match |
 | `runner_failed` | 9 | the package runner crashed or broke the runner protocol |
 | `license_needs_person` | 10 | `license accept` was run without an interactive terminal |
-| `confirmation_required` | 11 | a pull installs more than one package and no interactive terminal can confirm it; rerun with `--yes` |
+| `confirmation_required` | 11 | a pull installs more than one package and no interactive terminal can confirm it; a real outward `run` without `--yes` and without an interactive terminal. Rerun with `--yes` once the preview is what you meant to send; `details.preview` carries it |
 | — | 130 | interrupted with Ctrl+C; prints `cancelled`, and installs or records nothing that had not already completed |
 
 Bad arguments exit 2 and, with `--json`, still print an `invalid_input`
@@ -146,7 +219,7 @@ for the same reason. Annotations in `⟨…⟩`.
   "record": 1,                        // record format version — this document
   "id": "sha256:615f1b28…",           // "sha256:" + the asset's digest; the asset's name
   "name": "intro",                    // the asset's base name, as a piece named it
-  "kind": "audio",                    // the capability's kind
+  "kind": "audio",                    // the capability's kind; "post" for a receipt
   "mime": "audio/wav",
   "bytes": 12,                        // size of the asset
   "created": "2026-10-23T01:02:03Z",  // UTC, when the record was written

@@ -202,7 +202,7 @@ def test_manifest_missing_facet_is_rejected(tmp_path: Path) -> None:
 
 def test_manifest_unknown_facet_names_the_allowed_values(tmp_path: Path) -> None:
     manifest = MANIFEST.replace('facet = "voice"', 'facet = "song"')
-    allowed = "value: one of voice, audio, image, video, cad, text, presentation"
+    allowed = "value: one of voice, audio, image, video, cad, text, presentation, publish"
     assert ("packages/pkg/package.toml", "facet", allowed) in _problems(manifest, tmp_path)
 
 

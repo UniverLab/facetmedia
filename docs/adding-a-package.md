@@ -476,6 +476,99 @@ The build itself is GPL-3.0: `facet describe` and run records list it
 through the package's own `[[licenses]]`, the way every dependency
 licence is declared there.
 
+## An outward capability
+
+A capability of kind `post` sends something out — a post on the lab's brand
+account — instead of writing a file. It is the one kind that must declare
+`outward = true`, and an outward capability must be kind `post`;
+`facet registry validate` rejects either half alone:
+
+```toml
+[capabilities.send]
+summary = "Send text with images to the lab's brand account."
+kind = "post"
+outward = true
+```
+
+The post is irreversible, may cost money and may stay a draft, so facet
+keeps the guarantees in [contract.md](contract.md#an-outward-run-dry-run-yes-and-the-receipt)
+and the package only speaks to its network. It declares three verbs:
+
+- **`dry-run`** sends nothing. For each post it answers the rendered
+  `text`, the target `account`, the `media` paths, its `warnings` and the
+  `cost` estimate (`{"amount", "currency"}`, or `null` when the network does
+  not charge):
+
+  ```python
+  @runner.verb("dry-run")
+  def dry_run(req: Request) -> dict:
+      return {
+          "posts": [
+              {"text": text, "account": account, "media": media, "warnings": warnings, "cost": cost}
+          ],
+          "warnings": [],
+      }
+  ```
+
+- **`run`** sends once and reports what the network answered. It returns the
+  usual `tool` plus a `post` object, and no `assets` of its own: facet writes
+  the receipt.
+
+  ```python
+  @runner.verb("run")
+  def run(req: Request) -> dict:
+      return {
+          "tool": {"name": "bluesky", "version": "0.1.0"},
+          "post": {
+              "network": "bluesky",
+              "account": account,
+              "state": "published",  # published|draft|private|scheduled
+              "posts": [{"id": post_id, "url": public_url}],
+              "cost": {"amount": "0", "currency": "USD"},
+          },
+      }
+  ```
+
+- **`verify`** re-reads the post and answers what the network holds now. It
+  passes only when that equals the receipt:
+
+  ```python
+  @runner.verb("verify")
+  def verify(req: Request) -> dict:
+      # req.post names the receipt's network, account, state and posts.
+      return {"state": read_state(), "media": read_media()}
+  ```
+
+The **receipt** facet writes is `<piece>.post.json`: `network`, `account`,
+`state`, `posts`, `sources`, `cost`, `sent_at` and `verified_at`. `sources`
+carries each asset the post carried with its record `id` and `generated`,
+which facet derives from the source's own record — a non-empty
+`provenance.models` list means a model made it, and a source with no record
+is not generated. The `dry-run` and `run` requests carry those `sources`, so
+a network with a disclosure flag sets it from `generated` without asking the
+agent; `verify` carries them plus `post`.
+
+Because the post may go out even when a later step fails, the runner must
+report `run` **only** once the request left: facet keeps the receipt then,
+seals it to `unknown`, and never retries. A `verify` that cannot reach the
+network raises, and facet reports the post as unknown instead of guessing.
+
+### The credential check in `doctor`
+
+An outward package declares its credentials (see [Secrets](#secrets)) and
+reads them through the SDK, so a run refuses a missing one before anything
+leaves. Its `doctor` repeats the same question, so a person sees it before a
+piece: a `quick` check that the credential is present, named the way a run
+names it, with the fix a person runs.
+
+### Authentication in the skill
+
+Every publish skill carries an **authentication** section: what to create in
+the network's account settings, which `facet secret set` or `facet auth`
+command stores it, and that a person runs it in their own terminal — an
+agent never asks for a secret in the conversation and never passes one on a
+command line. `facet doctor <capability>` says whether it is set.
+
 ## The document kind
 
 Long written documents — the texforge thesis, articles, reports — are a
@@ -855,12 +948,13 @@ Each capability is `[capabilities.<name>]`, its id is
 ```toml
 [capabilities.strip]
 summary = "One line, shown by facet list and describe."
-kind = "text"   # audio | video | image | cad | presentation | text | document
+kind = "text"   # audio | video | image | cad | presentation | text | document | post
 ```
 
 `kind` is the asset the capability writes; it alone picks the preview
 schema and the viewer (`textured` tools make `text`; long written
-documents make [`document`](#the-document-kind)).
+documents make [`document`](#the-document-kind); a network post makes
+[`post`](#an-outward-capability), which is the one outward kind).
 
 The `summary` is English and required: it is the default every surface
 shows. A capability may add localized summaries in

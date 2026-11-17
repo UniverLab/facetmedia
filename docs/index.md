@@ -187,14 +187,16 @@ An agent learns facet from facet itself:
 $ facet skill
 ---
 name: facet
-description: Make images, audio, voice, video, cad, text and presentations with facet's isolated packages.
+description: Make images, audio, voice, video, cad, text, presentations and published posts with facet's isolated packages.
 ---
 # Facet
 
 Facet makes things through isolated packages. Each package declares one
 **facet** (its domain: `voice`, `audio`, `image`, `video`, `cad`, `text`,
-`presentation`) and one or more capabilities named `<package>.<name>`.
-A capability's **kind** is the asset it writes (…); it picks the viewer.
+`presentation`, `publish`) and one or more capabilities named
+`<package>.<name>`.
+A capability's **kind** is the asset it writes (`audio`, `text`, `cad`,
+`post`, ...); it picks the viewer.
 A package's **weight** is derived, never declared: `light` runs anywhere,
 `cpu-heavy` needs the machine to itself, `gpu` needs a GPU.
 

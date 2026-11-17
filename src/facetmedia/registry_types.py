@@ -26,7 +26,7 @@ DEFAULT_INVOCATION_TEMPLATE: Final[str] = (
 )
 
 CAPABILITY_KINDS: Final[frozenset[str]] = frozenset(
-    {"audio", "video", "image", "cad", "presentation", "text", "document"}
+    {"audio", "video", "image", "cad", "presentation", "text", "document", "post"}
 )
 FACETS: Final[tuple[str, ...]] = (
     "voice",
@@ -36,6 +36,7 @@ FACETS: Final[tuple[str, ...]] = (
     "cad",
     "text",
     "presentation",
+    "publish",
 )
 WEIGHT_LIMIT: Final[int] = 100_000_000
 FIELD_TYPES: Final[frozenset[str]] = frozenset(
@@ -252,6 +253,7 @@ class Capability:
     viewer: str = "generic"
     models: tuple[str, ...] | None = None
     verify_uses_server: bool = False
+    outward: bool = False
     i18n: Mapping[str, str] = dc_field(default_factory=dict)
 
     def input(self, name: str) -> Field | None:

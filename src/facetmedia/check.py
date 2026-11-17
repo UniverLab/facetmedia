@@ -14,12 +14,13 @@ package's quick doctor, through ``doctor.requirement_errors``.
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
 from facetmedia import env as env_module
-from facetmedia import record, runner
+from facetmedia import post, record, runner
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import Capability, Package, load_active_registry
@@ -83,7 +84,9 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
     params: dict[str, object] = dict(params_value)
     asset_path = _asset_path(asset)
     params = _relative_to_asset(params, asset_path.parent)
-    verdict = _verify_asset(package, home, env_dir, run_id, capability_id, params, asset_path)
+    verdict = _post_verdict(
+        package, home, capability_id, stored, asset_path, run_id
+    ) or _verify_asset(package, home, env_dir, run_id, capability_id, params, asset_path)
     recorded = stored.get("verification")
     recorded_metrics: dict[str, object] = {}
     if isinstance(recorded, dict):
@@ -103,6 +106,90 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
         },
     }
     return data, 0 if verdict.passed else 3
+
+
+def _post_verdict(
+    package: Package,
+    home: Home,
+    capability_id: str,
+    stored: Mapping[str, object],
+    asset_path: Path,
+    run_id: str,
+) -> runner.VerifyResult | None:
+    """A ``post`` asset's verdict: the network read back and judged honestly.
+
+    ``None`` for any other kind, so a file capability keeps today's path.  A
+    ``post`` is never compared to its own bytes alone: the network holds the
+    truth, so facet reads it back and passes only when the receipt matches.
+    """
+    if stored.get("kind") != post.RECEIPT_KIND:
+        return None
+    receipt = _receipt_of(asset_path)
+    _require_installed(package, home)
+    return _read_back_post(package, home, run_id, capability_id, receipt, asset_path)
+
+
+def _receipt_of(asset_path: Path) -> dict[str, object]:
+    try:
+        loaded: object = json.loads(asset_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise FacetError("invalid_input", f"{asset_path}: the receipt is not JSON") from exc
+    if not isinstance(loaded, dict):
+        raise FacetError("invalid_input", f"{asset_path}: the receipt is not a JSON object")
+    return {str(key): value for key, value in loaded.items()}
+
+
+def _read_back_post(
+    package: Package,
+    home: Home,
+    run_id: str,
+    capability_id: str,
+    receipt: Mapping[str, object],
+    asset_path: Path,
+) -> runner.VerifyResult:
+    """The runner's read-back of one post, judged against its receipt."""
+    temp_dir = home.tmp_dir / f".facet-check-post-{run_id}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        capability = next((item for item in package.capabilities if item.id == capability_id), None)
+        invocation = runner.Invocation(
+            package,
+            home,
+            home.env_dir(package.name, package.version),
+            temp_dir,
+            run_id,
+            VERIFY_TIMEOUT_S,
+            capability is not None and capability.verify_uses_server,
+        )
+        models = runner.model_paths(package, home)
+        request = runner.with_post(
+            runner.with_sources(
+                runner.make_request(
+                    "verify",
+                    capability_id,
+                    {},
+                    temp_dir,
+                    asset_path.parent,
+                    models,
+                ),
+                _carried(receipt),
+            ),
+            post.post_section(receipt),
+        )
+        outcome = runner.call(invocation, "verify", request)
+        measured = post.parse_read_back(outcome.result, temp_dir)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    thresholds = capability.thresholds if capability is not None else {}
+    return post.verdict(receipt, measured, thresholds)
+
+
+def _carried(receipt: Mapping[str, object]) -> list[dict[str, object]]:
+    """The receipt's source assets, which the read-back request repeats."""
+    sources = receipt.get("sources")
+    if not isinstance(sources, list):
+        return []
+    return [dict(item) for item in sources if isinstance(item, Mapping)]
 
 
 def _require_installed(package: Package, home: Home) -> None:

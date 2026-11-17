@@ -1,14 +1,15 @@
 ---
 name: facet
-description: Make images, audio, voice, video, cad, text and presentations with facet's isolated packages.
+description: Make images, audio, voice, video, cad, text, presentations and published posts with facet's isolated packages.
 ---
 # Facet
 
 Facet makes things through isolated packages. Each package declares one
 **facet** (its domain: `voice`, `audio`, `image`, `video`, `cad`, `text`,
-`presentation`) and one or more capabilities named `<package>.<name>`.
+`presentation`, `publish`) and one or more capabilities named
+`<package>.<name>`.
 A capability's **kind** is the asset it writes (`audio`, `text`, `cad`,
-...); it picks the viewer. A package's **weight** is derived, never
+`post`, ...); it picks the viewer. A package's **weight** is derived, never
 declared: `light` runs anywhere, `cpu-heavy` needs the machine to itself,
 `gpu` needs a GPU.
 
@@ -90,6 +91,32 @@ Branch on the exit code, not the prose:
 | 8 | `download_failed` | a download failed or its sha256 did not match |
 | 9 | `runner_failed` | the package runner crashed or broke its protocol |
 | 10 | `license_needs_person` | `license accept` without a terminal |
+| 11 | `confirmation_required` | a real outward `run` without `--yes` and no terminal to ask |
+
+## Publish
+
+A capability of kind `post` is **outward**: it sends the piece to the lab's
+brand account instead of writing a file. It cannot be undone, may cost money,
+and the network may keep it as a draft or private. Follow these rules:
+
+- **Dry run first.** `facet run <capability> <piece> --dry-run` sends
+  nothing; show the person its preview (the text, the media, the target
+  account, the warnings and the cost) before anything else.
+- **`--yes` only when the post is meant to go out.** Without it, a real run
+  at a terminal asks; with `--json` or no terminal it fails with
+  `confirmation_required` (exit 11). Never imply it from another flag.
+- **Never twice by accident.** A real run refuses an output folder whose
+  receipt already exists with `invalid_input` (exit 2): tell the person both
+  ways to send it again on purpose — remove the receipt, or use `--out` for
+  another output folder.
+- **Report the state as it is.** The receipt's `state` is what the network
+  really holds. Read it (`published`, `draft`, `private`, `scheduled`,
+  `unknown`) and report exactly that; never call a draft or a private post
+  published. `facet check <receipt>` reads it back.
+- **Credentials are the person's.** Tell them what to create in the account
+  and which `facet secret set <package> <name>` or `facet auth <package>` to
+  run — in their own terminal. Never ask for a secret in the conversation and
+  never pass one to `facet secret set` yourself; check with `facet doctor`.
 
 ## Fix
 

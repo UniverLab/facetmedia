@@ -18,7 +18,7 @@ Error codes and exit codes (exhaustive for v0.1):
 | ``download_failed``  | 8    | a download failed or its sha256 did not match               |
 | ``runner_failed``    | 9    | the package runner crashed or broke the runner protocol     |
 | ``license_needs_person`` | 10 | ``license accept`` run without an interactive terminal     |
-| ``confirmation_required`` | 11 | a multi-package pull needs a person's ``y``, none can be asked |
+| ``confirmation_required`` | 11 | a pull or a real outward run needs a person's ``y`` |
 """
 
 from __future__ import annotations

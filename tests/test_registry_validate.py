@@ -233,14 +233,19 @@ def _inline_viewer(root: Path, name: str) -> None:
 
 
 def _manifest_with_capability(kind: str, *, preview: bool) -> str:
-    """The template manifest plus one `test` capability of kind `kind`."""
+    """The template manifest plus one `test` capability of kind `kind`.
+
+    A `post` capability must also be declared outward and every other kind
+    must not be; the validation pair below covers the preview rule alone.
+    """
     table = '\n[capabilities.test.preview]\nviewer = "generic"\n' if preview else ""
+    outward = "\noutward = true" if kind == "post" else ""
     return (
         MANIFEST_TEMPLATE
         + f"""
 [capabilities.test]
 summary = "test"
-kind = "{kind}"
+kind = "{kind}"{outward}
 {table}"""
     )
 

@@ -38,8 +38,11 @@ ENTRY_KEYS = {
     "duration_s",
     "facet",
     "kind",
+    "network",
+    "post_state",
     "preview",
     "preview_state",
+    "url",
     "verified",
 }
 CARD_KEYS = {
@@ -53,9 +56,12 @@ CARD_KEYS = {
     "n",
     "name",
     "open",
+    "network",
     "package",
+    "post_state",
     "preview_state",
     "thumb",
+    "url",
     "verified",
 }
 

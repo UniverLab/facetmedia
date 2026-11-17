@@ -179,7 +179,17 @@ _REQUIREMENT_KEYS: Final[frozenset[str]] = frozenset(
 )
 _LICENSE_KEYS: Final[frozenset[str]] = frozenset({"subject", "spdx"})
 _CAPABILITY_KEYS: Final[frozenset[str]] = frozenset(
-    {"summary", "kind", "inputs", "verify", "preview", "models", "verify_uses_server", "i18n"}
+    {
+        "summary",
+        "kind",
+        "inputs",
+        "verify",
+        "preview",
+        "models",
+        "verify_uses_server",
+        "outward",
+        "i18n",
+    }
 )
 _VERIFY_KEYS: Final[frozenset[str]] = frozenset({"thresholds"})
 _PREVIEW_KEYS: Final[frozenset[str]] = frozenset({"viewer"})
@@ -676,6 +686,11 @@ class RegistryLoader:
         viewer = self.preview(item.get("preview"), file, prefix)
         models = _read_capability_models(self, item, file, prefix)
         verify_uses_server = self.boolean(item, "verify_uses_server", file, prefix, default=False)
+        outward = self.boolean(item, "outward", file, prefix, default=False)
+        if outward and kind != "post":
+            self.add(file, f"{prefix}outward", "an outward capability must have kind post")
+        if kind == "post" and not outward:
+            self.add(file, f"{prefix}outward", "a post capability must be outward")
         if "verify_uses_server" in item and not has_server:
             self.add(file, f"{prefix}verify_uses_server", "requires engine.server")
         i18n = read_i18n(
@@ -699,6 +714,7 @@ class RegistryLoader:
             viewer=viewer,
             models=models,
             verify_uses_server=verify_uses_server,
+            outward=outward,
             i18n=i18n,
         )
 

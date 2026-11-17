@@ -25,6 +25,7 @@ from facetmedia import (
     licenses,
     lock,
     plan,
+    post,
     preview,
     progress,
     prune,
@@ -256,6 +257,11 @@ def _handle_run(args: argparse.Namespace) -> int:
 
 
 def _announce_run(data: dict[str, object]) -> None:
+    if data.get("dry_run") is True:
+        preview = data.get("preview")
+        if isinstance(preview, dict):
+            post.announce(preview)
+        return
     assets = data.get("assets")
     for entry in assets if isinstance(assets, list) else []:
         if not isinstance(entry, dict):
@@ -265,6 +271,9 @@ def _announce_run(data: dict[str, object]) -> None:
             verification.get("status", "unknown") if isinstance(verification, dict) else "unknown"
         )
         _result_line(f"{entry.get('path')} {entry.get('name')}", status)
+    if data.get("sent") is False:
+        print("nothing sent")
+        return
     print(f"out {data.get('out_dir')}")
 
 

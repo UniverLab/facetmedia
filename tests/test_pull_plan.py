@@ -534,7 +534,7 @@ def test_unknown_name_lists_facets_and_packages(use_registry, monkeypatch, capsy
     assert details["packages"] == ["a"]
 
 
-EXPECTED_FACETS = "facets: audio, cad, image, presentation, text, video, voice"
+EXPECTED_FACETS = "facets: audio, cad, image, presentation, publish, text, video, voice"
 
 
 @pytest.mark.parametrize("argv", [["pull", "nope"], ["pull", "--package", "nope"]])
@@ -546,7 +546,16 @@ def test_unknown_name_text_lists_the_valid_names_sorted(
     assert main(argv) == EXIT_CODES["invalid_input"]
     captured = capsys.readouterr()
     lines = captured.err.splitlines()
-    assert sorted(FACETS) == ["audio", "cad", "image", "presentation", "text", "video", "voice"]
+    assert sorted(FACETS) == [
+        "audio",
+        "cad",
+        "image",
+        "presentation",
+        "publish",
+        "text",
+        "video",
+        "voice",
+    ]
     assert lines[0].endswith("nope")
     assert lines[1] == EXPECTED_FACETS
     assert lines[2] == "packages: alpha, zeta"
