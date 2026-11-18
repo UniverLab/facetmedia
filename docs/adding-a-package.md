@@ -339,7 +339,9 @@ shows it.
 A verb that refreshes a token must keep the new value so the next run does not
 force the user to sign in again. Call `renew_secret(name, value)` right after
 the network returns a new token; facet stores the declared value after the verb
-ends, by success, failure or exception, and masks it like any stored secret:
+ends, by success, failure or exception, and masks it like any stored secret.
+Renewing the same name twice keeps the last value; an empty name or value,
+or one containing a newline, is refused with `KeyError`:
 
 ```python
 from facet_runner_sdk import Request, Runner, renew_secret, secret

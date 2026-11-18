@@ -57,7 +57,8 @@ logs or shows it.
 Every runner request carries `renewals_file`: the path of a per-call, empty
 file (UTF-8, one `name=value` line per renewal) where a verb may record a
 refreshed secret through the runner SDK. After the verb ends, by success,
-failure or exception, facet stores each renewed value the package declared,
+failure or exception, facet stores each renewed value the package declared
+(the last line wins when a name is renewed more than once),
 deletes the file and its directory in every case, and masks every renewed
 value the same way as a stored one — including the output tail in an error's
 `details.output` and the kept log. A name the package did not declare is
