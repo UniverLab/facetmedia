@@ -263,9 +263,24 @@ non-boolean `required`, and any unknown key inside an entry.
 A value is stored by a person, never by the package: `facet secret set
 <package> <name>` reads it from a hidden prompt or from stdin, `facet secret
 list [<package>]` shows only names and whether each is set, and `facet
-secret rm <package> <name>` removes one. The value lives in
-`<home>/secrets/<package>.json` with mode `0600`; it survives every
-`facet remove` and `facet clean`, and only `facet secret rm` deletes it.
+secret rm <package> <name>` removes one. Every package's credentials live in
+one encrypted vault, `<home>/secrets/vault.enc` (owner-only, mode `0600`,
+inside an owner-only `0700` directory), written atomically; it survives every
+`facet remove` and `facet clean`, and only `facet secret rm` deletes a value.
+
+`facet secret passphrase` sets, changes or removes the vault passphrase by
+re-encrypting the vault (read from a hidden prompt at a terminal, from stdin
+otherwise; an empty value removes the passphrase). Without a passphrase the
+vault still uses a machine-bound key, so runs and agents need no prompt.
+With a passphrase, a run that needs a secret asks for it at a terminal;
+without a terminal the passphrase comes from `FACET_SECRETS_PASSPHRASE`, and
+when that is absent the run fails with `machine_cannot` and a hint naming
+that variable.
+
+**What the encryption protects against:** reading the vault file, copying it
+to another machine or user, and backups. **What it does not protect
+against:** a program running as the same user on the same machine when there
+is no passphrase, since that program can derive the same key.
 
 ### The `auth` verb
 
@@ -287,9 +302,9 @@ def auth(req: Request) -> dict:
 The verb's only channel back is the result file, so it returns a `secrets`
 map: each key must be a name the manifest declared, and a key it did not
 declare fails the whole flow with `invalid_input` and stores nothing. facet
-writes the returned values into the `0600` store and removes the verb's
+writes the returned values into the encrypted vault and removes the verb's
 temporary directory in every case, so nothing the flow wrote survives
-outside the store. `facet auth` requires the package to be installed and
+outside the vault. `facet auth` requires the package to be installed and
 holds the lock exclusively; it is never gated by the required-secret check,
 because producing the secrets is its whole job.
 

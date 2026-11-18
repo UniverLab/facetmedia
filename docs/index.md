@@ -105,7 +105,7 @@ FACET_HOME=/data/facet`. The directory is created on first use:
 │   └── hf/              # Hugging Face cache (HF_HOME)
 ├── python/              # uv-managed Python interpreters
 ├── registry/            # extracted registry snapshots (one dir per commit)
-├── secrets/             # one 0600 file per package's credentials, written on first set
+├── secrets/             # encrypted vault (vault.enc, 0600) for every package's credentials
 ├── servers/             # pinned tool checkouts, one per package version and rev
 ├── state/               # registry.json, installed.json, update-check.json, leftovers.json, licenses.json, lock files
 └── tmp/                 # scratch, same filesystem, for atomic renames

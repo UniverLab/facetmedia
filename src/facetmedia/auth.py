@@ -9,7 +9,7 @@ refused, so a flow can never smuggle an undeclared credential into the store.
 The verb's only channel back is the result file, so the secrets travel in a
 ``secrets`` map there.  The temporary directory holding that file is removed
 in every case and is never recorded as a kept leftover: a value that reached
-disk outside the ``0600`` store would survive the mask.  The run log is
+disk outside the encrypted vault would survive the mask.  The run log is
 scrubbed after storing for the same reason: the output mask predates the
 tokens the flow mints, so anything the verb printed reached the log unmasked.
 """
@@ -26,7 +26,7 @@ from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.registry import Package, load_active_registry
 from facetmedia.runner import Invocation
-from facetmedia.secrets import has_auth_verb, mask, set_value, store_file
+from facetmedia.secrets import has_auth_verb, mask, set_value, vault_file
 
 __all__ = ["AUTH_VERB", "RESULT_KEY", "handle"]
 
@@ -153,5 +153,5 @@ def handle(package_name: str, run_id: str) -> dict[str, object]:
     return {
         "package": package.name,
         "secrets": sorted(values),
-        "path": str(store_file(home, package.name)),
+        "path": str(vault_file(home)),
     }

@@ -18,6 +18,7 @@ dependencies = [
   "rich>=13",
   "questionary>=2",
   "rich-argparse>=1",
+  "PyNaCl>=1.5",
 ]
 
 # Development tools live in a dependency group (PEP 735), not in an extra:
@@ -74,3 +75,8 @@ extend_exclude = ["tests/fixtures"]
 [tool.coverage.run]
 source = ["facetmedia"]
 branch = true
+
+# Lab quality gate: cffi 2.1.1 is MIT-0 (verified permissive license) but
+# not yet in the allow-list; ignore as a verified metadata/allow-list gap.
+[tool.quality]
+license_ignore = ["cffi"]

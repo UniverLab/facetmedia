@@ -99,8 +99,10 @@ class Home:
             self._root / "cache" / "uv",
             self._root / "logs",
             self._root / "tmp",
+            self._root / "secrets",
         ):
             directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(self._root / "secrets", 0o700)
         same_filesystem_check(self)
         return self
 

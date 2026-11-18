@@ -117,6 +117,12 @@ and the network may keep it as a draft or private. Follow these rules:
   and which `facet secret set <package> <name>` or `facet auth <package>` to
   run — in their own terminal. Never ask for a secret in the conversation and
   never pass one to `facet secret set` yourself; check with `facet doctor`.
+  Credentials live in an encrypted vault under the facet home (`facet secret
+  passphrase` sets or removes a passphrase). The encryption protects against
+  reading the vault file, copying it to another machine or user, and backups.
+  It does not protect against a program running as the same user on the same
+  machine when there is no passphrase, since that program can derive the same
+  key.
 
 ## Fix
 

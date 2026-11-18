@@ -185,7 +185,7 @@ def test_top_level_help_keeps_registry_on_the_maintainers_line(
     [
         ("license", "manage tool licenses"),
         ("config", "set, get and list host application paths"),
-        ("secret", "set, list and remove a tool's credentials"),
+        ("secret", "set, list, remove and rekey a tool's credentials"),
         ("registry", "inspect the package registry (maintainers)"),
     ],
 )

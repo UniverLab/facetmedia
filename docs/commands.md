@@ -28,7 +28,7 @@ The two verbs that look similar answer two different questions:
 | `facet describe` | show a capability's full contract | none |
 | `facet skill` | print the skill for facet or one package | none |
 | `facet config` | store where a host application lives | none |
-| `facet secret` | store, list and remove a tool's credentials | `set` and `rm` exclusive; `list` none |
+| `facet secret` | store, list, remove and rekey a tool's credentials | `set`, `rm` and `passphrase` exclusive; `list` none |
 | `facet auth` | run a tool's browser sign-in and store its tokens | exclusive |
 | `facet doctor` | check facet, the tool chain and this machine | shared |
 | `facet check` | re-verify an asset against its record | per manifest |
@@ -493,10 +493,13 @@ is not valid TOML.
 
 Holds the credentials a tool needs: an app password, API keys, OAuth tokens.
 A package declares the credentials it uses in its manifest (`[[secrets]]`,
-see [adding-a-package.md](adding-a-package.md#secrets)), and the values live
-under the facet home in `<home>/secrets/<package>.json` — mode `0600`,
-outside every environment, piece and record. Nothing deletes them but
-`facet secret rm`: not `facet remove`, not `facet clean`.
+see [adding-a-package.md](adding-a-package.md#secrets)). Every package's
+credentials live in one encrypted vault, `<home>/secrets/vault.enc` (mode
+`0600`, inside an owner-only `0700` `secrets/` directory), written
+atomically and outside every environment, piece and record. Nothing deletes a
+value but `facet secret rm`: not `facet remove`, not `facet clean`. On first
+use, facet migrates any legacy per-package plain files under `secrets/` into
+the vault and removes them; a migration interrupted halfway loses nothing.
 
 - `facet secret set <package> <name>` — store one declared secret. The value
   is read from a hidden prompt at a terminal and from stdin otherwise; it is
@@ -506,23 +509,42 @@ outside every environment, piece and record. Nothing deletes them but
   of every package that declares any, with whether each is set.
 - `facet secret rm <package> <name>` — remove one; a secret that is not
   stored is a no-op with exit 0.
+- `facet secret passphrase` — set, change or remove the vault passphrase by
+  re-encrypting the vault. The passphrase is read from a hidden prompt at a
+  terminal and from stdin otherwise; an empty value removes the passphrase.
 
 ```console
 $ printf '%s' "$BLUESKY_APP_PASSWORD" | facet secret set bluesky app-password
 bluesky app-password set
 $ facet secret list bluesky
 bluesky app-password required set: the app password from the Bluesky settings
+$ facet secret passphrase
+secrets passphrase set
 ```
 
+Without a passphrase the vault still uses a machine-bound key, so runs and
+agents use secrets with no prompt. With a passphrase, a run that needs a
+secret asks for it at a terminal; without a terminal the passphrase comes
+from the environment variable `FACET_SECRETS_PASSPHRASE`, and when that is
+absent the run fails with `machine_cannot` and a hint naming that variable.
+A vault that does not decrypt (another user or machine, a wrong passphrase,
+or a damaged file) fails with `machine_cannot` and a hint to set the secrets
+again, and is never overwritten.
+
+**What the encryption protects against:** reading the vault file, copying it
+to another machine or user, and backups. **What it does not protect
+against:** a program running as the same user on the same machine when there
+is no passphrase, since that program can derive the same key.
+
 A name the package did not declare is `invalid_input`, and so is an empty
-value. Neither `list` nor any failure ever prints a stored value: a row
-carries the name, the description, whether the secret is required, and
+secret value. Neither `list` nor any failure ever prints a stored value: a
+row carries the name, the description, whether the secret is required, and
 whether it is set.
 
-Lock: `set` and `rm` take it exclusively; `list` takes none.
+Lock: `set`, `rm` and `passphrase` take it exclusively; `list` takes none.
 
 Exit codes: `0`; `2` an unknown package, a name the package did not declare,
-or an empty value.
+or an empty secret value; `5` the vault cannot be opened.
 
 ## `facet auth`
 
@@ -537,7 +559,7 @@ store a credential the package did not declare.
 A tool with no `auth` verb is refused, naming `facet secret set` instead, and
 so is a package that is not installed (`not_installed`, exit 7, with
 `facet pull <package>`). The verb's temporary directory is removed in every
-case, so the tokens it wrote exist only in the `0600` store afterwards.
+case, so the tokens it wrote exist only in the encrypted vault afterwards.
 
 ```console
 $ facet auth youtube

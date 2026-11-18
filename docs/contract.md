@@ -26,6 +26,15 @@ against this version needs to change.
 
 ## Credentials
 
+Credentials live in one encrypted vault, `<home>/secrets/vault.enc`. The
+encryption protects against reading the vault file, copying it to another
+machine or user, and backups. It does not protect against a program running
+as the same user on the same machine when there is no passphrase, since that
+program can derive the same key. `facet secret passphrase` sets, changes or
+removes the passphrase; without a terminal the passphrase comes from
+`FACET_SECRETS_PASSPHRASE`, and a vault that cannot be opened fails with
+`machine_cannot` and is never overwritten.
+
 A stored secret never appears in any output: not in `data`, not in an
 error's `message`, `hint` or `details`, not in a record, a preview or a log.
 Every surface reports a secret's name, its one-line description and whether

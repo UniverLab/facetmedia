@@ -174,10 +174,29 @@ def _announce_secret_list(rows: list[dict[str, object]]) -> None:
         print(f"{row['package']} {row['name']}{required} {state}: {row['description']}")
 
 
+def _passphrase_value() -> str:
+    """Read the vault passphrase from a hidden prompt or stdin (empty clears)."""
+    if sys.stdin.isatty():
+        return getpass.getpass("secrets passphrase (empty to remove): ")
+    return sys.stdin.readline().rstrip("\n")
+
+
+def _handle_secret_passphrase(args: argparse.Namespace) -> int:
+    """Exclusive: set, change or remove the vault passphrase."""
+    with lock.hold("exclusive", "facet secret passphrase", *_lock_params(args)):
+        data = secrets.change_passphrase(Home.from_env(), _passphrase_value())
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        state = "set" if data.get("protected") else "removed"
+        print(f"secrets passphrase {state}")
+    return 0
+
+
 _SECRET_HANDLERS: dict[str, Handler] = {
     "set": _handle_secret_set,
     "list": _handle_secret_list,
     "rm": _handle_secret_rm,
+    "passphrase": _handle_secret_passphrase,
 }
 
 
@@ -578,6 +597,7 @@ _EXAMPLES: dict[tuple[str, ...], tuple[str, ...]] = {
         "facet secret list",
         "facet secret set bluesky app-password",
         "facet secret rm bluesky app-password",
+        "facet secret passphrase",
     ),
     ("auth",): ("facet auth youtube", "facet auth youtube --json"),
     ("registry",): (
@@ -607,6 +627,10 @@ _EXAMPLES: dict[tuple[str, ...], tuple[str, ...]] = {
     ("secret", "rm"): (
         "facet secret rm bluesky app-password",
         "facet secret rm youtube oauth-token",
+    ),
+    ("secret", "passphrase"): (
+        "facet secret passphrase",
+        "facet secret passphrase --json",
     ),
     ("registry", "validate"): (
         "facet registry validate ../registry",

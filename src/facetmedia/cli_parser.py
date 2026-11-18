@@ -48,7 +48,7 @@ _VERB_HELP: dict[str, str] = {
 _GROUP_HELP: dict[str, str] = {
     "license": "manage tool licenses",
     "config": "set, get and list host application paths",
-    "secret": "set, list and remove a tool's credentials",
+    "secret": "set, list, remove and rekey a tool's credentials",
 }
 
 _VERB_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -78,6 +78,7 @@ _SECRET_VERBS: tuple[tuple[str, str], ...] = (
     ("set", "store one of a tool's credentials"),
     ("list", "list a tool's credentials and whether each is set"),
     ("rm", "remove one of a tool's credentials"),
+    ("passphrase", "set, change or remove the vault passphrase"),
 )
 
 # Verbs that take the facet lock get the waiting flags; light verbs (list,
@@ -705,7 +706,7 @@ def build_parser(
         _SECRET_VERBS,
         examples,
         secret_handlers,
-        lock_verbs=frozenset({"set", "rm"}),
+        lock_verbs=frozenset({"set", "rm", "passphrase"}),
     )
     _add_secret_flags(secret_parsers)
     _add_registry_group(subparsers, examples, registry_validate)
