@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
-__all__ = ["Request", "Runner", "secret"]
+__all__ = ["Request", "Runner", "renew_secret", "secret"]
 
 PROTOCOL_VERSION: Final[int] = 1
 #: The environment prefix ``facet`` exports a declared secret under.
@@ -34,6 +34,9 @@ NO_DOCTOR: Final[dict[str, Any]] = {
     "detail": "this package has no doctor",
     "fix": "report it to the package's maintainer",
 }
+
+#: The renewals file for the verb being handled, set by :meth:`Runner.run`.
+_current_renewals_file: str = ""
 
 
 class Request:
@@ -50,7 +53,9 @@ class Request:
     An outward capability's request also carries ``sources`` — the assets the
     post carries, each with its record ``id`` and whether a model
     ``generated`` it — and, for a read-back, ``post``: what the receipt
-    says the network holds.
+    says the network holds.  ``renewals_file`` is where the runner records a
+    secret it refreshed so facet can keep the new value (see
+    :func:`renew_secret`).
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -59,6 +64,7 @@ class Request:
         self.capability: str = str(data.get("capability", ""))
         self.protocol: int = int(data.get("protocol", 0))
         self.depth: str = str(data.get("depth", DEFAULT_DEPTH))
+        self.renewals_file: str = str(data.get("renewals_file", ""))
         self.inputs: dict[str, Any] = _mapping(data.get("inputs"))
         self.out_dir: Path = Path(str(data.get("out_dir", "")))
         self.piece_dir: Path = Path(str(data.get("piece_dir", "")))
@@ -126,7 +132,11 @@ class Runner:
             return 1
         try:
             request = Request.from_file(input_path)
-            result = handler(request)
+            globals()["_current_renewals_file"] = request.renewals_file
+            try:
+                result = handler(request)
+            finally:
+                globals()["_current_renewals_file"] = ""
         except Exception:
             traceback.print_exc()
             return 1
@@ -177,6 +187,24 @@ def secret(name: str) -> str:
         return os.environ[variable]
     except KeyError:
         raise KeyError(f"secret {name} is not set; run facet secret set or facet auth") from None
+
+
+def renew_secret(name: str, value: str) -> None:
+    """Record a refreshed secret so facet keeps the new value after this verb.
+
+    Appends the renewal at once and flushes, so the value survives a crash or
+    a raise later in the same verb.  ``name`` is the manifest spelling, as in
+    :func:`secret`.  A name or value that is empty, or a value that contains a
+    newline, is refused: a renewal facet cannot store safely is never written.
+    """
+    if not name or not value or "\n" in value or "\n" in name:
+        raise KeyError(f"secret {name} cannot be renewed; run facet secret set or facet auth")
+    path = _current_renewals_file
+    if not path:
+        raise KeyError(f"secret {name} cannot be renewed; run facet secret set or facet auth")
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"{name}={value}\n")
+        handle.flush()
 
 
 def _mapping(value: Any) -> dict[str, Any]:

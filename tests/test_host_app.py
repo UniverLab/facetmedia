@@ -657,7 +657,7 @@ def test_doctor_reports_the_config_fix_for_a_missing_app(
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     home = Home.from_env()
 
-    checks, _failures, doctor_errors = doctor_module.run_check(
+    checks, _failures, doctor_errors, _warnings = doctor_module.run_check(
         world.package(), home, "", "host-doctor"
     )
 

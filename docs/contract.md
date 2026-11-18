@@ -54,6 +54,19 @@ other package's; any occurrence of one of those values in the runner's
 stdout or stderr is replaced with the fixed mask `***` before facet keeps,
 logs or shows it.
 
+Every runner request carries `renewals_file`: the path of a per-call, empty
+file (UTF-8, one `name=value` line per renewal) where a verb may record a
+refreshed secret through the runner SDK. After the verb ends, by success,
+failure or exception, facet stores each renewed value the package declared,
+deletes the file and its directory in every case, and masks every renewed
+value the same way as a stored one — including the output tail in an error's
+`details.output` and the kept log. A name the package did not declare is
+skipped and reported once as a warning: in `data.warnings` on success, or in
+`error.details.warnings` on failure (a failure envelope carries no `data`).
+If storing a renewed secret fails, the file is deleted anyway and the error
+is `machine_cannot` with the message
+`the renewed secret was lost; run facet auth`.
+
 With `--json`, stdout carries exactly one JSON document: an **envelope**
 with the contract version. Progress goes to stderr, and every invocation
 writes a debug log under `~/.facet/logs/<YYYY-MM-DD>/`, so stdout is safe

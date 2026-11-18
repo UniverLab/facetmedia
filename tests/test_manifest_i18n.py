@@ -84,7 +84,7 @@ def test_unknown_facet_label_and_i18n_are_ignored_on_user_load(ahead_registry: P
 def test_strict_validation_reports_unknown_facet_label(ahead_registry: Path) -> None:
     problems = validate_registry(ahead_registry)
     found = {(item["file"], item["key"], item["problem"]) for item in problems}
-    assert ("index.toml", "facets.hologram", "unknown to facet 0.1.0b1") in found
+    assert ("index.toml", "facets.hologram", "unknown to facet 0.1.0b2") in found
 
 
 def test_facets_absent_is_empty(tmp_path: Path) -> None:

@@ -45,7 +45,7 @@ def engine_installed_check(package: Package, home: Home) -> Check | None:
 
 def engine_package_doctor(
     package: Package, home: Home
-) -> tuple[list[dict[str, object]], FacetError | None] | None:
+) -> tuple[list[dict[str, object]], FacetError | None, list[str]] | None:
     """The package-doctor result for an engine without a python runner.
 
     A host-app package reports its application's resolution; a binary package
@@ -57,7 +57,9 @@ def engine_package_doctor(
     return doctor_binary.package_doctor(package, home)
 
 
-def app_doctor(package: Package, home: Home) -> tuple[list[dict[str, object]], FacetError | None]:
+def app_doctor(
+    package: Package, home: Home
+) -> tuple[list[dict[str, object]], FacetError | None, list[str]]:
     """The package-doctor entry and the classified failure, if the app is unusable.
 
     A missing or too-old host application is not pull-fixable: no pull changes
@@ -68,9 +70,9 @@ def app_doctor(package: Package, home: Home) -> tuple[list[dict[str, object]], F
     assert app is not None
     problem = config.host_app_problem(app, home)
     if problem is None:
-        return [_entry(True, f"{app.app} {app.min_version}+ found", "")], None
+        return [_entry(True, f"{app.app} {app.min_version}+ found", "")], None, []
     error = FacetError("machine_cannot", problem.message, hint=problem.fix, details=problem.details)
-    return [_entry(False, problem.message, problem.fix)], error
+    return [_entry(False, problem.message, problem.fix)], error, []
 
 
 def _entry(ok: bool, detail: str, fix: str) -> dict[str, object]:

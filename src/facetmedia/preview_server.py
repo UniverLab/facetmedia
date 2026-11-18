@@ -313,7 +313,11 @@ class _GalleryHandler(_FileHandler):
     def _built(self, server: GalleryServer, entry: FolderAsset) -> FolderAsset:
         """Run one card's ``preview`` verb, then store the card it produced."""
         stored = record.read_record(entry.path)
-        rebuild(Home.from_env(), server.run_id, entry.capability, stored, entry.path)
+        _preview_data, _warnings = rebuild(
+            Home.from_env(), server.run_id, entry.capability, stored, entry.path
+        )
+        if _warnings:
+            logger.info("preview warnings for %s: %s", entry.path, "; ".join(_warnings))
         return self._store(server, entry)
 
     def _store(self, server: GalleryServer, entry: FolderAsset) -> FolderAsset:

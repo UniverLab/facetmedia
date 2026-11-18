@@ -336,6 +336,25 @@ command. Any occurrence of one of the package's stored values in what its
 runner prints is replaced with the fixed mask `***` before facet keeps or
 shows it.
 
+A verb that refreshes a token must keep the new value so the next run does not
+force the user to sign in again. Call `renew_secret(name, value)` right after
+the network returns a new token; facet stores the declared value after the verb
+ends, by success, failure or exception, and masks it like any stored secret:
+
+```python
+from facet_runner_sdk import Request, Runner, renew_secret, secret
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict:
+    token = secret("oauth-token")
+    token = refresh_if_needed(token)  # may return a rotated token
+    renew_secret("oauth-token", token)  # keep it for the next run
+    ...
+```
+
 ## Shared modules
 
 Packages run in separate environments, so a helper they both need is kept
@@ -1058,17 +1077,20 @@ evaluates a piece: the piece is data, the tool runs inside the package's
 own uv environment, and the conversation between facet and a runner is a
 file protocol. facet writes a **request file**,
 `{"protocol": 1, "verb", "capability", "inputs", "out_dir", "piece_dir",
-"models", "assets"}` (a `doctor` request adds `"depth": "quick" |
+"models", "assets", "renewals_file"}` (a `doctor` request adds `"depth": "quick" |
 "full"`), and the runner writes a **result file**: for `run`, its tool and
 one entry per asset; for `verify`, one verdict per asset; for `doctor`, a
 `{"name", "ok", "detail", "fix"}`-list of checks; for `auth`, a `secrets`
 map of the values it obtained (see [Secrets](#secrets)). A `file` is one bare
 name inside the run's temporary directory, never a path and never the
-reserved `.facet-` prefix. The runner is invoked through the manifest's
-`transport.invocation_template` with `{{python}}` (the environment's own
-interpreter), `{{entry}}`, `{{verb}}`, `{{input}}` and `{{result}}`, in
-its own process group, with `FACET_MODELS` pointing at the models
-directory.
+reserved `.facet-` prefix. `renewals_file` is the path of a per-call, empty
+UTF-8 file where the runner records a refreshed secret (one `name=value` line
+per renewal); facet stores declared renewals and deletes the file and its
+directory after every verb, by success, failure or exception. The runner is
+invoked through the manifest's `transport.invocation_template` with
+`{{python}}` (the environment's own interpreter), `{{entry}}`, `{{verb}}`,
+`{{input}}` and `{{result}}`, in its own process group, with `FACET_MODELS`
+pointing at the models directory.
 
 The `facet_runner_sdk` module ships with facet and is copied into every
 environment; the registry's shared modules, when a package declares
@@ -1109,12 +1131,13 @@ runner.main()
 
 `req` carries the request: `inputs` (validated, defaults filled, paths
 absolute), `out_dir`, `piece_dir`, `assets` (on `verify` and `preview`),
-`depth` (on `doctor`) and `model_path(id)`; the module-level
-`secret(name)` reads one declared credential (see [Secrets](#secrets)). An
-unknown verb or an
-exception exits 1 with the reason on stderr, which facet turns into
-`runner_failed` — with the one exception of a missing `doctor` verb,
-which the SDK answers politely so `facet doctor` can name the fix.
+`depth` (on `doctor`), `renewals_file` and `model_path(id)`; the module-level
+`secret(name)` reads one declared credential and `renew_secret(name, value)`
+records a refreshed one so facet keeps it after the verb ends (see
+[Secrets](#secrets)). An unknown verb or an exception exits 1 with the
+reason on stderr, which facet turns into `runner_failed` — with the one
+exception of a missing `doctor` verb, which the SDK answers politely so
+`facet doctor` can name the fix.
 
 ## The four verbs plus doctor, plus skill
 

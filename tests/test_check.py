@@ -391,7 +391,7 @@ def test_check_request_carries_absolute_paths(
         return runner_module.Outcome({"assets": [{"file": "asset.txt", "passed": True}]}, "")
 
     monkeypatch.setattr(runner_module, "call", fake_call)
-    verdict = check_module._verify_asset(
+    verdict, _warnings = check_module._verify_asset(
         package, home, tmp_path / "env", "run-1", "echo.text", {}, Path("asset.txt")
     )
     assert verdict.passed is True
@@ -422,7 +422,7 @@ def test_check_starts_no_server_without_flag(
     asset.write_text("x", encoding="utf-8")
     captured: dict[str, object] = {}
     monkeypatch.setattr(runner_module, "call", _fake_verify_call(captured))
-    verdict = check_module._verify_asset(
+    verdict, _warnings = check_module._verify_asset(
         package, home, tmp_path / "env", "run-1", "echo.text", {}, asset
     )
     assert verdict.passed is True
@@ -455,7 +455,7 @@ def test_check_starts_server_when_capability_opts_in(
     asset.write_text("x", encoding="utf-8")
     captured: dict[str, object] = {}
     monkeypatch.setattr(runner_module, "call", _fake_verify_call(captured))
-    verdict = check_module._verify_asset(
+    verdict, _warnings = check_module._verify_asset(
         _flagged_package(), home, tmp_path / "env", "run-1", "echo.text", {}, asset
     )
     assert verdict.passed is True

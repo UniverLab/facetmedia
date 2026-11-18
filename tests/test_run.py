@@ -331,6 +331,47 @@ runner.main()
 '''
 
 
+#: A runner that renews a secret and then answers with an absent asset.
+RENEW_THEN_BREAK_RUNNER = '''"""Echo run; renews a secret, then answers with an absent asset."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from facet_runner_sdk import Request, Runner, renew_secret
+
+runner = Runner()
+
+
+@runner.verb("run")
+def run(req: Request) -> dict[str, Any]:
+    renew_secret("rotated", "fresh-value")
+    return {
+        "tool": {"name": "echo", "version": "0.1.0"},
+        "assets": [
+            {
+                "file": "missing.txt",
+                "name": "echo",
+                "kind": "text",
+                "mime": "text/plain",
+                "properties": {},
+                "params": {},
+                "seed": None,
+                "inputs": [],
+            }
+        ],
+    }
+
+
+@runner.verb("doctor")
+def doctor(req: Request) -> dict[str, Any]:
+    return {"checks": [{"name": "runner", "ok": True, "detail": "ready", "fix": ""}]}
+
+
+runner.main()
+'''
+
+
 # --- fixtures and helpers.
 
 
@@ -511,6 +552,25 @@ def test_run_echo_writes_the_asset_and_a_passed_record(
     assert license_section["models"] == []
     assert license_section["accepted"] == []
     assert license_section["commercial_use"] is True
+
+
+def test_a_run_renewal_warning_survives_a_later_step_failure(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    facet_home: Path,
+    swap_echo_runner: Callable[[str], None],
+) -> None:
+    """The verb stored a renewal; the result it answered breaks, so say both."""
+    swap_echo_runner(RENEW_THEN_BREAK_RUNNER)
+    piece = _piece(tmp_path)
+    out = tmp_path / "out"
+
+    code = main(["run", "echo.text", str(piece), "--out", str(out), "--json"])
+    error = _envelope(capsys)["error"]
+    assert code == EXIT_RUNNER_FAILED
+    assert error["code"] == "runner_failed"
+    assert error["details"]["warnings"] == ["echo renewed undeclared secret rotated (skipped)"]
+    assert list((facet_home / "tmp").glob(".facet-renewals-*")) == []
 
 
 def test_run_verify_failure_exits_3_and_keeps_asset_and_record(
@@ -998,10 +1058,12 @@ def test_make_request_lists_assets_only_for_verify(tmp_path: Path) -> None:
     assert run_request["protocol"] == 1
     assert run_request["verb"] == "run"
     assert run_request["assets"] == []
+    assert run_request["renewals_file"] == ""
     verify_request = runner.make_request(
         "verify", "echo.text", {}, tmp_path, tmp_path, models, [tmp_path / "x.txt"]
     )
     assert verify_request["assets"] == [str(tmp_path / "x.txt")]
+    assert verify_request["renewals_file"] == ""
 
 
 def test_parse_run_result_rejects_a_listed_but_absent_file(tmp_path: Path) -> None:
@@ -1250,6 +1312,7 @@ def test_make_request_writes_absolute_paths(
     assert request["piece_dir"] == os.path.abspath(str(Path("build_foto") / ".facet-tmp-x"))
     assert Path(str(request["out_dir"])).is_absolute()
     assert Path(str(request["piece_dir"])).is_absolute()
+    assert request["renewals_file"] == ""
 
 
 def test_host_arg_converts_the_absolute_path_for_an_exe(

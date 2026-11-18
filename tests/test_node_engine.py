@@ -757,7 +757,9 @@ def test_doctor_reports_a_stale_staged_runner(
     assert checks["node"]["fix"] == "facet pull nodepkg"
     assert "the staged runner is not current" in str(checks["node"]["detail"])
 
-    _checks, _failures, doctor_errors = doctor_module.run_check(package, home, "", "run-stale")
+    _checks, _failures, doctor_errors, _warnings = doctor_module.run_check(
+        package, home, "", "run-stale"
+    )
     assert doctor_errors == []
 
 
@@ -771,7 +773,9 @@ def test_doctor_reports_machine_cannot_when_the_binary_cannot_run(
     node_bin = home.node_runtime_dir(NODE_RUNTIME) / "bin" / "node"
     node_bin.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
 
-    checks, _failures, doctor_errors = doctor_module.run_check(package, home, "", "run-doctor")
+    checks, _failures, doctor_errors, _warnings = doctor_module.run_check(
+        package, home, "", "run-doctor"
+    )
 
     assert checks["node"]["ok"] is False
     assert checks["node"]["fix"] != "facet pull nodepkg"

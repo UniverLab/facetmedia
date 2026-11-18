@@ -716,7 +716,7 @@ def _quick_checks(
         }
         for name in doctor.CHECK_ORDER
     ]
-    doctor_checks, _ = doctor.package_doctor(package, home, run_id, "quick", capability)
+    doctor_checks, _, _warnings = doctor.package_doctor(package, home, run_id, "quick", capability)
     return [*ordered, *doctor_checks]
 
 

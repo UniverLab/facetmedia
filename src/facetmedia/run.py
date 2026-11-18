@@ -146,8 +146,10 @@ def execute(args: argparse.Namespace, run_id: str) -> tuple[dict[str, object], i
     )
     if records is not None:
         data["assets"] = records
-    if gate_warnings:
-        data["warnings"] = gate_warnings
+    renewal_warnings = data.pop("renewal_warnings", [])
+    warnings = [*gate_warnings, *(renewal_warnings if isinstance(renewal_warnings, list) else [])]
+    if warnings:
+        data["warnings"] = warnings
     return data, exit_code
 
 
@@ -253,8 +255,11 @@ def _run_locked(
         try:
             if job.capability.outward:
                 return _produce_outward(args, job)
-            records, exit_code = _produce(job)
-            return records, exit_code, {}
+            records, exit_code, warnings = _produce(job)
+            data: dict[str, object] = {}
+            if warnings:
+                data["renewal_warnings"] = warnings
+            return records, exit_code, data
         finally:
             _drop_ephemeral(job.home, job.package, ephemeral)
 
@@ -447,17 +452,17 @@ def _lock_params(args: argparse.Namespace) -> tuple[bool, float]:
 # --- under the lock: run, verify, place, record.
 
 
-def _produce(job: RunJob) -> tuple[list[dict[str, object]], int]:
+def _produce(job: RunJob) -> tuple[list[dict[str, object]], int, list[str]]:
     """One run under the lock: assets out of temp, one record each."""
     temp_dir = job.out_dir / f".facet-tmp-{job.run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
     try:
-        records, failed = _attempt(job, temp_dir)
+        records, failed, warnings = _attempt(job, temp_dir)
     except Exception:
         placement.keep_leftover(job.home, temp_dir)
         raise
     shutil.rmtree(temp_dir)
-    return records, 3 if failed else 0
+    return records, 3 if failed else 0, warnings
 
 
 # --- outward capabilities: dry run, confirmation, send, receipt, read-back.
@@ -500,16 +505,35 @@ def _outward_step(
     args: argparse.Namespace, job: RunJob, temp_dir: Path
 ) -> tuple[list[dict[str, object]] | None, int, dict[str, object]]:
     """The dry run and the confirmation, then the one send."""
-    preview = _dry_preview(job, temp_dir)
+    preview, warnings = _dry_preview(job, temp_dir)
     if job.dry_run:
-        return None, 0, {"dry_run": True, "preview": preview}
+        data: dict[str, object] = {"dry_run": True, "preview": preview}
+        if warnings:
+            data["renewal_warnings"] = warnings
+        return None, 0, data
     if not _confirmed(args, job, preview):
-        return None, 0, {"dry_run": False, "sent": False}
-    records = _send_and_place(job, temp_dir, preview)
-    return records, 0, {"dry_run": False, "sent": True}
+        data = {"dry_run": False, "sent": False}
+        if warnings:
+            data["renewal_warnings"] = warnings
+        return None, 0, data
+    try:
+        records, send_warnings = _send_and_place(job, temp_dir, preview)
+    except FacetError as exc:
+        if warnings:
+            details = dict(exc.details) if isinstance(exc.details, dict) else {}
+            existing = details.get("warnings")
+            items = list(existing) if isinstance(existing, list) else []
+            details["warnings"] = [*warnings, *items]
+            raise FacetError(exc.code, exc.message, exc.hint, details) from exc
+        raise
+    all_warnings = [*warnings, *send_warnings]
+    data = {"dry_run": False, "sent": True}
+    if all_warnings:
+        data["renewal_warnings"] = all_warnings
+    return records, 0, data
 
 
-def _dry_preview(job: RunJob, temp_dir: Path) -> dict[str, object]:
+def _dry_preview(job: RunJob, temp_dir: Path) -> tuple[dict[str, object], list[str]]:
     """What the run would send, straight from the runner's ``dry-run`` verb.
 
     ``out_dir`` is the home's temporary directory, never the output folder:
@@ -542,7 +566,7 @@ def _dry_preview(job: RunJob, temp_dir: Path) -> dict[str, object]:
             f"a receipt already exists at {job.out_dir / job.receipt_name}; a real run "
             "would refuse it until that receipt is removed",
         ]
-    return preview
+    return preview, list(outcome.warnings)
 
 
 def _confirmed(args: argparse.Namespace, job: RunJob, preview: Mapping[str, object]) -> bool:
@@ -580,9 +604,15 @@ def _posts(preview: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [entry if isinstance(entry, Mapping) else {} for entry in entries]
 
 
+def _merged_warnings(extra: list[str] | tuple[str, ...], existing: object) -> list[str]:
+    """Prepend ``extra`` to any warning list already kept in an error detail."""
+    prior = existing if isinstance(existing, list) else []
+    return [*extra, *prior]
+
+
 def _send_and_place(
     job: RunJob, temp_dir: Path, preview: Mapping[str, object]
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], list[str]]:
     """Send once, keep the receipt, read the post back and judge it honestly.
 
     The request is never retried.  Once the runner reports that a request
@@ -606,20 +636,35 @@ def _send_and_place(
         carried,
     )
     outcome = runner.call(inv, "run", request)
+    warnings = list(outcome.warnings)
     try:
         facts = post.parse_post(outcome.result, temp_dir)
     except FacetError as exc:
         enriched = _enriched(exc, outcome, inv)
+        if warnings:
+            details = dict(enriched.details)
+            details["warnings"] = _merged_warnings(warnings, details.get("warnings"))
+            enriched = FacetError(enriched.code, enriched.message, enriched.hint, details)
         raise _salvaged(job, temp_dir, preview, outcome, carried, enriched) from None
     sent_at = post.now()
-    verdict, failure = _read_back(inv, job, models, facts, carried)
+    verdict, failure, read_back_warnings = _read_back(inv, job, models, facts, carried)
+    all_warnings = [*warnings, *read_back_warnings]
     receipt = _receipt(facts, carried, sent_at, pass_read_back=verdict.passed)
     records = _place_receipt(job, temp_dir, outcome, receipt, verdict)
     if failure is not None:
+        if all_warnings:
+            details = dict(failure.details) if isinstance(failure.details, dict) else {}
+            details["warnings"] = list(all_warnings)
+            failure = FacetError(failure.code, failure.message, failure.hint, details)
         raise _may_exist(facts, _receipt_file(job), failure)
     if not verdict.passed:
-        raise _state_mismatch(facts, _receipt_file(job), verdict)
-    return records
+        err = _state_mismatch(facts, _receipt_file(job), verdict)
+        if all_warnings:
+            details = dict(err.details)
+            details["warnings"] = list(all_warnings)
+            err = FacetError(err.code, err.message, err.hint, details)
+        raise err
+    return records, all_warnings
 
 
 def _salvaged(
@@ -692,7 +737,7 @@ def _read_back(
     models: Mapping[str, Path],
     facts: Mapping[str, object],
     carried: Sequence[Mapping[str, object]],
-) -> tuple[VerifyResult, FacetError | None]:
+) -> tuple[VerifyResult, FacetError | None, list[str]]:
     """The post re-read from the network; a failed call is a failed verdict.
 
     The receipt is never written from a read-back that did not happen: a
@@ -716,13 +761,15 @@ def _read_back(
         outcome = runner.call(inv, "verify", request)
         measured = post.parse_read_back(outcome.result, inv.temp_dir)
     except FacetError as exc:
-        return _failed_verdict(job, facts), exc
+        details = exc.details if isinstance(exc.details, dict) else {}
+        warn = details.get("warnings")
+        return _failed_verdict(job, facts), exc, list(warn) if isinstance(warn, list) else []
     verdict = post.verdict(
         {**facts, "path": job.receipt_name, "sources": carried},
         measured,
         job.capability.thresholds,
     )
-    return verdict, None
+    return verdict, None, list(outcome.warnings)
 
 
 def _failed_verdict(job: RunJob, facts: Mapping[str, object]) -> VerifyResult:
@@ -794,7 +841,7 @@ def _post_refs(facts: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [entry for entry in entries if isinstance(entry, Mapping) and entry.get("url")]
 
 
-def _attempt(job: RunJob, temp_dir: Path) -> tuple[list[dict[str, object]], bool]:
+def _attempt(job: RunJob, temp_dir: Path) -> tuple[list[dict[str, object]], bool, list[str]]:
     """Run and verify one piece in ``temp_dir``; the caller places the assets."""
     inv = Invocation(job.package, job.home, job.env_dir, temp_dir, job.run_id, job.timeout_s)
     models = runner.model_paths(job.package, job.home)
@@ -802,15 +849,38 @@ def _attempt(job: RunJob, temp_dir: Path) -> tuple[list[dict[str, object]], bool
         "run", job.capability.id, job.inputs, temp_dir, job.piece_dir, models
     )
     outcome = runner.call(inv, "run", request)
-    tool, assets = _parse_run(outcome, inv)
-    verdicts = _verify(inv, job, models, assets) if job.verify else {}
-    records = placement.place(job, temp_dir, assets, tool, verdicts)
+    warnings = list(outcome.warnings)
+    try:
+        tool, assets = _parse_run(outcome, inv)
+    except FacetError as exc:
+        details = dict(exc.details)
+        if warnings:
+            details["warnings"] = _merged_warnings(warnings, details.get("warnings"))
+        raise FacetError(exc.code, exc.message, exc.hint, details) from exc
+    if job.verify:
+        try:
+            verdicts, verify_warnings = _verify(inv, job, models, assets)
+            warnings.extend(verify_warnings)
+        except FacetError as exc:
+            details = dict(exc.details)
+            if warnings:
+                details["warnings"] = _merged_warnings(warnings, details.get("warnings"))
+            raise FacetError(exc.code, exc.message, exc.hint, details) from exc
+    else:
+        verdicts = {}
+    try:
+        records = placement.place(job, temp_dir, assets, tool, verdicts)
+    except FacetError as exc:
+        details = dict(exc.details)
+        if warnings:
+            details["warnings"] = _merged_warnings(warnings, details.get("warnings"))
+        raise FacetError(exc.code, exc.message, exc.hint, details) from exc
     failed = any(
         isinstance(entry["verification"], Mapping)
         and entry["verification"].get("status") == "failed"
         for entry in records
     )
-    return records, failed
+    return records, failed, warnings
 
 
 def _parse_run(outcome: Outcome, inv: Invocation) -> tuple[dict[str, str], list[RunAsset]]:
@@ -822,16 +892,22 @@ def _parse_run(outcome: Outcome, inv: Invocation) -> tuple[dict[str, str], list[
 
 def _verify(
     inv: Invocation, job: RunJob, models: Mapping[str, Path], assets: Sequence[RunAsset]
-) -> dict[str, VerifyResult]:
+) -> tuple[dict[str, VerifyResult], list[str]]:
     paths = [inv.temp_dir / asset.file for asset in assets]
     request = runner.make_request(
         "verify", job.capability.id, job.inputs, inv.temp_dir, job.piece_dir, models, paths
     )
     outcome = runner.call(inv, "verify", request)
     try:
-        return runner.parse_verify_result(outcome.result, assets, inv.temp_dir)
+        verdicts = runner.parse_verify_result(outcome.result, assets, inv.temp_dir)
     except FacetError as exc:
-        raise _enriched(exc, outcome, inv) from None
+        enriched = _enriched(exc, outcome, inv)
+        if outcome.warnings:
+            details = dict(enriched.details)
+            details["warnings"] = _merged_warnings(list(outcome.warnings), details.get("warnings"))
+            enriched = FacetError(enriched.code, enriched.message, enriched.hint, details)
+        raise enriched from None
+    return verdicts, list(outcome.warnings)
 
 
 def _enriched(exc: FacetError, outcome: Outcome, inv: Invocation) -> FacetError:

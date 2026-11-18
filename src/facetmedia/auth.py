@@ -21,12 +21,12 @@ from collections.abc import Mapping
 from typing import Final
 
 from facetmedia import env as env_module
-from facetmedia import runner
+from facetmedia import renewals, runner
 from facetmedia.contract import FacetError
-from facetmedia.home import Home, log_file
+from facetmedia.home import Home
 from facetmedia.registry import Package, load_active_registry
 from facetmedia.runner import Invocation
-from facetmedia.secrets import has_auth_verb, mask, set_value, vault_file
+from facetmedia.secrets import has_auth_verb, set_value, vault_file
 
 __all__ = ["AUTH_VERB", "RESULT_KEY", "handle"]
 
@@ -100,21 +100,8 @@ def _refuse_undeclared(package: Package, names: list[str]) -> None:
 
 
 def _scrub_log(run_id: str, values: Mapping[str, str]) -> None:
-    """Replace freshly stored values in this run's log with the fixed mask.
-
-    The runner's output is masked with the values the store held when the run
-    started; a browser flow mints its tokens mid-run, so anything it printed
-    before they were stored reached the log unmasked.  Once stored they are
-    stored values, and the log keeps them: scrub them now.
-    """
-    path = log_file(run_id)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return
-    scrubbed = mask(text, tuple(values.values()))
-    if scrubbed != text:
-        path.write_text(scrubbed, encoding="utf-8")
+    """Replace freshly stored values in this run's log with the fixed mask."""
+    renewals.scrub(run_id, values)
 
 
 def handle(package_name: str, run_id: str) -> dict[str, object]:

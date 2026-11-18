@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import IO, Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
-from facetmedia import config
+from facetmedia import config, renewals, secrets
 from facetmedia.contract import FacetError
 from facetmedia.env import binary as env_binary
 from facetmedia.home import Home, log_file, uv_env
@@ -131,6 +131,7 @@ class Outcome:
 
     result: Mapping[str, object]
     output: str
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -343,6 +344,7 @@ def make_request(
         "piece_dir": os.path.abspath(str(piece_dir)),
         "models": {key: str(models[key]) for key in sorted(models)},
         "assets": listed,
+        "renewals_file": "",
     }
 
 
@@ -408,22 +410,87 @@ def call(inv: Invocation, verb: str, request: Mapping[str, object]) -> Outcome:
     running out, kills the runner's whole process group and fails with
     ``runner_failed``.
     """
-    input_path = inv.temp_dir / REQUEST_NAME
-    result_path = inv.temp_dir / RESULT_NAME
-    input_path.write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding="utf-8")
-    # run and verify share the temp dir: a result an earlier verb left behind
-    # must never be read as this verb's answer to "did you write a result".
-    result_path.unlink(missing_ok=True)
-    argv = build_argv(inv.package, inv.home, inv.env_dir, verb, input_path, result_path)
-    logger.info("runner %s: %s", verb, " ".join(argv))
+    renewals_dir: Path | None = None
+    renewals_path: Path | None = None
     tail: deque[str] = deque(maxlen=TAIL_LINES)
-    # The signal trap is installed before the server and the runner start, so a
-    # signal that arrives the instant either appears is still ours to clean up.
-    with _trapped(), _server_session(inv) as server_url:
-        returncode = _run_client(inv, verb, argv, tail, server_url)
-    if returncode != 0:
-        raise _failure(inv, tail, f"runner {verb} failed with exit code {returncode}")
-    return Outcome(_read_result(result_path, inv, tail), "".join(tail))
+    raised: BaseException | None = None
+    result: Mapping[str, object] | None = None
+    try:
+        renewals_dir, renewals_path = renewals.create(inv.home, inv.run_id, verb)
+        request_copy = dict(request)
+        request_copy["renewals_file"] = str(renewals_path)
+        input_path = inv.temp_dir / REQUEST_NAME
+        result_path = inv.temp_dir / RESULT_NAME
+        input_path.write_text(
+            json.dumps(request_copy, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        # run and verify share the temp dir: a result an earlier verb left behind
+        # must never be read as this verb's answer to "did you write a result".
+        result_path.unlink(missing_ok=True)
+        argv = build_argv(inv.package, inv.home, inv.env_dir, verb, input_path, result_path)
+        logger.info("runner %s: %s", verb, " ".join(argv))
+        # The signal trap is installed before the server and the runner start, so a
+        # signal that arrives the instant either appears is still ours to clean up.
+        with _trapped(), _server_session(inv) as server_url:
+            returncode = _run_client(inv, verb, argv, tail, server_url)
+        if returncode != 0:
+            raise _failure(inv, tail, f"runner {verb} failed with exit code {returncode}")
+        result = _read_result(result_path, inv, tail)
+    except BaseException as exc:
+        raised = exc
+    warnings: list[str] = []
+    extra_values: tuple[str, ...] = ()
+    store_error: FacetError | None = None
+    if renewals_dir is not None and renewals_path is not None:
+        warnings, extra_values, store_error = _process_renewals(inv, renewals_dir, renewals_path)
+    output = secrets.mask("".join(tail), extra_values)
+    if store_error is not None:
+        details = dict(raised.details) if isinstance(raised, FacetError) else _details(inv, output)
+        details["output"] = secrets.mask(str(details.get("output", output)), extra_values)
+        raise FacetError(
+            store_error.code, store_error.message, store_error.hint, details
+        ) from store_error
+    if raised is not None:
+        if isinstance(raised, FacetError):
+            details = dict(raised.details)
+            details["output"] = secrets.mask(str(details.get("output", output)), extra_values)
+            if warnings:
+                existing = details.get("warnings")
+                items = list(existing) if isinstance(existing, list) else []
+                details["warnings"] = [*items, *warnings]
+            raise FacetError(raised.code, raised.message, raised.hint, details)
+        raise raised
+    assert result is not None
+    return Outcome(result, output, tuple(warnings))
+
+
+def _process_renewals(
+    inv: Invocation, directory: Path, path: Path
+) -> tuple[list[str], tuple[str, ...], FacetError | None]:
+    """Store renewals, scrub/mask with their values, clean up, return warnings."""
+    try:
+        values = renewals.parse(path)
+        extra_values = tuple(values.values())
+        store_error: FacetError | None = None
+        try:
+            _stored, skipped = renewals.store(inv.home, inv.package, values)
+            warnings = [
+                f"{inv.package.name} renewed undeclared secret {name} (skipped)" for name in skipped
+            ]
+        except FacetError as exc:
+            store_error = exc
+            warnings = []
+        except Exception as exc:
+            store_error = FacetError(
+                "machine_cannot",
+                "the renewed secret was lost; run facet auth",
+                hint=str(exc) if str(exc) else None,
+            )
+            warnings = []
+        renewals.scrub(inv.run_id, extra_values)
+        return warnings, extra_values, store_error
+    finally:
+        renewals.cleanup(directory)
 
 
 def _maybe_add_wslenv(inv: Invocation, env_vars: dict[str, str]) -> None:
@@ -701,11 +768,12 @@ def _stream(stream: IO[str], tail: deque[str], values: Sequence[str] = ()) -> No
             logger.info("%s", masked.rstrip("\n"))
 
 
-def _secret_values(inv: Invocation) -> tuple[str, ...]:
-    """The owning package's stored values: what its output must be masked with."""
-    from facetmedia import secrets as secrets_module  # noqa: PLC0415
-
-    return secrets_module.mask_values(inv.home, inv.package)
+def _secret_values(inv: Invocation, extra: Sequence[str] = ()) -> tuple[str, ...]:
+    """The owning package's stored and renewed values: what output is masked with."""
+    values = secrets.mask_values(inv.home, inv.package)
+    if not extra:
+        return values
+    return (*values, *tuple(extra))
 
 
 def _wait(inv: Invocation, process: subprocess.Popen[str], verb: str, tail: deque[str]) -> int:

@@ -611,7 +611,7 @@ FACET_INDEX_CASES = [
     pytest.param(
         '[facets.song]\nlabel = "Song"\n',
         "facets.song",
-        "unknown to facet 0.1.0b1",
+        "unknown to facet 0.1.0b2",
         id="facet-name",
     ),
     pytest.param("[facets.text]\n", "facets.text.label", "required", id="facet-label-missing"),

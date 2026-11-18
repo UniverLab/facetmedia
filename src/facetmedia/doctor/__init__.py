@@ -158,9 +158,17 @@ class PackageSection:
     failures: list[FacetError]
     doctor_failure: FacetError | None
     needs_pull: bool
+    warnings: list[str]
 
     def as_data(self) -> dict[str, object]:
-        return {"installed": self.installed, "readiness": self.readiness, "doctor": self.doctor}
+        data: dict[str, object] = {
+            "installed": self.installed,
+            "readiness": self.readiness,
+            "doctor": self.doctor,
+        }
+        if self.warnings:
+            data["warnings"] = list(self.warnings)
+        return data
 
 
 # --- the readiness checks moved from check.py, each with its fix.
@@ -178,9 +186,9 @@ def requirement_errors(
     then a quick doctor that merely timed out becomes a warning the run
     carries on with instead of a failure.
     """
-    _, failures, doctor_failures = run_check(package, home, "", run_id, depth="quick")
+    _, failures, doctor_failures, doc_warnings = run_check(package, home, "", run_id, depth="quick")
     errors: list[FacetError] = []
-    warnings: list[str] = []
+    warnings: list[str] = list(doc_warnings)
     for error in failures + doctor_failures:
         warning = _timeout_warning(error) if timeout_warns else None
         if warning is None:
@@ -206,17 +214,17 @@ def run_check(
     capability_id: str,
     run_id: str = "",
     depth: str = "quick",
-) -> tuple[dict[str, dict[str, object]], list[FacetError], list[FacetError]]:
+) -> tuple[dict[str, dict[str, object]], list[FacetError], list[FacetError], list[str]]:
     """One capability's readiness: the checks, the gate failures, the doctor's.
 
     ``capability_id`` names the capability the doctor request carries; when
     empty the package's first capability is used.  Never downloads anything.
     """
     checks, failures = machine_checks(package, home)
-    doctor_checks, doctor_failure = package_doctor(
+    doctor_checks, doctor_failure, warnings = package_doctor(
         package, home, run_id, depth, capability_id or _first_capability(package)
     )
-    return checks, failures, _doctor_errors(package, doctor_checks, doctor_failure)
+    return checks, failures, _doctor_errors(package, doctor_checks, doctor_failure), warnings
 
 
 def machine_checks(
@@ -837,7 +845,7 @@ def _package_section(
 ) -> PackageSection:
     """One package's readiness and its doctor checks, with their classifications."""
     readiness, failures = machine_checks(package, home)
-    checks, doctor_failure = package_doctor(package, home, run_id, depth, capability)
+    checks, doctor_failure, warnings = package_doctor(package, home, run_id, depth, capability)
     return PackageSection(
         installed=readiness["installed"]["ok"] is True,
         readiness=readiness,
@@ -850,6 +858,7 @@ def _package_section(
         or readiness["ffmpeg"]["ok"] is not True
         or readiness["node"]["ok"] is not True
         or readiness["shared_modules"]["ok"] is not True,
+        warnings=list(warnings),
     )
 
 

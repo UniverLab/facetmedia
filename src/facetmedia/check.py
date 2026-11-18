@@ -84,9 +84,13 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
     params: dict[str, object] = dict(params_value)
     asset_path = _asset_path(asset)
     params = _relative_to_asset(params, asset_path.parent)
-    verdict = _post_verdict(
-        package, home, capability_id, stored, asset_path, run_id
-    ) or _verify_asset(package, home, env_dir, run_id, capability_id, params, asset_path)
+    post_result = _post_verdict(package, home, capability_id, stored, asset_path, run_id)
+    if post_result is not None:
+        verdict, warnings = post_result
+    else:
+        verdict, warnings = _verify_asset(
+            package, home, env_dir, run_id, capability_id, params, asset_path
+        )
     recorded = stored.get("verification")
     recorded_metrics: dict[str, object] = {}
     if isinstance(recorded, dict):
@@ -105,6 +109,8 @@ def reverify(asset: str, home: Home, run_id: str) -> tuple[dict[str, object], in
             "verifier": verdict.verifier,
         },
     }
+    if warnings:
+        data["warnings"] = list(warnings)
     return data, 0 if verdict.passed else 3
 
 
@@ -115,7 +121,7 @@ def _post_verdict(
     stored: Mapping[str, object],
     asset_path: Path,
     run_id: str,
-) -> runner.VerifyResult | None:
+) -> tuple[runner.VerifyResult, list[str]] | None:
     """A ``post`` asset's verdict: the network read back and judged honestly.
 
     ``None`` for any other kind, so a file capability keeps today's path.  A
@@ -146,7 +152,7 @@ def _read_back_post(
     capability_id: str,
     receipt: Mapping[str, object],
     asset_path: Path,
-) -> runner.VerifyResult:
+) -> tuple[runner.VerifyResult, list[str]]:
     """The runner's read-back of one post, judged against its receipt."""
     temp_dir = home.tmp_dir / f".facet-check-post-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -178,10 +184,11 @@ def _read_back_post(
         )
         outcome = runner.call(invocation, "verify", request)
         measured = post.parse_read_back(outcome.result, temp_dir)
+        warnings = list(outcome.warnings)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
     thresholds = capability.thresholds if capability is not None else {}
-    return post.verdict(receipt, measured, thresholds)
+    return post.verdict(receipt, measured, thresholds), warnings
 
 
 def _carried(receipt: Mapping[str, object]) -> list[dict[str, object]]:
@@ -264,7 +271,7 @@ def _verify_asset(
     capability_id: str,
     params: dict[str, object],
     asset_path: Path,
-) -> runner.VerifyResult:
+) -> tuple[runner.VerifyResult, list[str]]:
     """Run the runner's ``verify`` verb on one asset with the record's params."""
     temp_dir = home.tmp_dir / f".facet-check-verify-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -301,4 +308,4 @@ def _verify_asset(
         raise
     else:
         shutil.rmtree(temp_dir)
-        return verdicts[asset_path.name]
+        return verdicts[asset_path.name], list(outcome.warnings)

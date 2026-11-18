@@ -17,6 +17,8 @@ Every verb keeps facet's outward contract without touching a real account:
 
 ``FIXTURE_CALL_LOG`` names a file every outward verb appends its name to, so
 a test can show facet called ``run`` exactly once and never retried it.
+``FIXTURE_RENEW_DRY_RUN`` and ``FIXTURE_RENEW_RUN`` make that verb renew an
+undeclared secret, so a test can show the renewal warning survives the path.
 
 The credential is read through the SDK, so a run without
 ``FACET_SECRET_APP_PASSWORD`` fails the way a real package would.
@@ -28,7 +30,7 @@ import json
 import os
 from typing import Any
 
-from facet_runner_sdk import Request, Runner, secret
+from facet_runner_sdk import Request, Runner, renew_secret, secret
 
 runner = Runner()
 
@@ -47,9 +49,17 @@ def _logged(verb: str) -> None:
             handle.write(f"{verb}\n")
 
 
+def _renew(verb: str) -> None:
+    """Renew an undeclared secret when a test asked for the warning path."""
+    flag = {"dry-run": "FIXTURE_RENEW_DRY_RUN", "run": "FIXTURE_RENEW_RUN"}.get(verb)
+    if flag and os.environ.get(flag):
+        renew_secret("rotated", f"{verb}-token")
+
+
 @runner.verb("dry-run")
 def dry_run(req: Request) -> dict[str, Any]:
     _logged("dry-run")
+    _renew("dry-run")
     secret("app-password")
     text = str(req.inputs["text"])
     media = [str(item["image"]) for item in req.inputs.get("media", [])]
@@ -71,6 +81,7 @@ def dry_run(req: Request) -> dict[str, Any]:
 @runner.verb("run")
 def run(req: Request) -> dict[str, Any]:
     _logged("run")
+    _renew("run")
     secret("app-password")
     text = str(req.inputs["text"])
     state = os.environ.get("FIXTURE_POST_STATE", POST_STATE)

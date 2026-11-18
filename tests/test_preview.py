@@ -173,10 +173,9 @@ def test_regeneration_never_starts_the_package_server(
         return runner_module.Outcome({}, "")
 
     monkeypatch.setattr(runner_module, "call", fake_call)
-    assert (
-        preview_build_module.ensure(package, home, "run-1", "echo.text", {}, asset, preview_file)
-        == {}
-    )
+    assert preview_build_module.ensure(
+        package, home, "run-1", "echo.text", {}, asset, preview_file
+    ) == ({}, [])
     assert captured == {"start_server": False, "verb": "preview"}
 
 

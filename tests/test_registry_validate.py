@@ -141,7 +141,7 @@ def test_validate_ahead_registry_reports_floor_and_unknown_index_facet(
         "requires_facet",
         "needs facet >=9",
     ) in found
-    assert ("index.toml", "facets.hologram", "unknown to facet 0.1.0b1") in found
+    assert ("index.toml", "facets.hologram", "unknown to facet 0.1.0b2") in found
     assert not any(item["key"] == "facet" for item in errors)
     assert not any(item["key"] == "capabilities.future.kind" for item in errors)
     assert not any(item["key"] == "future.section" for item in errors)

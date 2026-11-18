@@ -862,7 +862,7 @@ def test_the_package_doctor_reports_a_missing_checkout_without_starting_it(
     env_dir.mkdir(parents=True)
     (env_dir / ".complete").write_text(package.lock_sha256, encoding="utf-8")
 
-    checks, failure = doctor_module.package_doctor(
+    checks, failure, _warnings = doctor_module.package_doctor(
         package, home, "run-doctor", "quick", "probe.health"
     )
 

@@ -597,7 +597,9 @@ def test_doctor_reports_machine_cannot_when_the_version_is_wrong(
         encoding="utf-8",
     )
 
-    checks, _failures, doctor_errors = doctor_module.run_check(package, home, "", "run-doctor")
+    checks, _failures, doctor_errors, _warnings = doctor_module.run_check(
+        package, home, "", "run-doctor"
+    )
 
     assert checks["installed"]["ok"] is False
     assert "9.9.9" in str(checks["installed"]["detail"])
@@ -616,7 +618,9 @@ def test_doctor_reports_machine_cannot_when_the_binary_cannot_run(
     resolved = home.bin_dir / BINARY_NAME / BINARY_VERSION / "bin" / "stubtool"
     resolved.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
 
-    checks, _failures, doctor_errors = doctor_module.run_check(package, home, "", "run-doctor")
+    checks, _failures, doctor_errors, _warnings = doctor_module.run_check(
+        package, home, "", "run-doctor"
+    )
 
     assert checks["installed"]["ok"] is False
     assert checks["installed"]["fix"] != "facet pull binpkg"

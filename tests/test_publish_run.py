@@ -136,6 +136,21 @@ def test_a_dry_run_reports_the_networks_warnings(
     assert post["warnings"] == ["the text is over the network's 300 limit"]
 
 
+def test_a_dry_run_carries_a_renewal_warning(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    piece: Path,
+) -> None:
+    """A renewal warning the dry-run verb stored reaches the envelope data."""
+    monkeypatch.setenv("FIXTURE_RENEW_DRY_RUN", "1")
+    code = _send(piece, tmp_path, "--dry-run", "--json")
+    envelope = _envelope(capsys)
+    assert code == EXIT_OK
+    assert envelope["data"]["warnings"] == ["bluesky renewed undeclared secret rotated (skipped)"]
+
+
 def test_the_terminal_shows_the_dry_run_preview(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -410,6 +425,23 @@ def test_a_draft_read_back_fails_and_seals_the_receipt_unknown(
     assert stored["verification"]["metrics"]["state"] == "draft"
 
 
+def test_a_failed_read_back_keeps_the_runs_renewal_warning(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    piece: Path,
+) -> None:
+    """The send stored a renewal; the read-back failed, so the error says so."""
+    monkeypatch.setenv("FIXTURE_RENEW_RUN", "1")
+    monkeypatch.setenv("FIXTURE_READ_BACK", "draft")
+    out = tmp_path / "out"
+    code = _send(piece, out, "--yes", "--json")
+    error = _envelope(capsys)["error"]
+    assert code == EXIT_VERIFICATION_FAILED
+    assert error["details"]["warnings"] == ["bluesky renewed undeclared secret rotated (skipped)"]
+
+
 def test_a_read_back_that_cannot_happen_says_the_post_may_exist(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -463,6 +495,23 @@ def test_a_send_whose_answer_breaks_the_protocol_keeps_an_unknown_receipt(
     # The receipt-exists rule now refuses a second send over the same output.
     assert _send(piece, out, "--yes", "--json") == EXIT_INVALID_INPUT
     assert _envelope(capsys)["error"]["message"].endswith("this piece was already sent")
+
+
+def test_a_broken_send_keeps_the_runs_renewal_warning(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    piece: Path,
+) -> None:
+    """A run result facet cannot read still reports the renewal it stored."""
+    monkeypatch.setenv("FIXTURE_RENEW_RUN", "1")
+    monkeypatch.setenv("FIXTURE_BAD_RUN", "1")
+    out = tmp_path / "out"
+    code = _send(piece, out, "--yes", "--json")
+    error = _envelope(capsys)["error"]
+    assert code == EXIT_RUNNER_FAILED
+    assert error["details"]["warnings"] == ["bluesky renewed undeclared secret rotated (skipped)"]
 
 
 # --- `facet check` reads a post back, never judging it by its bytes alone.

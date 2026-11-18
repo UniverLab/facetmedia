@@ -98,10 +98,11 @@ def _single_mode(args: argparse.Namespace, run_id: str) -> tuple[dict[str, objec
     stored = record.read_record(args.asset)
     capability_id = _capability_of(stored, args.asset)
     preview_file = asset_path.parent / (asset_path.name + PREVIEW_SUFFIX)
+    warnings: list[str] = []
     if preview_state(asset_path, preview_file) == FRESH:
         preview_data = _load_preview(preview_file)
     else:
-        preview_data = rebuild(home, run_id, capability_id, stored, asset_path)
+        preview_data, warnings = rebuild(home, run_id, capability_id, stored, asset_path)
     images = _images(preview_data, asset_path.parent)
     _mark_truncated(preview_data)
     shown = images[:PAGE_LIMIT] if isinstance(preview_data.get("pages"), list) else images
@@ -111,6 +112,8 @@ def _single_mode(args: argparse.Namespace, run_id: str) -> tuple[dict[str, objec
         "preview": preview_data,
         "images": [str(path) for path in shown],
     }
+    if warnings:
+        data["warnings"] = list(warnings)
     if bool(getattr(args, "json", False)):
         return data, 0
     _show(args, preview_data, _capability(capability_id), asset_path, preview_file)

@@ -34,7 +34,9 @@ def installed_check(package: Package, home: Home) -> Check | None:
     return Check(False, problem, fix)
 
 
-def package_doctor(package: Package, home: Home) -> tuple[list[dict[str, object]], None] | None:
+def package_doctor(
+    package: Package, home: Home
+) -> tuple[list[dict[str, object]], None, list[str]] | None:
     """The package-doctor entry for a binary engine that is present or broken.
 
     A binary package has no runner verb of its own to call: the probe facet
@@ -48,6 +50,6 @@ def package_doctor(package: Package, home: Home) -> tuple[list[dict[str, object]
     problem = env_binary.binary_problem(package, home)
     if problem is None:
         detail = f"binary {binary.name} {binary.version} verified and runnable"
-        return [{"name": "binary", "ok": True, "detail": detail, "fix": ""}], None
+        return [{"name": "binary", "ok": True, "detail": detail, "fix": ""}], None, []
     fix = "" if env_binary.binary_present(binary, home) else f"facet pull {package.name}"
-    return [{"name": "binary", "ok": False, "detail": problem, "fix": fix}], None
+    return [{"name": "binary", "ok": False, "detail": problem, "fix": fix}], None, []

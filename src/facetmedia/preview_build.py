@@ -31,7 +31,7 @@ def rebuild(
     capability_id: str,
     stored: Mapping[str, object],
     asset_path: Path,
-) -> dict[str, object]:
+) -> tuple[dict[str, object], list[str]]:
     """The runner's fresh preview: the package must be installed to rebuild."""
     _capability_record, package = _resolve(capability_id)
     if not env.is_installed(package, home):
@@ -54,7 +54,7 @@ def ensure(
     params: dict[str, object],
     asset_path: Path,
     preview_file: Path,
-) -> dict[str, object]:
+) -> tuple[dict[str, object], list[str]]:
     """The parsed preview file, regenerated when missing or older than asset."""
     try:
         asset_mtime = asset_path.stat().st_mtime
@@ -65,7 +65,7 @@ def ensure(
     except OSError:
         preview_mtime = None
     if preview_mtime is not None and preview_mtime >= asset_mtime:
-        return load_preview(preview_file)
+        return load_preview(preview_file), []
     preview_file.unlink(missing_ok=True)
     temp_dir = home.tmp_dir / f".facet-preview-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -88,11 +88,12 @@ def ensure(
             runner.model_paths(package, home),
             [asset_path],
         )
-        runner.call(invocation, "preview", request)
+        outcome = runner.call(invocation, "preview", request)
         preview_data = load_preview(preview_file)
+        warnings = list(outcome.warnings)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
-    return preview_data
+    return preview_data, warnings
 
 
 def installed_packages(names: Iterable[str | None]) -> frozenset[str]:

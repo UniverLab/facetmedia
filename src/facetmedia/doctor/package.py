@@ -23,8 +23,8 @@ from facetmedia.registry_types import Package
 
 def package_doctor(
     package: Package, home: Home, run_id: str, depth: str, capability: str
-) -> tuple[list[dict[str, object]], FacetError | None]:
-    """One package's ``doctor`` verb: its checks plus a failure to classify.
+) -> tuple[list[dict[str, object]], FacetError | None, list[str]]:
+    """One package's ``doctor`` verb: its checks, a failure to classify, warnings.
 
     An uninstalled environment is skipped with an ``ok`` check.  A timeout is
     a failed check of class ``machine_cannot``; a crash or a broken protocol
@@ -36,15 +36,15 @@ def package_doctor(
     if (engine := doctor_host.engine_package_doctor(package, home)) is not None:
         return engine
     if not env_module.client_env_present(package, home):
-        return [_doctor_skip(package, home)], None
+        return [_doctor_skip(package, home)], None, []
     node_entry = doctor_node.doctor_entry(package, home)
     if node_entry is not None:
-        return [node_entry], None
+        return [node_entry], None, []
     artifact_entry = _artifact_doctor_check(package, home)
     if artifact_entry is not None:
-        return [artifact_entry], None
+        return [artifact_entry], None, []
     if not env_module.server_present(package, home) or not env_module.source_present(package, home):
-        return [_server_doctor_check(package, home)], None
+        return [_server_doctor_check(package, home)], None, []
     temp_dir = home.tmp_dir / f".facet-doctor-{run_id}"
     temp_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -125,7 +125,7 @@ def _doctor_skip(package: Package, home: Home) -> dict[str, object]:
 
 def _doctor_call(
     package: Package, home: Home, run_id: str, depth: str, capability: str, temp_dir: Path
-) -> tuple[list[dict[str, object]], FacetError | None]:
+) -> tuple[list[dict[str, object]], FacetError | None, list[str]]:
     from facetmedia.doctor import DOCTOR_TIMEOUTS, QUICK_TIMEOUT_S  # noqa: PLC0415
 
     timeout_s = DOCTOR_TIMEOUTS.get(depth, QUICK_TIMEOUT_S)
@@ -144,9 +144,15 @@ def _doctor_call(
         )
         request["depth"] = depth
         outcome = runner.call(invocation, "doctor", request)
-        return _doctor_result(package, outcome.result, temp_dir)
+        checks, failure = _doctor_result(package, outcome.result, temp_dir)
+        return checks, failure, list(outcome.warnings)
     except FacetError as exc:
-        return [_failed_doctor_check(package, exc)], _classify_doctor_error(package, exc, timeout_s)
+        warnings = exc.details.get("warnings")
+        return (
+            [_failed_doctor_check(package, exc)],
+            _classify_doctor_error(package, exc, timeout_s),
+            list(warnings) if isinstance(warnings, list) else [],
+        )
 
 
 def _failed_doctor_check(package: Package, error: FacetError) -> dict[str, object]:
