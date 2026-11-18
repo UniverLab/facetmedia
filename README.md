@@ -45,7 +45,7 @@ packages, the first run, and how an agent starts with `facet skill`.
 | `facet describe` | show a capability's inputs, verification and licences |
 | `facet skill` | print the skill for facet or one package |
 | `facet config` | store where a host application lives |
-| `facet secret` | store, list and remove a tool's credentials |
+| `facet secret` | store, list, remove and rekey a tool's credentials |
 | `facet auth` | run a tool's browser sign-in and store its tokens |
 | `facet doctor` | check facet, the tool chain and this machine's readiness |
 | `facet check` | re-verify an asset against its record |
