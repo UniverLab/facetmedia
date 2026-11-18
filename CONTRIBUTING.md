@@ -50,7 +50,7 @@ GPU. `scripts/acceptance.sh` reproduces that condition and proves it.
 ```bash
 bash scripts/acceptance.sh             # build the wheel, clean home, remove it
 bash scripts/acceptance.sh --keep      # keep the root to inspect assets and logs
-bash scripts/acceptance.sh --wheel dist/facetmedia-0.1.0b1-py3-none-any.whl
+bash scripts/acceptance.sh --wheel dist/facetmedia-0.1.0b2-py3-none-any.whl
 bash scripts/acceptance.sh --registry-ref main
 ```
 

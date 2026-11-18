@@ -10,7 +10,7 @@ Add `--json` to any `facet` command for machine-readable output:
 
 ```console
 $ facet list --json
-{"contract": 1, "data": {"available": {"capabilities": "…", "facets": "…", "packages": "…"}, "packages": [], "registry": {"path": "…"}}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"available": {"capabilities": "…", "facets": "…", "packages": "…"}, "packages": [], "registry": {"path": "…"}}, "facet": "0.1.0b2", "ok": true}
 ```
 
 The keys above are the examples, not the whole `data`: `facet describe`
@@ -64,7 +64,7 @@ to parse.
 ### Success
 
 ```json
-{"contract": 1, "data": {"package": "ffmpeg", "pulled": true, "…": "…"}, "facet": "0.1.0b1", "ok": true}
+{"contract": 1, "data": {"package": "ffmpeg", "pulled": true, "…": "…"}, "facet": "0.1.0b2", "ok": true}
 ```
 
 `contract` is the contract version — the source constant `CONTRACT_VERSION`,
@@ -81,7 +81,7 @@ present only when the list is not empty; a consumer that does not know it
 keeps working.
 
 ```json
-{"contract": 1, "data": {"…": "…"}, "facet": "0.1.0b1", "notices": [{"available": "0.2.0", "installed": "0.1.0", "kind": "update", "package": "comfy"}], "ok": true}
+{"contract": 1, "data": {"…": "…"}, "facet": "0.1.0b2", "notices": [{"available": "0.2.0", "installed": "0.1.0", "kind": "update", "package": "comfy"}], "ok": true}
 ```
 
 `kind: "update"` names an installed package whose version in the registry
@@ -93,7 +93,7 @@ installs the newer version.
 ### Failure
 
 ```json
-{"contract": 1, "error": {"code": "invalid_input", "details": {}, "hint": null, "message": "argument VERB: invalid choice: 'nope' (choose from update, pull, list, describe, example, run, check, preview, doctor, auth, remove, clean, skill, license, config, secret, registry)"}, "facet": "0.1.0b1", "ok": false}
+{"contract": 1, "error": {"code": "invalid_input", "details": {}, "hint": null, "message": "argument VERB: invalid choice: 'nope' (choose from update, pull, list, describe, example, run, check, preview, doctor, auth, remove, clean, skill, license, config, secret, registry)"}, "facet": "0.1.0b2", "ok": false}
 ```
 
 `code` is from the table below, `message` is one line, `hint` is an
@@ -257,7 +257,7 @@ for the same reason. Annotations in `⟨…⟩`.
       {"path": "ref.png", "id": "sha256:8c7dd6f5…"}
     ],
     "seed": null,                     // number, when the tool is seeded
-    "facet": "0.1.0b1",               // facet version that ran
+    "facet": "0.1.0b2",               // facet version that ran
     "registry": {"commit": "e475dbac…", "path": null}
                                       // the snapshot commit in use, or null path
                                       //   when FACET_REGISTRY pointed at a checkout
