@@ -1,24 +1,24 @@
-```
-    ██████                               █████    ██████   ██████              █████  ███
-   ███░░███                             ░░███    ░░██████ ██████              ░░███  ░░░
-  ░███ ░░░   ██████    ██████   ██████  ███████   ░███░█████░███   ██████   ███████  ████   ██████
- ███████    ░░░░░███  ███░░███ ███░░███░░░███░    ░███░░███ ░███  ███░░███ ███░░███ ░░███  ░░░░░███
-░░░███░      ███████ ░███ ░░░ ░███████   ░███     ░███ ░░░  ░███ ░███████ ░███ ░███  ░███   ███████
-  ░███      ███░░███ ░███  ███░███░░░    ░███ ███ ░███      ░███ ░███░░░  ░███ ░███  ░███  ███░░███
-  █████    ░░████████░░██████ ░░██████   ░░█████  █████     █████░░██████ ░░████████ █████░░████████
- ░░░░░      ░░░░░░░░  ░░░░░░   ░░░░░░     ░░░░░  ░░░░░     ░░░░░  ░░░░░░   ░░░░░░░░ ░░░░░  ░░░░░░░░
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/UniverLab/.github/main/assets/banner-facetmedia.svg" alt="facetMedia"/>
+</p>
 
-The banner is DOS Rebel from pyfiglet; a terminal too narrow for it gets the
-TheDraw font ansiltr4 from [tat3r/tdfiglet](https://github.com/tat3r/tdfiglet)
-at commit `0225b8881d06773b92d9db2c7881f03ff0bdece7`, which declares no
-licence. `scripts/make_banner.py` regenerates both.
+<p align="center">
+  <a href="https://github.com/UniverLab/facetmedia/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/UniverLab/facetmedia/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"/></a>
+  <a href="https://pypi.org/project/facetmedia/"><img src="https://img.shields.io/pypi/v/facetmedia?include_prereleases&style=for-the-badge&color=E8C547" alt="PyPI"/></a>
+  <img src="https://img.shields.io/badge/Status-Beta-E8C547?style=for-the-badge" alt="Status"/>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-2E8B57?style=for-the-badge" alt="License"/></a>
+</p>
 
 facet installs each creation tool (Kokoro, Whisper, FFmpeg, CadQuery, …)
 in its own pinned uv environment, groups the tools by facet, and exposes
 them to agents through one verifiable `--json` contract and on-demand
 skills: a command that turns a data piece into an asset, a record that
 proves what made it, and a check that the asset still passes.
+
+The CLI prints its banner in DOS Rebel from pyfiglet; a terminal too narrow for it gets the
+TheDraw font ansiltr4 from [tat3r/tdfiglet](https://github.com/tat3r/tdfiglet)
+at commit `0225b8881d06773b92d9db2c7881f03ff0bdece7`, which declares no
+licence. `scripts/make_banner.py` regenerates both.
 
 > Internal preview: the interface may change between betas.
 
