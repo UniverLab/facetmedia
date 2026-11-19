@@ -504,7 +504,16 @@ the vault and removes them; a migration interrupted halfway loses nothing.
 - `facet secret set <package> <name>` — store one declared secret. The value
   is read from a hidden prompt at a terminal and from stdin otherwise; it is
   never taken from the command line, where the shell's history and the
-  process list would keep it.
+  process list would keep it. With no package and no name, when standard
+  input and output are both terminals, `facet secret set` walks the person
+  through choosing an installed package, then a credential, then its value,
+  repeating until every required credential is set or the person quits with
+  `done`. With `--json` and no arguments it never prompts: the missing
+  `<package> <name>` is `invalid_input`, exit 2. Off a terminal, bare
+  `facet secret set` also never prompts: `confirmation_required`, exit 11,
+  with a hint to name the package and secret. Cancelling the choice prints
+  `nothing selected` and exits `0` with nothing stored; a package that
+  declares no secrets says so and exits `0`.
 - `facet secret list [<package>]` — every declared secret of one package, or
   of every package that declares any, with whether each is set.
 - `facet secret rm <package> <name>` — remove one; a secret that is not
@@ -543,8 +552,11 @@ whether it is set.
 
 Lock: `set`, `rm` and `passphrase` take it exclusively; `list` takes none.
 
-Exit codes: `0`; `2` an unknown package, a name the package did not declare,
-or an empty secret value; `5` the vault cannot be opened.
+Exit codes: `0` (including a cancelled choice or a package that declares
+no secrets); `2` an unknown package, a name the package did not declare,
+an empty secret value, or bare `set --json` (missing `<package> <name>`);
+`5` the vault cannot be opened; `11` bare `set` with no terminal to
+choose on.
 
 ## `facet auth`
 

@@ -32,6 +32,7 @@ from facetmedia import (
     record,
     registry,
     run,
+    secret_wizard,
     secrets,
     theme,
     update,
@@ -127,6 +128,11 @@ def _secret_value(args: argparse.Namespace) -> str:
 
 def _handle_secret_set(args: argparse.Namespace) -> int:
     """Exclusive: prompt for one credential and store it under the facet home."""
+    if args.package is None and args.name is None:
+        return secret_wizard.run(args)
+    if args.package is None or args.name is None:
+        missing = "<package>" if args.package is None else "<name>"
+        raise FacetError("invalid_input", f"the following arguments are required: {missing}")
     package = _secret_package(args.package)
     with lock.hold("exclusive", "facet secret set", *_lock_params(args)):
         data = secrets.set_value(Home.from_env(), package, args.name, _secret_value(args))

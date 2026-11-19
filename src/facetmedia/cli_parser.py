@@ -419,17 +419,30 @@ def _add_config_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
 
 
 def _add_secret_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
-    for parsers_key in ("set", "rm"):
-        parsers[parsers_key].add_argument(
-            "package",
-            metavar="<package>",
-            help="an installed package name from `facet list`",
-        )
-        parsers[parsers_key].add_argument(
-            "name",
-            metavar="<name>",
-            help="a secret the package declares, from `facet secret list <package>`",
-        )
+    parsers["set"].add_argument(
+        "package",
+        nargs="?",
+        default=None,
+        metavar="<package>",
+        help="an installed package name from `facet list`",
+    )
+    parsers["set"].add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        metavar="<name>",
+        help="a secret the package declares, from `facet secret list <package>`",
+    )
+    parsers["rm"].add_argument(
+        "package",
+        metavar="<package>",
+        help="an installed package name from `facet list`",
+    )
+    parsers["rm"].add_argument(
+        "name",
+        metavar="<name>",
+        help="a secret the package declares, from `facet secret list <package>`",
+    )
     parsers["list"].add_argument(
         "package",
         nargs="?",
