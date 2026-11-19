@@ -616,9 +616,10 @@ package the same way the login path does — it must exist, be installed and
 declare an `auth` verb — then offers the secrets currently set and removes
 the chosen ones through `facet secret rm`'s path. With no package, at a
 terminal, it first offers the installed packages, then that package's set
-secrets. The secrets are a multi-select at a terminal, with `done` as the
-last choice; off a terminal the numbered list takes comma-separated row
-numbers, and a blank answer, EOF or `done` removes nothing and exits `0`.
+secrets. At a terminal the secrets are a multi-select with `done` as the
+last choice: a checkbox when facet can style the terminal, otherwise a
+numbered list that takes comma-separated row numbers. A blank answer, EOF
+or `done` removes nothing and exits `0`.
 Removing nothing is a clean no-op, and a package holding no stored secret
 prints `<package>: nothing stored` and exits `0`.
 
