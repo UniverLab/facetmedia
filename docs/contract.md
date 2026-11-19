@@ -224,7 +224,7 @@ Branch on the exit code without parsing prose:
 | `download_failed` | 8 | a model, environment, server or source, or registry download failed, or its sha256 did not match |
 | `runner_failed` | 9 | the package runner crashed or broke the runner protocol |
 | `license_needs_person` | 10 | `license accept` was run without an interactive terminal |
-| `confirmation_required` | 11 | a pull installs more than one package and no interactive terminal can confirm it; a real outward `run` without `--yes` and without an interactive terminal; bare `facet auth` with no interactive terminal to choose on. Rerun with `--yes` once the preview is what you meant to send; `details.preview` carries it |
+| `confirmation_required` | 11 | a pull installs more than one package and no interactive terminal can confirm it; a real outward `run` without `--yes` and without an interactive terminal; bare `facet auth` with no interactive terminal to choose on. For the first two, rerun with `--yes` once the preview is what you meant to send; `details.preview` carries it. For auth, name the package: `facet auth <package>`; `details.packages` lists the registry's package names |
 | — | 130 | interrupted with Ctrl+C; prints `cancelled`, and installs or records nothing that had not already completed |
 
 Bad arguments exit 2 and, with `--json`, still print an `invalid_input`

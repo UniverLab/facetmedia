@@ -557,15 +557,18 @@ not declare fails the whole flow with `invalid_input`: a sign-in can never
 store a credential the package did not declare.
 
 With no package, when standard input and output are both terminals,
-`facet auth` lists the installed packages
-that offer a browser sign-in and lets the person choose one, then runs the
-same sign-in flow. Packages with no `auth` verb are listed with the
-`facet secret set <package> <name>` command that fits them instead. When no
-installed package offers a browser sign-in, it says so, names
-`facet pull <package>` first, and exits `0`. After a chosen sign-in, confirm
-with `facet doctor <package> --full` and read what it reports: every declared
-secret set, plus the package's own deep checks. Never claim success before
-that check.
+`facet auth` lists the installed packages that offer a browser sign-in and
+lets the person choose one, then runs the same sign-in flow. Packages with
+no `auth` verb are listed with the `facet secret set <package> <name>`
+command that fits them instead. With `--json` and no package it never
+prompts: the missing `<package>` is `invalid_input`, exit 2. Off a terminal,
+bare `facet auth` also never prompts: `confirmation_required`, exit 11, with
+a hint to name the package. Cancelling the choice prints `nothing selected`
+and exits `0` with nothing stored. When no installed package offers a
+browser sign-in, it says so, names `facet pull <package>` first, and exits
+`0`. After a chosen sign-in, confirm with `facet doctor <package> --full`
+and read what it reports: every declared secret set, plus the package's own
+deep checks. Never claim success before that check.
 
 A tool with no `auth` verb is refused, naming `facet secret set` instead, and
 so is a package that is not installed (`not_installed`, exit 7, with
