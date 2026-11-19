@@ -508,7 +508,8 @@ the vault and removes them; a migration interrupted halfway loses nothing.
   input and output are both terminals, `facet secret set` walks the person
   through choosing an installed package, then a credential, then its value,
   repeating until every required credential is set or the person quits with
-  `done`. With `--json` and no arguments it never prompts: the missing
+  `done`. With no installed packages it prints `nothing selected` and exits
+  `0`. With `--json` and no arguments it never prompts: the missing
   `<package> <name>` is `invalid_input`, exit 2. Off a terminal, bare
   `facet secret set` also never prompts: `confirmation_required`, exit 11,
   with a hint to name the package and secret. Cancelling the choice prints
