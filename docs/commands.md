@@ -556,6 +556,17 @@ returns, under the package's declared secret names. A name the manifest did
 not declare fails the whole flow with `invalid_input`: a sign-in can never
 store a credential the package did not declare.
 
+With no package, when standard input and output are both terminals,
+`facet auth` lists the installed packages
+that offer a browser sign-in and lets the person choose one, then runs the
+same sign-in flow. Packages with no `auth` verb are listed with the
+`facet secret set <package> <name>` command that fits them instead. When no
+installed package offers a browser sign-in, it says so, names
+`facet pull <package>` first, and exits `0`. After a chosen sign-in, confirm
+with `facet doctor <package> --full` and read what it reports: every declared
+secret set, plus the package's own deep checks. Never claim success before
+that check.
+
 A tool with no `auth` verb is refused, naming `facet secret set` instead, and
 so is a package that is not installed (`not_installed`, exit 7, with
 `facet pull <package>`). The verb's temporary directory is removed in every
@@ -566,9 +577,21 @@ $ facet auth youtube
 youtube: stored oauth-token
 ```
 
-Lock: exclusive. Exit codes: `0`; `2` an unknown package, a package with no
-`auth` verb, or a returned name the manifest did not declare; `7` the package
-is not installed; `9` the verb crashed or returned no `secrets` map.
+With no package the wizard adds the confirmation reminder after the
+chosen sign-in:
+
+```console
+$ facet auth
+youtube: stored oauth-token
+confirm with `facet doctor youtube --full`
+```
+
+Lock: exclusive. Exit codes: `0` (including a cancelled choice or no
+offering package); `2` an unknown package, a package with no `auth` verb, a
+returned name the manifest did not declare, or bare `facet auth --json`
+(missing `<package>`); `7` the package is not installed; `9` the verb
+crashed or returned no `secrets` map; `11` bare `facet auth` with no
+terminal to choose on.
 
 ## `facet doctor`
 

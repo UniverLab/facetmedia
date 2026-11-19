@@ -91,7 +91,7 @@ Branch on the exit code, not the prose:
 | 8 | `download_failed` | a download failed or its sha256 did not match |
 | 9 | `runner_failed` | the package runner crashed or broke its protocol |
 | 10 | `license_needs_person` | `license accept` without a terminal |
-| 11 | `confirmation_required` | a real outward `run` without `--yes` and no terminal to ask |
+| 11 | `confirmation_required` | a real outward `run` without `--yes` and no terminal to ask; bare `facet auth` with no terminal to choose on |
 
 ## Publish
 
@@ -114,8 +114,7 @@ and the network may keep it as a draft or private. Follow these rules:
   `unknown`) and report exactly that; never call a draft or a private post
   published. `facet check <receipt>` reads it back.
 - **Credentials are the person's.** Tell them what to create in the account
-  and which `facet secret set <package> <name>` or `facet auth <package>` to
-  run — in their own terminal. Never ask for a secret in the conversation and
+  and which `facet secret set <package> <name>` or `facet auth <package>` to run — in their own terminal (`facet auth` alone lists offering packages). Never ask for a secret in the conversation and
   never pass one to `facet secret set` yourself; check with `facet doctor`.
   Credentials live in an encrypted vault under the facet home (`facet secret
   passphrase` sets or removes a passphrase). The encryption protects against

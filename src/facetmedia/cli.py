@@ -202,13 +202,19 @@ _SECRET_HANDLERS: dict[str, Handler] = {
 
 def _handle_auth(args: argparse.Namespace) -> int:
     """Exclusive: run a package's browser sign-in and store what it returns."""
+    wizard = not args.package
+    name = auth.pick(args) if wizard else args.package
+    if name is None:
+        return 0
     with lock.hold("exclusive", "facet auth", *_lock_params(args)):
-        data = auth.handle(args.package, args.run_id)
+        data = auth.handle(name, args.run_id)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         stored = data["secrets"]
         names = ", ".join(stored) if isinstance(stored, list) else ""
         print(f"{data['package']}: stored {names}")
+        if wizard:
+            print(f"confirm with `facet doctor {data['package']} --full`")
     return 0
 
 

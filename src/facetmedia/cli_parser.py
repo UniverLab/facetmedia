@@ -442,8 +442,13 @@ def _add_secret_flags(parsers: dict[str, argparse.ArgumentParser]) -> None:
 def _add_auth_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "package",
+        nargs="?",
+        default=None,
         metavar="<package>",
-        help="an installed package whose auth verb opens a browser sign-in",
+        help=(
+            "an installed package whose auth verb opens a browser sign-in; "
+            "omit it at a terminal to choose"
+        ),
     )
 
 
