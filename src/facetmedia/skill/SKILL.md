@@ -37,14 +37,15 @@ prints that package's how-to), plus `secrets`: one
 — never a value. When a required secret is missing, store it with
 `facet secret set <package> <name>` (hidden prompt at a terminal, stdin
 otherwise) or `facet auth <package>` when the package offers a browser
-sign-in.
+sign-in. `facet auth login [<package>]` repeats it; `facet auth logout
+[<package>]` removes stored secrets locally, revoking nothing server-side.
 
 `summary` and a facet's name are English by default. When the registry
-declares localized texts, `facet describe --json` carries them under
-`i18n`, keyed by language tag (`{"es": {"summary": "…"}}`, `{}` when none),
-and `facet list --available --json` carries each facet's `label` and
-`i18n` under `data.facets` (`{"text": {"label": "Text", "i18n": {"es":
-{"label": "Texto"}}}}`).
+declares localized texts, `facet describe --json` carries them under `i18n`,
+keyed by language tag (`{"es": {"summary": "…"}}`, `{}` when none), and
+`facet list --available --json` carries each facet's `label` and `i18n`
+under `data.facets` (`{"text": {"label": "Text", "i18n": {"es": {"label":
+"Texto"}}}}`).
 
 ## Run
 

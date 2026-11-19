@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Final
 
 import questionary
 
-from facetmedia import banner, renewals, runner, theme
+from facetmedia import banner, lock, renewals, runner, secrets, theme
 from facetmedia import env as env_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
@@ -35,19 +35,39 @@ from facetmedia.secrets import auth_hint, has_auth_verb, set_value, vault_file
 if TYPE_CHECKING:
     from facetmedia.registry_types import Registry
 
-__all__ = ["AUTH_VERB", "NOTHING_OFFERED", "NOTHING_SELECTED", "RESULT_KEY", "handle", "pick"]
+__all__ = [
+    "AUTH_VERB",
+    "LOGIN_VERB",
+    "LOGOUT_VERB",
+    "NOTHING_OFFERED",
+    "NOTHING_SELECTED",
+    "NOTHING_STORED",
+    "RESULT_KEY",
+    "handle",
+    "logout",
+    "pick",
+]
 
 #: The verb a package registers to produce secrets through a browser flow.
 AUTH_VERB: Final[str] = "auth"
 #: The result-file key the returned secrets travel in.
 RESULT_KEY: Final[str] = "secrets"
+#: ``facet auth login``: today's sign-in flow, with or without a package.
+LOGIN_VERB: Final[str] = "login"
+#: ``facet auth logout``: remove a package's stored sign-in secrets, locally.
+LOGOUT_VERB: Final[str] = "logout"
 #: Printed when no installed package offers a browser sign-in.
 NOTHING_OFFERED: Final[str] = (
     "nothing installed offers a browser sign-in; `facet pull <package>` first"
 )
 #: Printed when the person cancels the choice without picking a package.
 NOTHING_SELECTED: Final[str] = "nothing selected"
+#: Printed when a package holds no stored sign-in secret to remove.
+NOTHING_STORED: Final[str] = "nothing stored"
 _SELECT_MESSAGE: Final[str] = "Choose an account — arrows move, enter picks [default: done]:"
+_PICK_SECRETS_MESSAGE: Final[str] = (
+    "Choose the credentials to remove — space toggles, enter confirms:"
+)
 _DONE: Final[object] = object()
 
 
@@ -256,3 +276,149 @@ def handle(package_name: str, run_id: str) -> dict[str, object]:
         "secrets": sorted(values),
         "path": str(vault_file(home)),
     }
+
+
+def _logout_refused(args: argparse.Namespace, known: list[str]) -> None:
+    """Refuse the logout wizard when it cannot ask: ``--json`` or no terminal."""
+    if bool(getattr(args, "json", False)):
+        raise FacetError("invalid_input", "the following arguments are required: <package>")
+    if not _terminal():
+        raise FacetError(
+            "confirmation_required",
+            "picking what to sign out of needs a terminal",
+            hint="facet auth logout <package>",
+            details={"packages": known},
+        )
+
+
+def _logout_choosable(args: argparse.Namespace, package: Package) -> None:
+    """Removal asks which credentials: never ``--json``, and never without a terminal."""
+    detail = f"choosing {package.name}'s stored credentials to remove needs a terminal"
+    hint = f"facet secret rm {package.name} <name>"
+    if bool(getattr(args, "json", False)):
+        raise FacetError("invalid_input", detail, hint=hint, details={"package": package.name})
+    if not _terminal():
+        raise FacetError(
+            "confirmation_required", detail, hint=hint, details={"package": package.name}
+        )
+
+
+def _logout_target(args: argparse.Namespace, target: str | None) -> Package | None:
+    """The package to sign out of: the named one, or one chosen at the terminal."""
+    if target is not None:
+        return _resolve(target)
+    registry = load_active_registry()
+    _logout_refused(args, sorted(registry.packages))
+    banner.print_text()
+    installed = _installed(registry, Home.from_env())
+    if not installed:
+        print(NOTHING_SELECTED)
+        return None
+    chosen = _select(installed)
+    if chosen is None:
+        print(NOTHING_SELECTED)
+        return None
+    return _resolve(chosen)
+
+
+def _stored(home: Home, package: Package) -> list[str]:
+    """The package's declared secret names that currently hold a value."""
+    rows = secrets.rows(home, [package])
+    return [str(row["name"]) for row in rows if row.get("set") is True]
+
+
+def _rows(names: list[str]) -> list[tuple[str, str | None]]:
+    """One row per stored secret, then ``done``; the done row has no name."""
+    return [(name, name) for name in names] + [("done", None)]
+
+
+def _parse_rows(answer: str, rows: list[tuple[str, str | None]]) -> list[str]:
+    """The names behind the 1-based row numbers in ``answer``, in order, without repeats."""
+    picked: list[str] = []
+    for token in answer.replace(",", " ").split():
+        if not token.isdigit():
+            continue
+        index = int(token)
+        if not 1 <= index <= len(rows):
+            continue
+        value = rows[index - 1][1]
+        if value is not None and value not in picked:
+            picked.append(value)
+    return picked
+
+
+def _choose_styled(names: list[str]) -> list[str]:
+    """The checkbox choice, or an empty list on EOF or the done row."""
+    choices = [
+        questionary.Choice(title=label, value=label if value is not None else _DONE)
+        for label, value in _rows(names)
+    ]
+    try:
+        picked = questionary.checkbox(_PICK_SECRETS_MESSAGE, choices=choices).unsafe_ask()
+    except EOFError:
+        return []
+    return [str(name) for name in picked or [] if name is not _DONE]
+
+
+def _choose_plain(names: list[str]) -> list[str]:
+    """The numbered comma-separated choice; blank, EOF or the done row removes nothing."""
+    rows = _rows(names)
+    for index, (label, _value) in enumerate(rows, 1):
+        print(f"{index}. {label}")
+    try:
+        answer = input(f"Choose credentials to remove [1-{len(rows)}, comma separated]: ").strip()
+    except EOFError:
+        return []
+    return _parse_rows(answer, rows)
+
+
+def _choose_secrets(names: list[str]) -> list[str]:
+    """The stored secret names to remove, chosen at the terminal."""
+    if theme.styled():
+        return _choose_styled(names)
+    return _choose_plain(names)
+
+
+def _remove_stored(
+    home: Home,
+    package: Package,
+    names: list[str],
+    args: argparse.Namespace,
+) -> list[str]:
+    """Remove each chosen name through ``secret rm``'s path, under one exclusive lock."""
+    wait = bool(getattr(args, "wait", True))
+    timeout_s = float(getattr(args, "wait_timeout", 3600.0))
+    removed: list[str] = []
+    with lock.hold("exclusive", "facet auth logout", wait, timeout_s):
+        for name in names:
+            if secrets.remove(home, package, name)["removed"] is True:
+                removed.append(name)
+    return removed
+
+
+def logout(args: argparse.Namespace, target: str | None) -> dict[str, object] | None:
+    """Remove a package's stored sign-in secrets locally; ``None`` when nothing was chosen.
+
+    Nothing leaves this machine: no network call, no revocation.  Re-authenticating
+    with ``facet auth login <package>`` is the way back.  A package with nothing
+    stored is a no-op that still reports its empty ``removed`` list.
+    """
+    package = _logout_target(args, target)
+    if package is None:
+        return None
+    home = Home.from_env()
+    names = _stored(home, package)
+    done: dict[str, object] = {
+        "package": package.name,
+        "removed": [],
+        "path": str(vault_file(home)),
+    }
+    if not names:
+        return done
+    _logout_choosable(args, package)
+    chosen = _choose_secrets(names)
+    if not chosen:
+        print(NOTHING_SELECTED)
+        return None
+    done["removed"] = _remove_stored(home, package, chosen, args)
+    return done

@@ -457,10 +457,19 @@ def _add_auth_flags(parser: argparse.ArgumentParser) -> None:
         "package",
         nargs="?",
         default=None,
+        metavar="<verb-or-package>",
+        help=(
+            "login, logout, or an installed package whose auth verb opens a "
+            "browser sign-in; omit it at a terminal to choose"
+        ),
+    )
+    parser.add_argument(
+        "extra",
+        nargs="?",
+        default=None,
         metavar="<package>",
         help=(
-            "an installed package whose auth verb opens a browser sign-in; "
-            "omit it at a terminal to choose"
+            "the installed package `login` or `logout` applies to; omit it at a terminal to choose"
         ),
     )
 

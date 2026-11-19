@@ -207,9 +207,26 @@ _SECRET_HANDLERS: dict[str, Handler] = {
 
 
 def _handle_auth(args: argparse.Namespace) -> int:
+    """Exclusive: sign a package in, or remove its stored sign-in secrets."""
+    first = args.package
+    if first == auth.LOGOUT_VERB:
+        return _handle_auth_logout(args)
+    if first == auth.LOGIN_VERB:
+        return _handle_auth_login(args, args.extra)
+    if args.extra is not None:
+        raise FacetError(
+            "invalid_input",
+            f"{first} takes no second argument; use login or logout",
+            hint="facet auth login <package>",
+            details={"arguments": [first, args.extra]},
+        )
+    return _handle_auth_login(args, first)
+
+
+def _handle_auth_login(args: argparse.Namespace, target: str | None) -> int:
     """Exclusive: run a package's browser sign-in and store what it returns."""
-    wizard = not args.package
-    name = auth.pick(args) if wizard else args.package
+    wizard = target is None
+    name = auth.pick(args) if wizard else target
     if name is None:
         return 0
     with lock.hold("exclusive", "facet auth", *_lock_params(args)):
@@ -221,6 +238,24 @@ def _handle_auth(args: argparse.Namespace) -> int:
         print(f"{data['package']}: stored {names}")
         if wizard:
             print(f"confirm with `facet doctor {data['package']} --full`")
+    return 0
+
+
+def _handle_auth_logout(args: argparse.Namespace) -> int:
+    """Remove a package's stored sign-in secrets, on this machine only."""
+    data = auth.logout(args, args.extra)
+    if data is None:
+        return 0
+    contract.emit(contract.ok(data), args.json)
+    if not args.json:
+        removed = data["removed"]
+        names = ", ".join(removed) if isinstance(removed, list) else ""
+        if not names:
+            print(f"{data['package']}: {auth.NOTHING_STORED}")
+            return 0
+        print(f"{data['package']}: removed {names}")
+        print("removed on this machine only; nothing was revoked on the server")
+        print(f"sign back in with `facet auth login {data['package']}`")
     return 0
 
 
@@ -611,7 +646,12 @@ _EXAMPLES: dict[tuple[str, ...], tuple[str, ...]] = {
         "facet secret rm bluesky app-password",
         "facet secret passphrase",
     ),
-    ("auth",): ("facet auth youtube", "facet auth youtube --json"),
+    ("auth",): (
+        "facet auth youtube",
+        "facet auth login youtube",
+        "facet auth logout youtube",
+        "facet auth logout --json",
+    ),
     ("registry",): (
         "facet registry validate ../registry",
         "facet registry validate ../registry --json",

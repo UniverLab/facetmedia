@@ -5,6 +5,10 @@ and runs the existing sign-in flow for the chosen one. Everything here builds
 its own registry and drives the wizard with fake TTYs: questionary prompts
 read keystrokes from prompt_toolkit pipe input, one entry per prompt in
 order. The runner is stubbed, so nothing downloads and no browser opens.
+
+``facet auth login [<package>]`` is the same flow by name, and
+``facet auth logout [<package>]`` removes a package's stored secrets on this
+machine, choosing them at the terminal and never calling the network.
 """
 
 from __future__ import annotations
@@ -246,3 +250,287 @@ def test_empty_registry_names_nothing_offered(use_registry, monkeypatch, capsys)
     assert "facet pull" in out
     assert "facet secret set a token" in out
     assert values_missing(home)
+
+
+# --- `facet auth login`
+
+
+def test_login_with_a_package_runs_the_same_flow(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    called: list[str] = []
+    monkeypatch.setattr(
+        auth_module,
+        "handle",
+        lambda name, run_id: (
+            called.append(name)
+            or {
+                "package": name,
+                "secrets": ["token"],
+                "path": str(secrets.vault_file(home)),
+            }
+        ),
+    )
+    assert main(["auth", "login", "a"]) == 0
+    assert called == ["a"]
+    out = capsys.readouterr().out
+    assert "a: stored token" in out
+    # With an explicit package the wizard-only doctor reminder stays out.
+    assert "facet doctor a --full" not in out
+
+
+def test_login_without_a_package_runs_the_guide(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
+    fake_outcome = SimpleNamespace(result={"secrets": {"token": "wizard-token"}})
+    monkeypatch.setattr("facetmedia.runner.call", lambda inv, verb, request: fake_outcome)
+    monkeypatch.setattr("facetmedia.renewals.scrub", lambda run_id, values: None)
+    fake_tty(monkeypatch, ["\r"])
+    assert main(["auth", "login"]) == 0
+    out = capsys.readouterr().out
+    assert "a: stored token" in out
+    assert "confirm with `facet doctor a --full`" in out
+    assert secrets.env_for(home, load_active_registry().package("a")) == {
+        "FACET_SECRET_TOKEN": "wizard-token"
+    }
+
+
+def test_the_package_alias_and_the_login_verb_run_the_same_flow(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    handlers: list[str] = []
+
+    def fake_handle(name: str, run_id: str) -> dict[str, object]:
+        handlers.append(name)
+        return {"package": name, "secrets": ["token"], "path": str(secrets.vault_file(home))}
+
+    monkeypatch.setattr(auth_module, "handle", fake_handle)
+    assert main(["auth", "a"]) == 0
+    assert main(["auth", "login", "a"]) == 0
+    capsys.readouterr()
+    assert handlers == ["a", "a"]
+
+
+def test_two_packages_without_a_verb_word_is_invalid_input(
+    use_registry, monkeypatch, capsys
+) -> None:
+    _auth_registry(use_registry, "a", True)
+    assert main(["auth", "a", "b"]) == EXIT_INVALID_INPUT
+    captured = capsys.readouterr()
+    assert "takes no second argument" in captured.err
+    assert "facet auth login <package>" in captured.err
+
+
+# --- `facet auth logout`
+
+
+def _logged_in(home: Home, root: Path, values: dict[str, str]) -> None:
+    """Store the given secrets so logout has something to remove."""
+    package = load_registry(root).packages["a"]
+    for name, value in values.items():
+        secrets.set_value(home, package, name, value)
+
+
+def test_logout_removes_every_chosen_secret(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    _append_secret(root, "a", "handle", "the account handle")
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t", "handle": "h"})
+    removed: list[str] = []
+    real_remove = secrets.remove
+
+    def spy(where: Home, package: object, name: str) -> dict[str, object]:
+        removed.append(name)
+        return real_remove(where, package, name)
+
+    monkeypatch.setattr(secrets, "remove", spy)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "1, 2")
+    assert main(["auth", "logout", "a"]) == 0
+    out = capsys.readouterr().out
+    assert removed == ["token", "handle"]
+    assert "a: removed token, handle" in out
+    assert "nothing was revoked on the server" in out
+    assert "facet auth login a" in out
+    assert secrets.env_for(home, load_registry(root).packages["a"]) == {}
+
+
+def test_logout_with_no_choice_removes_nothing(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t"})
+    monkeypatch.setattr(secrets, "remove", lambda *a, **k: pytest.fail("remove was called"))
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "")
+    assert main(["auth", "logout", "a"]) == 0
+    out = capsys.readouterr().out
+    assert auth_module.NOTHING_SELECTED in out
+    assert secrets.env_for(home, load_registry(root).packages["a"]) == {"FACET_SECRET_TOKEN": "t"}
+
+
+def test_logout_with_nothing_stored_is_a_quiet_no_op(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    monkeypatch.setattr(secrets, "remove", lambda *a, **k: pytest.fail("remove was called"))
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("prompted with nothing set"))
+    assert main(["auth", "logout", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "a: nothing stored" in out
+
+
+def test_logout_without_a_package_offers_installed_packages(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t"})
+    monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    answers = iter(["1", "1"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    assert main(["auth", "logout"]) == 0
+    out = capsys.readouterr().out
+    assert "a: removed token" in out
+    assert secrets.env_for(home, load_registry(root).packages["a"]) == {}
+
+
+def test_logout_without_a_package_and_no_tty_refuses(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    make_installed(Home.from_env(), root, "a")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert main(["auth", "logout"]) == EXIT_CONFIRMATION_REQUIRED
+    captured = capsys.readouterr()
+    assert "picking what to sign out of needs a terminal" in captured.err
+    assert "facet auth logout <package>" in captured.err
+
+
+def test_logout_with_json_and_no_package_is_invalid_input(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    make_installed(Home.from_env(), root, "a")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert main(["auth", "logout", "--json"]) == EXIT_INVALID_INPUT
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["code"] == "invalid_input"
+    assert error["message"] == "the following arguments are required: <package>"
+
+
+def test_logout_with_a_package_under_json_never_prompts(use_registry, monkeypatch, capsys) -> None:
+    # Removal still asks which credentials; --json refuses instead of guessing.
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t"})
+    monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("prompted under --json"))
+    assert main(["auth", "logout", "a", "--json"]) == EXIT_INVALID_INPUT
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["code"] == "invalid_input"
+    assert error["details"] == {"package": "a"}
+    assert secrets.env_for(home, load_registry(root).packages["a"]) == {"FACET_SECRET_TOKEN": "t"}
+
+
+def test_logout_the_done_row_removes_nothing(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    _append_secret(root, "a", "handle", "the account handle")
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t", "handle": "h"})
+    monkeypatch.setattr(secrets, "remove", lambda *a, **k: pytest.fail("remove was called"))
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    # Rows are 1. token, 2. handle, 3. done.
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "3")
+    assert main(["auth", "logout", "a"]) == 0
+    assert auth_module.NOTHING_SELECTED in capsys.readouterr().out
+    assert secrets.env_for(home, load_registry(root).packages["a"]) == {
+        "FACET_SECRET_TOKEN": "t",
+        "FACET_SECRET_HANDLE": "h",
+    }
+
+
+def test_login_without_a_package_under_json_is_invalid_input(
+    use_registry, monkeypatch, capsys
+) -> None:
+    _auth_registry(use_registry, "a", True)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert main(["auth", "login", "--json"]) == EXIT_INVALID_INPUT
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["message"] == "the following arguments are required: <package>"
+
+
+def test_login_keeps_no_wait_on_the_lock_path(use_registry, monkeypatch, capsys) -> None:
+    # --no-wait and --wait-timeout still reach the lock on the login path.
+    root = _auth_registry(use_registry, "a", True)
+    make_installed(Home.from_env(), root, "a")
+    seen: list[tuple[bool, float]] = []
+    real_hold = auth_module.lock.hold
+
+    def spy(mode: str, purpose: str, wait: bool, timeout_s: float) -> object:
+        seen.append((wait, timeout_s))
+        return real_hold(mode, purpose, wait, timeout_s)
+
+    monkeypatch.setattr(auth_module.lock, "hold", spy)
+    monkeypatch.setattr(
+        auth_module,
+        "handle",
+        lambda name, run_id: {
+            "package": name,
+            "secrets": ["token"],
+            "path": "x",
+        },
+    )
+    assert main(["auth", "login", "a", "--no-wait", "--wait-timeout", "5"]) == 0
+    assert seen == [(False, 5.0)]
+
+
+def test_logout_resolves_the_package_like_login(use_registry, monkeypatch, capsys) -> None:
+    # A package with no auth verb is refused by the shared resolver.
+    root = use_registry(["a"])
+    _append_secret(root, "a", "token", "the test token")
+    _write_runner(root, "a", RUNNER_WITHOUT_AUTH)
+    make_installed(Home.from_env(), root, "a")
+    assert main(["auth", "logout", "a"]) == EXIT_INVALID_INPUT
+    assert "provides no auth verb" in capsys.readouterr().err
+
+
+def test_logout_refuses_an_unknown_package(use_registry, monkeypatch, capsys) -> None:
+    _auth_registry(use_registry, "a", True)
+    assert main(["auth", "logout", "nope"]) == EXIT_INVALID_INPUT
+    assert "unknown package: nope" in capsys.readouterr().err
+
+
+def test_logout_styled_checkbox_toggles_the_chosen_secrets(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    _append_secret(root, "a", "handle", "the account handle")
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t", "handle": "h"})
+    # One space toggles the highlighted row (token); enter submits the selection.
+    fake_tty(monkeypatch, [" \r"])
+    assert main(["auth", "logout", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "a: removed token" in out
+    assert secrets.env_for(home, load_registry(root).packages["a"]) == {"FACET_SECRET_HANDLE": "h"}
