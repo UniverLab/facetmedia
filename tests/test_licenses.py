@@ -327,3 +327,68 @@ def test_decide_mismatch_raises_invalid_input() -> None:
     assert exc_info.value.code == "invalid_input"
     assert MODEL_ID in exc_info.value.message
     assert "nothing was recorded" in exc_info.value.message
+
+
+def test_record_backend_attaches_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    _not_a_terminal(monkeypatch)
+    assert main(["license", "accept", MODEL_ID, "--yes"]) == 0
+    record = licenses_module.record_backend(MODEL_ID, "backend-repo", "fp-one")
+    receipt = record["backend"]["backend-repo"]
+    assert receipt["fingerprint"] == "fp-one"
+    assert isinstance(receipt["at"], str) and receipt["at"].endswith("Z")
+    (persisted,) = _acceptance_records()
+    assert persisted["backend"]["backend-repo"]["fingerprint"] == "fp-one"
+    package = load_registry(FIXTURES).packages["termsy"]
+    assert [row["model"] for row in licenses_module.require(package.models)] == [MODEL_ID]
+
+
+def test_record_backend_replace_overwrites_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    _not_a_terminal(monkeypatch)
+    assert main(["license", "accept", MODEL_ID, "--yes"]) == 0
+    licenses_module.record_backend(MODEL_ID, "backend-repo", "fp-one")
+    record = licenses_module.record_backend(MODEL_ID, "backend-repo", "fp-two")
+    assert list(record["backend"]) == ["backend-repo"]
+    assert record["backend"]["backend-repo"]["fingerprint"] == "fp-two"
+    (persisted,) = _acceptance_records()
+    assert persisted["backend"]["backend-repo"]["fingerprint"] == "fp-two"
+
+
+def test_record_backend_unknown_model_names_known_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    with pytest.raises(FacetError) as exc_info:
+        licenses_module.record_backend("nope", "backend-repo", "fp")
+    assert exc_info.value.code == "invalid_input"
+    assert "nope" in exc_info.value.message
+    assert MODEL_ID in exc_info.value.details["known"]
+
+
+def test_record_backend_without_acceptance_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    with pytest.raises(FacetError) as exc_info:
+        licenses_module.record_backend(MODEL_ID, "backend-repo", "fp")
+    assert exc_info.value.code == "license_not_accepted"
+    assert MODEL_ID in exc_info.value.message
+    assert exc_info.value.hint == f"facet license accept {MODEL_ID}"
+
+
+def test_record_backend_keeps_old_record_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fixture_registry(monkeypatch)
+    _not_a_terminal(monkeypatch)
+    assert main(["license", "accept", MODEL_ID, "--yes"]) == 0
+    (before,) = _acceptance_records()
+    record = licenses_module.record_backend(MODEL_ID, "backend-repo", "fp-one")
+    for key in ("model", "spdx", "by", "at", "method"):
+        assert record[key] == before[key]
+    assert record["method"] == "flag"

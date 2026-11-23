@@ -138,6 +138,12 @@ def decide(model_id: str, typed: str) -> Acceptance:
     return Acceptance(ACCEPTED)
 
 
+def _write_accepted(home: Home, records: list[dict[str, Any]]) -> None:
+    atomic_write_json(
+        home.licenses_file, {"version": STATE_VERSION, "accepted": records}, home.tmp_dir
+    )
+
+
 def record(model: Model, method: str) -> Acceptance:
     """Write the acceptance record for an already-confirmed ``model``."""
     entry: dict[str, Any] = {
@@ -154,10 +160,34 @@ def record(model: Model, method: str) -> Acceptance:
         record_item for record_item in _read_accepted(home) if record_item.get("model") != model.id
     ]
     kept.append(entry)
-    atomic_write_json(
-        home.licenses_file, {"version": STATE_VERSION, "accepted": kept}, home.tmp_dir
-    )
+    _write_accepted(home, kept)
     return Acceptance(ACCEPTED, entry)
+
+
+def record_backend(model_id: str, repo_id: str, fingerprint: str) -> dict[str, Any]:
+    """Attach a backend catalogue receipt to an existing acceptance record."""
+    found = find_model(model_id)
+    if found is None:
+        raise FacetError(
+            "invalid_input",
+            f"unknown model: {model_id}",
+            details={"known": acceptance_ids()},
+        )
+    _, model = found
+    home = Home.from_env()
+    records = _read_accepted(home)
+    match = _matching_record(model, records)
+    if match is None:
+        raise FacetError(
+            "license_not_accepted",
+            f"license not accepted: {model_id} ({model.spdx})",
+            hint=f"facet license accept {model_id}",
+            details={"models": [{"id": model_id}]},
+        )
+    backend = match.setdefault("backend", {})
+    backend[repo_id] = {"fingerprint": fingerprint, "at": _now_z()}
+    _write_accepted(home, records)
+    return match
 
 
 def accept(model_id: str, assume_yes: bool) -> Acceptance:

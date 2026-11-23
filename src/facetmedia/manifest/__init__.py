@@ -220,6 +220,7 @@ class RegistryLoader:
         self.strict = strict
         self.problems: list[Problem] = []
         self.model_ids: dict[str, str] = {}
+        self.acceptance_repo_owners: dict[str, str] = {}
         self.skipped: list[SkippedPackage] = []
 
     def add(self, file: str, key: str, problem: str) -> None:

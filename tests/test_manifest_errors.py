@@ -665,3 +665,86 @@ def test_index_facet_problems(declaration: str, key: str, problem: str, tmp_path
     assert ("index.toml", key, problem) in {
         (entry["file"], entry["key"], entry["problem"]) for entry in validate_registry(tmp_path)
     }
+
+
+ACCEPTANCE_CASES = [
+    pytest.param(
+        BASE + MODEL + 'acceptance_repos = "r1"\n',
+        "models[0].acceptance_repos",
+        "type",
+        id="acceptance-repos-non-list",
+    ),
+    pytest.param(
+        BASE + MODEL + 'acceptance_repos = [""]\n',
+        "models[0].acceptance_repos",
+        "value",
+        id="acceptance-repos-empty",
+    ),
+    pytest.param(
+        BASE + MODEL + 'acceptance_repos = ["r1", 1]\n',
+        "models[0].acceptance_repos",
+        "value",
+        id="acceptance-repos-non-string",
+    ),
+]
+
+
+@pytest.mark.parametrize(("manifest", "key", "problem"), ACCEPTANCE_CASES)
+def test_model_acceptance_repos_problems(
+    manifest: str, key: str, problem: str, tmp_path: Path
+) -> None:
+    assert ("packages/pkg/package.toml", key, problem) in _problems(manifest, tmp_path)
+
+
+def test_model_acceptance_repos_absent_defaults_to_empty(tmp_path: Path) -> None:
+    _write_index(tmp_path, "pkg")
+    _write_package(BASE + MODEL + CAPABILITY + CAPABILITY_PREVIEW, tmp_path)
+    (model,) = load_registry(tmp_path).package("pkg").models
+    assert model.acceptance_repos == ()
+
+
+def test_model_acceptance_repos_parses(tmp_path: Path) -> None:
+    _write_index(tmp_path, "pkg")
+    manifest = BASE + MODEL + 'acceptance_repos = ["r1", "r2"]\n' + CAPABILITY + CAPABILITY_PREVIEW
+    _write_package(manifest, tmp_path)
+    (model,) = load_registry(tmp_path).package("pkg").models
+    assert model.acceptance_repos == ("r1", "r2")
+
+
+BACKEND_REPOS = """
+[[models]]
+id = "b1"
+spdx = "MIT"
+backend = true
+acceptance_repos = ["r9"]
+"""
+
+
+def test_backend_model_acceptance_repos_parses(tmp_path: Path) -> None:
+    _write_index(tmp_path, "pkg")
+    _write_package(BASE + BACKEND_REPOS + CAPABILITY + CAPABILITY_PREVIEW, tmp_path)
+    (model,) = load_registry(tmp_path).package("pkg").models
+    assert model.backend is True
+    assert model.acceptance_repos == ("r9",)
+
+
+def test_model_acceptance_repos_duplicate_across_files(tmp_path: Path) -> None:
+    _write_index(tmp_path, "one", "two")
+    base_one = BASE.replace('name = "pkg"', 'name = "one"')
+    base_two = BASE.replace('name = "pkg"', 'name = "two"')
+    manifest_one = (
+        base_one + MODEL + 'acceptance_repos = ["r1"]\n' + CAPABILITY + CAPABILITY_PREVIEW
+    )
+    _write_package(manifest_one, tmp_path, name="one")
+    other = MODEL.replace("m1", "m2")
+    manifest = base_two + other + 'acceptance_repos = ["r1"]\n' + CAPABILITY + CAPABILITY_PREVIEW
+    _write_package(manifest, tmp_path, name="two")
+    loader = RegistryLoader(tmp_path)
+    registry = loader.load()
+    assert ("packages/two/package.toml", "models[0].acceptance_repos", "duplicate") in {
+        (problem.file, problem.key, problem.problem) for problem in loader.problems
+    }
+    assert registry is not None
+    assert "two" not in registry.packages
+    (first,) = registry.package("one").models
+    assert first.acceptance_repos == ("r1",)

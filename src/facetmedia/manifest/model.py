@@ -36,8 +36,31 @@ _MODEL_KEYS: Final[frozenset[str]] = frozenset(
         "hf_repo",
         "revision",
         "backend",
+        "acceptance_repos",
     }
 )
+
+
+def _parse_acceptance_repos(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str
+) -> tuple[str, ...] | None:
+    raw = item.get("acceptance_repos")
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        loader.add(file, f"{prefix}acceptance_repos", "type")
+        return None
+    for entry in raw:
+        if not isinstance(entry, str) or not entry:
+            loader.add(file, f"{prefix}acceptance_repos", "value")
+            return None
+    for entry in raw:
+        if entry in loader.acceptance_repo_owners:
+            loader.add(file, f"{prefix}acceptance_repos", "duplicate")
+            return None
+    for entry in raw:
+        loader.acceptance_repo_owners[entry] = file
+    return tuple(raw)
 
 
 def read_models(loader: RegistryLoader, raw: object, file: str) -> tuple[Model, ...]:
@@ -76,6 +99,7 @@ def _read_model(
     acceptance = loader.boolean(item, "requires_acceptance", file, prefix, default=False)
     terms_url = loader.string(item, "terms_url", file, prefix, required=False) or ""
     backend = loader.boolean(item, "backend", file, prefix, default=False)
+    acceptance_repos = _parse_acceptance_repos(loader, item, file, prefix)
     if backend:
         size: int | None = _backend_check(loader, item, file, prefix, acceptance, terms_url)
         direct: dict[str, str] = {}
@@ -87,7 +111,7 @@ def _read_model(
         direct, hf = _model_source(loader, item, file, prefix)
     if len(loader.problems) != before:
         return None
-    if model_id is None or spdx is None or size is None:
+    if model_id is None or spdx is None or size is None or acceptance_repos is None:
         return None
     if backend:
         return Model(
@@ -98,6 +122,7 @@ def _read_model(
             bytes=0,
             terms_url=terms_url,
             backend=True,
+            acceptance_repos=acceptance_repos,
         )
     return Model(
         id=model_id,
@@ -111,6 +136,7 @@ def _read_model(
         path=direct.get("path", ""),
         hf_repo=hf.get("hf_repo", ""),
         revision=hf.get("revision", ""),
+        acceptance_repos=acceptance_repos,
     )
 
 

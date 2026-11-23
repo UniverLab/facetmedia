@@ -137,6 +137,7 @@ class Model:
     hf_repo: str = ""
     revision: str = ""
     backend: bool = False
+    acceptance_repos: tuple[str, ...] = ()
 
     @property
     def source(self) -> str:
