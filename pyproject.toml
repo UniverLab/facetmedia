@@ -52,6 +52,12 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "C90", "PL"]
 
+# Runner-protocol name: SecretNotSet must subclass KeyError (so old
+# `except KeyError` handlers keep working) and the spec fixes its name,
+# so it cannot carry the Error suffix N818 wants.
+[tool.ruff.lint.per-file-ignores]
+"src/facetmedia/runner_sdk.py" = ["N818"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 15
 

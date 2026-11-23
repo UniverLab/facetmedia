@@ -345,6 +345,7 @@ def make_request(
         "models": {key: str(models[key]) for key in sorted(models)},
         "assets": listed,
         "renewals_file": "",
+        "package": "",
     }
 
 
@@ -419,6 +420,7 @@ def call(inv: Invocation, verb: str, request: Mapping[str, object]) -> Outcome:
         renewals_dir, renewals_path = renewals.create(inv.home, inv.run_id, verb)
         request_copy = dict(request)
         request_copy["renewals_file"] = str(renewals_path)
+        request_copy["package"] = inv.package.name
         input_path = inv.temp_dir / REQUEST_NAME
         result_path = inv.temp_dir / RESULT_NAME
         input_path.write_text(

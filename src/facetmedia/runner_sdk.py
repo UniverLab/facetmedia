@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
-__all__ = ["Request", "Runner", "renew_secret", "secret"]
+__all__ = ["Request", "Runner", "SecretNotSet", "renew_secret", "secret"]
 
 PROTOCOL_VERSION: Final[int] = 1
 #: The environment prefix ``facet`` exports a declared secret under.
@@ -37,6 +37,12 @@ NO_DOCTOR: Final[dict[str, Any]] = {
 
 #: The renewals file for the verb being handled, set by :meth:`Runner.run`.
 _current_renewals_file: str = ""
+#: The package name for the verb being handled, set by :meth:`Runner.run`.
+_current_package: str = ""
+
+
+class SecretNotSet(KeyError):
+    """A declared secret with no stored value; names the command that sets it."""
 
 
 class Request:
@@ -65,6 +71,7 @@ class Request:
         self.protocol: int = int(data.get("protocol", 0))
         self.depth: str = str(data.get("depth", DEFAULT_DEPTH))
         self.renewals_file: str = str(data.get("renewals_file", ""))
+        self.package: str = str(data.get("package", ""))
         self.inputs: dict[str, Any] = _mapping(data.get("inputs"))
         self.out_dir: Path = Path(str(data.get("out_dir", "")))
         self.piece_dir: Path = Path(str(data.get("piece_dir", "")))
@@ -133,10 +140,15 @@ class Runner:
         try:
             request = Request.from_file(input_path)
             globals()["_current_renewals_file"] = request.renewals_file
+            globals()["_current_package"] = request.package
             try:
                 result = handler(request)
             finally:
                 globals()["_current_renewals_file"] = ""
+                globals()["_current_package"] = ""
+        except (ValueError, SecretNotSet) as exc:
+            print(f"error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+            return 1
         except Exception:
             traceback.print_exc()
             return 1
@@ -179,14 +191,18 @@ def secret(name: str) -> str:
     ``name`` is the manifest spelling (``app-password``); the variable is
     ``FACET_SECRET_APP_PASSWORD``.  A secret the manifest declares but nobody
     stored is absent, and so is one the manifest never declared: both raise
-    ``KeyError`` naming what to run, so a runner never sends an empty
-    credential.
+    ``SecretNotSet`` (a ``KeyError``) naming what to run, so a runner never
+    sends an empty credential.
     """
     variable = f"{SECRET_PREFIX}{name.upper().replace('-', '_')}"
     try:
         return os.environ[variable]
     except KeyError:
-        raise KeyError(f"secret {name} is not set; run facet secret set or facet auth") from None
+        if _current_package:
+            message = f"secret {name} is not set; run facet secret set {_current_package} {name}"
+        else:
+            message = f"secret {name} is not set; run facet secret set or facet auth"
+        raise SecretNotSet(message) from None
 
 
 def renew_secret(name: str, value: str) -> None:

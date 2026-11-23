@@ -329,12 +329,16 @@ runner = Runner()
 
 @runner.verb("run")
 def run(req: Request) -> dict:
-    token = secret("app-password")  # KeyError naming the fix when it is not set
+    token = secret("app-password")  # SecretNotSet naming the fix when it is not set
     ...
 ```
 
-`secret(name)` raises `KeyError` when the value is not set, so a runner never
-sends an empty credential. When a package declares a required secret that is
+`secret(name)` raises `SecretNotSet` (a `KeyError` subclass, so existing
+`except KeyError` handlers keep working) when the value is not set, so a
+runner never sends an empty credential. A verb that raises it (or
+`ValueError`) fails with one `error: <message>` line on stderr and no
+traceback; the message names the exact `facet secret set <package> <name>`
+command. When a package declares a required secret that is
 not stored, `facet run` fails before the runner starts with
 `machine_cannot`, naming the exact `facet secret set` or `facet auth`
 command. Any occurrence of one of the package's stored values in what its
@@ -1084,8 +1088,9 @@ evaluates a piece: the piece is data, the tool runs inside the package's
 own uv environment, and the conversation between facet and a runner is a
 file protocol. facet writes a **request file**,
 `{"protocol": 1, "verb", "capability", "inputs", "out_dir", "piece_dir",
-"models", "assets", "renewals_file"}` (a `doctor` request adds `"depth": "quick" |
-"full"`), and the runner writes a **result file**: for `run`, its tool and
+"models", "assets", "renewals_file", "package"}` (a `doctor` request adds
+`"depth": "quick" | "full"`; `package` is the manifest `name`, and older
+requests without it still work), and the runner writes a **result file**: for `run`, its tool and
 one entry per asset; for `verify`, one verdict per asset; for `doctor`, a
 `{"name", "ok", "detail", "fix"}`-list of checks; for `auth`, a `secrets`
 map of the values it obtained (see [Secrets](#secrets)). A `file` is one bare
