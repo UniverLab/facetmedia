@@ -133,6 +133,10 @@ set). It keeps three things about who accepted and when:
 - `method` — `"interactive"` (typed in the terminal) or `"flag"`
   (`--yes` passed by command line).
 
+An accepted record may also carry a `backend` map of backend repo ids to
+catalogue receipts, each with `fingerprint` and `at`; records without it
+keep working.
+
 Acceptance happens through `license accept` alone, and until then
 every gate (`pull`, `run`, `doctor`, `check`) names the exact accept
 command.

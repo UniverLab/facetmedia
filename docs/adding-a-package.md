@@ -241,6 +241,11 @@ backend = true                  # served by the backend: never fetched, never ha
 `backend-owned`; `run` still requires acceptance for the pieces that select
 it (see [licenses.md](licenses.md)).
 
+Any `[[models]]` entry, backend-owned or not, may declare
+`acceptance_repos`: a list of non-empty backend repo ids whose catalogue
+gate the model conditions. When absent it defaults to an empty list, and
+each repo id may be owned by at most one model across the whole registry.
+
 ## Secrets
 
 A package that talks to a network service needs credentials: an app
