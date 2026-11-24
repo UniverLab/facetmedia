@@ -15,6 +15,7 @@ from rich.markup import escape
 
 from facetmedia import (
     auth,
+    auth_wizard,
     check,
     config,
     contract,
@@ -178,6 +179,10 @@ def _announce_secret_list(rows: list[dict[str, object]]) -> None:
         state = "set" if row.get("set") is True else "not set"
         required = " required" if row.get("required") is True else ""
         print(f"{row['package']} {row['name']}{required} {state}: {row['description']}")
+        if isinstance(row.get("obtain"), str) and row["obtain"]:
+            print(f"  obtain: {row['obtain']}")
+        if isinstance(row.get("produced_by"), str) and row["produced_by"]:
+            print(f"  produced by: {row['produced_by']}")
 
 
 def _passphrase_value() -> str:
@@ -225,19 +230,33 @@ def _handle_auth(args: argparse.Namespace) -> int:
 
 def _handle_auth_login(args: argparse.Namespace, target: str | None) -> int:
     """Exclusive: run a package's browser sign-in and store what it returns."""
-    wizard = target is None
-    name = auth.pick(args) if wizard else target
-    if name is None:
-        return 0
+    if target is not None and (args.json or not auth._terminal()):
+        return _handle_auth_verb(args, target)
+    wait, timeout_s = _lock_params(args)
+    if target is not None:
+        names = [auth.resolve_wizard(target).name]
+    else:
+        picked = auth.pick(args)
+        if picked is None:
+            return 0
+        names = picked
+    auth_wizard.run_packages(names, run_id=args.run_id, wait=wait, timeout_s=timeout_s)
+    return 0
+
+
+def _handle_auth_verb(args: argparse.Namespace, target: str) -> int:
+    """Run a package's ``auth`` verb once and store what it returns.
+
+    The ``--json`` and off-terminal path: exactly the old ``facet auth``
+    behaviour, with no prompts and no doctor check.
+    """
     with lock.hold("exclusive", "facet auth", *_lock_params(args)):
-        data = auth.handle(name, args.run_id)
+        data = auth.handle(target, args.run_id)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         stored = data["secrets"]
         names = ", ".join(stored) if isinstance(stored, list) else ""
         print(f"{data['package']}: stored {names}")
-        if wizard:
-            print(f"confirm with `facet doctor {data['package']} --full`")
     return 0
 
 

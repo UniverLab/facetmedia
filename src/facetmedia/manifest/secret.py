@@ -23,7 +23,13 @@ if TYPE_CHECKING:
     from facetmedia.manifest import RegistryLoader
 
 _SECRET_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
-_SECRET_KEYS: Final[frozenset[str]] = frozenset({"name", "description", "required"})
+_SECRET_KEYS: Final[frozenset[str]] = frozenset(
+    {"name", "description", "required", "obtain", "produced_by"}
+)
+#: The only ``produced_by`` value: the package's ``auth`` verb mints it.
+PRODUCED_BY_AUTH: Final[str] = "auth"
+#: The longest ``obtain`` hint a person can read at a glance.
+OBTAIN_LIMIT: Final[int] = 300
 
 
 def read_secrets(loader: RegistryLoader, raw: object, file: str) -> tuple[Secret, ...]:
@@ -61,6 +67,45 @@ def _read_secret(
             seen.add(name)
     description = loader.string(item, "description", file, prefix, required=True)
     required = loader.boolean(item, "required", file, prefix, default=False)
+    obtain = _read_obtain(loader, item, file, prefix)
+    produced_by = _read_produced_by(loader, item, file, prefix)
     if len(loader.problems) != before or name is None or description is None:
         return None
-    return Secret(name=name, description=description, required=required)
+    return Secret(
+        name=name,
+        description=description,
+        required=required,
+        obtain=obtain,
+        produced_by=produced_by,
+    )
+
+
+def _read_obtain(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str
+) -> str | None:
+    """Where the person gets the value: absent, or one short line."""
+    if "obtain" not in item:
+        return None
+    value = item["obtain"]
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > OBTAIN_LIMIT
+        or "\n" in value
+        or "\r" in value
+    ):
+        loader.add(file, f"{prefix}obtain", "value")
+        return None
+    return value
+
+
+def _read_produced_by(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str
+) -> str | None:
+    """What mints the value: absent, or exactly ``"auth"``."""
+    if "produced_by" not in item:
+        return None
+    if item["produced_by"] != PRODUCED_BY_AUTH:
+        loader.add(file, f"{prefix}produced_by", "value")
+        return None
+    return PRODUCED_BY_AUTH

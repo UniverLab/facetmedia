@@ -828,12 +828,16 @@ def test_describe_reports_each_secret_and_never_its_value(clean_store: tuple[Hom
             "description": "The app password from the account's settings.",
             "required": True,
             "set": True,
+            "obtain": None,
+            "produced_by": None,
         },
         {
             "name": "handle",
             "description": "The account handle to post as.",
             "required": False,
             "set": False,
+            "obtain": None,
+            "produced_by": None,
         },
     ]
 

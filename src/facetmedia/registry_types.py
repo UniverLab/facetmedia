@@ -152,12 +152,16 @@ class Secret:
 
     Only the name, a one-line description and whether a run needs it ever
     reach a surface: a stored value never leaves the store, the runner's
-    environment and the masked output.
+    environment and the masked output.  ``obtain`` tells a person where to
+    get the value; ``produced_by`` names what produces it (``"auth"`` for
+    the package's ``auth`` verb, never typed in).
     """
 
     name: str
     description: str
     required: bool = False
+    obtain: str | None = None
+    produced_by: str | None = None
 
 
 @dataclass(frozen=True)

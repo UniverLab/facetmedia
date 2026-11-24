@@ -561,51 +561,60 @@ choose on.
 
 ## `facet auth`
 
-Runs a tool's interactive sign-in, and signs it out again.
+Signs tools in interactively, and signs them out again.
 `facet auth login [<package>]` is the explicit form of the same flow:
 `facet auth <package>` is its alias, so every doc, skill and hook that names
 it keeps working, and bare `facet auth` behaves exactly like
 `facet auth login`. A package may provide an `auth` verb for flows that need
 a browser — OAuth for X, YouTube or TikTok: the verb prints a URL, opens the
 browser, listens on a loopback port, and writes the tokens it obtained.
-With a package, the verb runs interactively and stores what it returns,
-under the package's declared secret names. A name the manifest did not
-declare fails the whole flow with `invalid_input`: a sign-in can never store
-a credential the package did not declare.
+A name the manifest did not declare fails a sign-in with `invalid_input`:
+a sign-in can never store a credential the package did not declare.
 
 With no package, when standard input and output are both terminals,
-`facet auth` and `facet auth login` list the installed packages that offer a
-browser sign-in and let the person choose one, then run the same sign-in
-flow. Packages with no `auth` verb are listed with the
-`facet secret set <package> <name>` command that fits them instead. With
-`--json` and no package neither prompts: the missing `<package>` is
-`invalid_input`, exit 2. Off a terminal, both also never prompt:
-`confirmation_required`, exit 11, with a hint to name the package.
-Cancelling the choice prints `nothing selected` and exits `0` with nothing
-stored. When no installed package offers a browser sign-in, it says so,
-names `facet pull <package>` first, and exits `0`. After a chosen sign-in,
-confirm with `facet doctor <package> --full` and read what it reports: every
-declared secret set, plus the package's own deep checks. Never claim success
-before that check.
+`facet auth` and `facet auth login` run a guided wizard. It lists every
+installed package that declares a secret, each with its stored state (`set`,
+`partly set`, `not set`), and lets the person multi-pick rows — or the `all`
+row for every package. A blank answer or `done` leaves with
+`nothing changed`. Then, per package in manifest order, the wizard asks for
+every secret the `auth` verb does not produce: it prints the secret's
+description and where to get it, reads the value with echo off, and stores
+it through the same path `facet secret set` uses. A value already stored is
+kept unless the person asks to replace it; a required secret may not be left
+empty, an optional one is skipped with an empty answer. Afterwards the
+package's `auth` verb runs when it has one; a failure prints the one-line
+reason and offers `retry`, `skip` or `quit`, keeping the secrets already
+stored. Packages with no `auth` verb get the typed prompts and the check
+only. Each package ends with one summary line — `signed in`, `partly set`,
+`failed` or `skipped` — from `facet doctor <package> --full`, whose detail
+and fix print on a failure. When no installed package declares a secret, it
+says so, names `facet pull <package>` first, and exits `0`.
+
+With a package, at a terminal and without `--json`, the same per-package
+flow runs for that package alone. With `--json`, or off a terminal, it
+behaves exactly as before: the package's `auth` verb runs once and stores
+what it returns, with no prompts and no doctor check. With `--json` and no
+package neither prompts: the missing `<package>` is `invalid_input`,
+exit 2. Off a terminal, both also never prompt: `confirmation_required`,
+exit 11, with a hint to name the package plus the
+`facet secret set <package> <name>` command for each typed secret still
+missing. Cancelling at any prompt stops cleanly: `nothing changed` when
+nothing was stored in this run, otherwise the names stored, and exit `0`.
+A value is never printed, logged or passed on; runners still receive secrets
+only through their environment.
 
 ```console
-$ facet auth youtube
-youtube: stored oauth-token
 $ facet auth login youtube
+youtube oauth-token: the token shown after the browser sign-in
+  where to get it: the provider's developer console
+youtube oauth-token set
 youtube: stored oauth-token
+youtube: signed in
+$ facet auth youtube
+youtube: signed in
 ```
 
-With no package the wizard adds the confirmation reminder after the
-chosen sign-in:
-
-```console
-$ facet auth
-youtube: stored oauth-token
-confirm with `facet doctor youtube --full`
-```
-
-A tool with no `auth` verb is refused, naming `facet secret set` instead, and
-so is a package that is not installed (`not_installed`, exit 7, with
+A package that is not installed is refused (`not_installed`, exit 7, with
 `facet pull <package>`). The verb's temporary directory is removed in every
 case, so the tokens it wrote exist only in the encrypted vault afterwards.
 
@@ -645,14 +654,15 @@ sign back in with `facet auth login youtube`
 `confirmation_required`, exit 11, instead of guessing. As a locking verb it
 accepts `--no-wait` and `--wait-timeout`.
 
-Lock: exclusive; `login` holds it around the sign-in, `logout` around the
-removals. Exit codes: `0` (including a cancelled choice, nothing selected,
-nothing stored, or no offering package); `2` an unknown package, a package
-with no `auth` verb, a returned name the manifest did not declare, bare
+Lock: exclusive; `login` holds it around each store and the sign-in,
+`logout` around the removals. Exit codes: `0` (including a cancelled choice,
+`nothing changed`, `nothing stored`, or no package declaring a secret); `2`
+an unknown package, a returned name the manifest did not declare, bare
 `facet auth --json` or `facet auth login --json` (missing `<package>`), or
 `facet auth logout --json`; `7` the package is not installed; `9` the verb
 crashed or returned no `secrets` map; `11` bare `facet auth`, `facet auth
-login` or `facet auth logout` with no terminal to choose on.
+login` or `facet auth logout` with no terminal to choose on. With a package,
+`--json` or off a terminal still refuses a package with no `auth` verb.
 
 ## `facet doctor`
 

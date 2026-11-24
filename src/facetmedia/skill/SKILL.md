@@ -32,13 +32,13 @@ Start with `facet list --available`: packages grouped by facet with their
 weight. Filter with `facet list --available --facet voice`. With `--json`
 each package row adds `facet` and `weight`. `facet describe <capability>
 --json` adds `facet` beside `kind`, `weight`, and `skill` (the command that
-prints that package's how-to), plus `secrets`: one
-`{name, description, required, set}` row per credential the package declares
-— never a value. When a required secret is missing, store it with
-`facet secret set <package> <name>` (hidden prompt at a terminal, stdin
-otherwise) or `facet auth <package>` when the package offers a browser
-sign-in. `facet auth login [<package>]` repeats it; `facet auth logout
-[<package>]` removes stored secrets locally, revoking nothing server-side.
+prints that package's how-to), plus `secrets`: one `{name, description,
+required, set, obtain, produced_by}` row per credential the package declares
+— never a value (`obtain` says where to get it, `produced_by: "auth"` means
+the `auth` verb mints it). When a required secret is missing, run the guided
+`facet auth login [<package>]`, or store it with `facet secret set <package>
+<name>`. `facet auth logout [<package>]` removes stored secrets locally,
+revoking nothing server-side.
 
 `summary` and a facet's name are English by default. When the registry
 declares localized texts, `facet describe --json` carries them under `i18n`,

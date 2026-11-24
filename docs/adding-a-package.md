@@ -258,12 +258,21 @@ per-entry shape `[[models]]` uses:
 name = "app-password"                # [a-z][a-z0-9-]*, unique in the package
 description = "The app password from the account's settings, not the login one"
 required = false                     # default false; true refuses a run without it
+obtain = "Account settings > Security > App passwords"  # optional: where to get it
+produced_by = "auth"                 # optional: only "auth"; the auth verb mints it
 ```
 
 `description` is one line, non-empty, and is what `facet secret list` and
-`facet describe` print beside the name. `facet registry validate` rejects a
-malformed or duplicate `name`, a missing or empty `description`, a
-non-boolean `required`, and any unknown key inside an entry.
+`facet describe` print beside the name. `obtain` is optional: one line of at
+most 300 characters telling the person where to get the value, printed next
+to the description by the same surfaces and by the `facet auth login`
+wizard. `produced_by` is optional and its only allowed value is `"auth"`:
+it marks a secret the package's `auth` verb produces, so the wizard never
+asks for it by typing and the person sets it only through the browser
+sign-in. `facet registry validate` rejects a malformed or duplicate `name`,
+a missing or empty `description`, a non-boolean `required`, an empty or long
+or multi-line `obtain`, any `produced_by` other than `"auth"`, and any
+unknown key inside an entry.
 
 A value is stored by a person, never by the package: `facet secret set
 <package> <name>` reads it from a hidden prompt or from stdin, `facet secret

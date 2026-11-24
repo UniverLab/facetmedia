@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Final
 
 import questionary
@@ -30,22 +30,26 @@ from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import Package, load_active_registry
 from facetmedia.runner import Invocation
-from facetmedia.secrets import auth_hint, has_auth_verb, set_value, vault_file
+from facetmedia.secrets import has_auth_verb, set_value, vault_file
 
 if TYPE_CHECKING:
     from facetmedia.registry_types import Registry
 
 __all__ = [
+    "ALL_CHOICE",
     "AUTH_VERB",
     "LOGIN_VERB",
     "LOGOUT_VERB",
+    "NOTHING_CHANGED",
     "NOTHING_OFFERED",
     "NOTHING_SELECTED",
     "NOTHING_STORED",
+    "NOTHING_WITH_SECRETS",
     "RESULT_KEY",
     "handle",
     "logout",
     "pick",
+    "resolve_wizard",
 ]
 
 #: The verb a package registers to produce secrets through a browser flow.
@@ -62,6 +66,12 @@ NOTHING_OFFERED: Final[str] = (
 )
 #: Printed when the person cancels the choice without picking a package.
 NOTHING_SELECTED: Final[str] = "nothing selected"
+#: Printed when the wizard ends with nothing picked and nothing stored.
+NOTHING_CHANGED: Final[str] = "nothing changed"
+#: Printed when no installed package declares a secret to guide through.
+NOTHING_WITH_SECRETS: Final[str] = (
+    "nothing installed declares a secret; `facet pull <package>` first"
+)
 #: Printed when a package holds no stored sign-in secret to remove.
 NOTHING_STORED: Final[str] = "nothing stored"
 _SELECT_MESSAGE: Final[str] = "Choose an account — arrows move, enter picks [default: done]:"
@@ -71,8 +81,8 @@ _PICK_SECRETS_MESSAGE: Final[str] = (
 _DONE: Final[object] = object()
 
 
-def _resolve(package_name: str) -> Package:
-    """The package to sign in to: it must exist, be compatible and be installed."""
+def _resolve_base(package_name: str) -> Package:
+    """The named package: it must exist and be compatible with this facet."""
     active = load_active_registry()
     package = active.package(package_name)
     if package is None:
@@ -82,13 +92,11 @@ def _resolve(package_name: str) -> Package:
             details={"known": sorted(active.packages)},
         )
     package.require_compatible()
-    if not has_auth_verb(package):
-        raise FacetError(
-            "invalid_input",
-            f"{package.name} provides no auth verb",
-            hint=f"facet secret set {package.name} <name>",
-            details={"package": package.name},
-        )
+    return package
+
+
+def _require_installed(package: Package) -> None:
+    """Refuse a package whose environment is not on this machine."""
     home = Home.from_env()
     if not env_module.is_installed(package, home):
         raise FacetError(
@@ -97,6 +105,30 @@ def _resolve(package_name: str) -> Package:
             hint=f"facet pull {package.name}",
             details={"package": package.name},
         )
+
+
+def _resolve(package_name: str) -> Package:
+    """The package to sign in to: it must exist, be compatible and be installed."""
+    package = _resolve_base(package_name)
+    if not has_auth_verb(package):
+        raise FacetError(
+            "invalid_input",
+            f"{package.name} provides no auth verb",
+            hint=f"facet secret set {package.name} <name>",
+            details={"package": package.name},
+        )
+    _require_installed(package)
+    return package
+
+
+def resolve_wizard(package_name: str) -> Package:
+    """The package to guide: installed and compatible; no auth verb needed.
+
+    Packages without a browser sign-in get the typed prompts and the check
+    only, so the wizard resolves them where the verb runner refuses them.
+    """
+    package = _resolve_base(package_name)
+    _require_installed(package)
     return package
 
 
@@ -144,15 +176,44 @@ def _terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+def _manual_hint(prefix: str | None = None) -> str | None:
+    """The commands that set each unstored typed secret by hand.
+
+    ``None`` when nothing is missing, so the refusal keeps its bare hint;
+    a locked vault reads as nothing missing rather than a second failure.
+    """
+    try:
+        registry = load_active_registry()
+        home = Home.from_env()
+        declared = sorted(
+            (package for package in registry.packages.values() if package.secrets),
+            key=lambda package: package.name,
+        )
+        found = secrets.rows(home, declared)
+    except FacetError:
+        found = []
+    commands = [
+        f"facet secret set {row['package']} {row['name']}"
+        for row in found
+        if row.get("set") is not True and row.get("produced_by") != "auth"
+    ]
+    parts = ([prefix] if prefix else []) + commands
+    return "; ".join(parts) if parts else None
+
+
 def _refused(args: argparse.Namespace, known: list[str]) -> None:
     """Refuse the wizard when it cannot ask: ``--json`` or no terminal."""
     if bool(getattr(args, "json", False)):
-        raise FacetError("invalid_input", "the following arguments are required: <package>")
+        raise FacetError(
+            "invalid_input",
+            "the following arguments are required: <package>",
+            hint=_manual_hint(),
+        )
     if not _terminal():
         raise FacetError(
             "confirmation_required",
             "picking what to sign in to needs a terminal",
-            hint="facet auth <package>",
+            hint=_manual_hint("facet auth <package>"),
             details={"packages": known},
         )
 
@@ -166,21 +227,89 @@ def _installed(registry: Registry, home: Home) -> list[Package]:
     ]
 
 
-def _line(package: Package) -> str:
-    """One offered package: name, version and the secret names it declares."""
-    names = ", ".join(secret.name for secret in package.secrets)
-    return f"{package.name} {package.version} ({names})"
+#: The extra choice that guides every package instead of picking rows.
+ALL_CHOICE: Final[str] = "all"
+_SELECT_PACKAGES_MESSAGE: Final[str] = (
+    "Choose packages to sign in to — space toggles, enter confirms:"
+)
 
 
-def _excluded_line(package: Package) -> str:
-    """One installed package with no auth verb, and the command that fits it."""
-    first = package.secrets[0].name if package.secrets else "<name>"
-    return f"not offered: {package.name} — no browser sign-in; use `{auth_hint(package, first)}`"
+def _package_state(home: Home, package: Package) -> str:
+    """The package's stored state: ``set``, ``partly set`` or ``not set``."""
+    found = secrets.rows(home, [package])
+    flags = [row.get("set") is True for row in found]
+    if all(flags):
+        return "set"
+    if not any(flags):
+        return "not set"
+    return "partly set"
+
+
+def _offer_line(package: Package, state: str) -> str:
+    """One offered package: name, version and its stored state."""
+    return f"{package.name} {package.version} ({state})"
+
+
+def _expand_picked(picked: Sequence[object], names: list[str]) -> list[str]:
+    """The chosen package names in offering order; done or blank chooses none."""
+    if not picked or any(value is _DONE for value in picked):
+        return []
+    if ALL_CHOICE in [str(value) for value in picked]:
+        return list(names)
+    wanted = {str(value) for value in picked}
+    return [name for name in names if name in wanted]
+
+
+def _select_packages_styled(packages: list[Package], states: dict[str, str]) -> list[str]:
+    """The checkbox choice, in offering order, or an empty list on done."""
+    choices = [
+        questionary.Choice(title=_offer_line(package, states[package.name]), value=package.name)
+        for package in packages
+    ]
+    choices.append(questionary.Choice(title=ALL_CHOICE, value=ALL_CHOICE))
+    choices.append(questionary.Choice(title="done", value=_DONE))
+    try:
+        picked = questionary.checkbox(_SELECT_PACKAGES_MESSAGE, choices=choices).unsafe_ask()
+    except EOFError:
+        return []
+    return _expand_picked(list(picked or []), [package.name for package in packages])
+
+
+def _select_packages_plain(packages: list[Package], states: dict[str, str]) -> list[str]:
+    """The numbered comma-separated choice, or an empty list on done."""
+    names = [package.name for package in packages]
+    rows: list[tuple[str, str | None]] = [
+        (_offer_line(package, states[package.name]), package.name) for package in packages
+    ]
+    rows += [(ALL_CHOICE, ALL_CHOICE), ("done", None)]
+    for index, (label, _value) in enumerate(rows, 1):
+        print(f"{index}. {label}")
+    try:
+        answer = input(f"Choose packages [1-{len(rows)}, comma separated]: ").strip()
+    except EOFError:
+        return []
+    if not answer or answer == "done":
+        return []
+    if answer == ALL_CHOICE:
+        return list(names)
+    if answer in names:
+        return [answer]
+    return _expand_picked(_parse_rows(answer, rows), names)
+
+
+def _select_packages(packages: list[Package], states: dict[str, str]) -> list[str]:
+    """The chosen package names, or an empty list on done, blank, or EOF."""
+    if theme.styled():
+        return _select_packages_styled(packages, states)
+    return _select_packages_plain(packages, states)
 
 
 def _select_styled(packages: list[Package]) -> str | None:
     """The styled questionary choice, or ``None`` on done."""
-    prompts = [questionary.Choice(title=_line(package), value=package.name) for package in packages]
+    prompts = [
+        questionary.Choice(title=f"{package.name} {package.version}", value=package.name)
+        for package in packages
+    ]
     prompts.append(questionary.Choice(title="done", value=_DONE))
     picked = questionary.select(_SELECT_MESSAGE, choices=prompts).unsafe_ask()
     return None if picked is _DONE else str(picked)
@@ -217,25 +346,31 @@ def _select(packages: list[Package]) -> str | None:
     return _select_plain([package.name for package in packages])
 
 
-def pick(args: argparse.Namespace) -> str | None:
-    """The package to sign in to, chosen at the terminal, or ``None`` for nothing."""
+def pick(args: argparse.Namespace) -> list[str] | None:
+    """The packages to guide, chosen at the terminal, or ``None`` for nothing.
+
+    Every installed package that declares a secret is offered with its
+    stored state; the person multi-picks rows, or the ``all`` row for every
+    package.  An empty answer or ``done`` prints ``nothing changed``.
+    """
     registry = load_active_registry()
     home = Home.from_env()
     _refused(args, sorted(registry.packages))
     banner.print_text()
-    installed = _installed(registry, home)
-    offered = [package for package in installed if has_auth_verb(package)]
-    for package in installed:
-        if not has_auth_verb(package):
-            print(_excluded_line(package))
+    offered = [package for package in _installed(registry, home) if package.secrets]
     if not offered:
-        print(NOTHING_OFFERED)
+        print(NOTHING_WITH_SECRETS)
         return None
-    chosen = _select(offered)
-    if chosen is None:
-        print(NOTHING_SELECTED)
+    states = {package.name: _package_state(home, package) for package in offered}
+    try:
+        chosen = _select_packages(offered, states)
+    except KeyboardInterrupt:
+        print(NOTHING_CHANGED)
         return None
-    return _resolve(chosen).name
+    if not chosen:
+        print(NOTHING_CHANGED)
+        return None
+    return [resolve_wizard(name).name for name in chosen]
 
 
 def handle(package_name: str, run_id: str) -> dict[str, object]:
