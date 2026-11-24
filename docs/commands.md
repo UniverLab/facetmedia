@@ -188,8 +188,8 @@ the terminal, in the narrower TheDraw font ansiltr4 otherwise) and the
 detected machine (GPU and VRAM, RAM, free disk under the facet home, and
 each host app); then a facet checklist driven with the arrow keys and
 toggled with the space bar, each line showing the facet, this machine's
-plan for it, and their total disk. Facets with something installable
-start checked; installed packages are marked. Accepting shows the combined
+plan for it, and their total disk. All facets start unchecked; check the
+ones to install; installed packages are marked. Accepting shows the combined
 plan as a table, asks once (`[default: no]`), and installs with the same
 progress and summary as `facet pull <facet>`. Ctrl+C exits the wizard with
 code 130, printing `cancelled`, and installs nothing that had not already

@@ -34,11 +34,10 @@ NOTHING_SELECTED: Final[str] = "nothing selected"
 
 @dataclass
 class Choice:
-    """One facet row: its machine plan and whether it starts picked."""
+    """One facet row: its machine plan."""
 
     name: str
     entries: list[PlanEntry]
-    checked: bool
 
 
 def offered(args: argparse.Namespace) -> bool:
@@ -125,23 +124,22 @@ def _app_lines(registry: Registry, home: Home) -> list[str]:
 
 
 def _pick(registry: Registry, home: Home, args: argparse.Namespace) -> list[str]:
-    """The facets the person checked; arrows move, space toggles."""
+    """The facets the person checked; starts unchecked, arrows move, space toggles."""
     cpu = bool(getattr(args, "cpu", False))
     tier = getattr(args, "tier", None)
     prompts = [
-        questionary.Choice(title=_facet_line(choice), value=choice.name, checked=choice.checked)
+        questionary.Choice(title=_facet_line(choice), value=choice.name, checked=False)
         for choice in _choices(registry, home, cpu, tier)
     ]
     return list(questionary.checkbox("Facets to install:", choices=prompts).unsafe_ask())
 
 
 def _choices(registry: Registry, home: Home, cpu: bool, tier: str | None) -> list[Choice]:
-    """Every facet with its machine plan; installable facets start checked."""
+    """Every facet with its machine plan."""
     choices: list[Choice] = []
     for name in FACETS:
         entries = plan.build_plan(plan._from_name(registry, name), home, cpu=cpu, tier=tier)
-        checked = any(entry.install and not entry.noop for entry in entries)
-        choices.append(Choice(name, entries, checked))
+        choices.append(Choice(name, entries))
     return choices
 
 
