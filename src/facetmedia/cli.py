@@ -229,18 +229,30 @@ def _handle_auth(args: argparse.Namespace) -> int:
 
 
 def _handle_auth_login(args: argparse.Namespace, target: str | None) -> int:
-    """Exclusive: run a package's browser sign-in and store what it returns."""
+    """Exclusive: guide one package at a time until the person picks done."""
     if target is not None and (args.json or not auth._terminal()):
         return _handle_auth_verb(args, target)
     wait, timeout_s = _lock_params(args)
     if target is not None:
-        names = [auth.resolve_wizard(target).name]
-    else:
+        return _handle_named_login(args, target, wait, timeout_s)
+    while True:
         picked = auth.pick(args)
         if picked is None:
             return 0
-        names = picked
-    auth_wizard.run_packages(names, run_id=args.run_id, wait=wait, timeout_s=timeout_s)
+        auth_wizard.run_packages([picked], run_id=args.run_id, wait=wait, timeout_s=timeout_s)
+
+
+def _handle_named_login(args: argparse.Namespace, target: str, wait: bool, timeout_s: float) -> int:
+    """Guide the named package, refusing one that is already fully signed in."""
+    package = auth.resolve_wizard(target)
+    home = Home.from_env()
+    if auth._package_state(home, package) == "set":
+        print(
+            f"{package.name} is already signed in; "
+            f"sign out first with facet auth logout {package.name}"
+        )
+        return 0
+    auth_wizard.run_packages([package.name], run_id=args.run_id, wait=wait, timeout_s=timeout_s)
     return 0
 
 

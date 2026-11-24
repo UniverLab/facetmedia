@@ -1,12 +1,13 @@
 """``facet auth login`` as a guided wizard: typed secrets, browser flow, check.
 
-Bare ``facet auth`` offers every installed package that declares a secret;
+Bare ``facet auth`` offers every installed package that declares a secret
+and is not fully signed in, one at a time with nothing preselected;
 with a package it guides that one.  For each package the wizard asks for
-every typed secret (one the ``auth`` verb does not produce), telling the
-person what it is and where to get it, runs the package's ``auth`` verb
-when it has one, and checks the result with the full doctor.  The run ends
-with one summary line per package: ``signed in``, ``partly set``,
-``failed`` or ``skipped``.
+every typed secret that is not already stored (one the ``auth`` verb does
+not produce), telling the person what it is and where to get it, runs the
+package's ``auth`` verb when it has one, and checks the result with the
+full doctor.  The run ends with one summary line per package:
+``signed in``, ``partly set``, ``failed`` or ``skipped``.
 
 A value is never printed, logged or passed on: typed answers arrive with
 echo off and travel only through the existing secret store.
@@ -112,11 +113,11 @@ def _track(stored: list[str], name: str) -> None:
 def _typed_phase(
     package: Package, home: Home, wait: bool, timeout_s: float, stored: list[str]
 ) -> None:
-    """Ask for every secret the ``auth`` verb does not produce, in order."""
+    """Ask for every unstored secret the ``auth`` verb does not produce, in order."""
     typed = [secret for secret in package.secrets if secret.produced_by != "auth"]
     known = {str(row["name"]): row.get("set") is True for row in secrets.rows(home, [package])}
     for secret in typed:
-        if known.get(secret.name) is True and _ask_keep(package, secret):
+        if known.get(secret.name) is True:
             continue
         _announce_secret(package, secret)
         value = _read_value(package, secret)
@@ -129,12 +130,6 @@ def _typed_phase(
         print(f"{package.name} {secret.name} set")
 
 
-def _ask_keep(package: Package, secret: Secret) -> bool:
-    """Whether to keep the stored value; anything but yes replaces it."""
-    answer = input(f"{package.name} {secret.name} is set; replace it? [y/N]: ")
-    return answer.strip().lower() not in ("y", "yes")
-
-
 def _announce_secret(package: Package, secret: Secret) -> None:
     """What the secret is and where the person gets it; never a value."""
     print(f"{package.name} {secret.name}: {secret.description}")
@@ -143,9 +138,9 @@ def _announce_secret(package: Package, secret: Secret) -> None:
 
 
 def _read_value(package: Package, secret: Secret) -> str:
-    """The typed value with echo off; empty is a skip only when optional."""
+    """The typed value with echo off, stripped; empty is a skip only when optional."""
     while True:
-        value = getpass.getpass(f"{package.name} {secret.name}: ")
+        value = getpass.getpass(f"{package.name} {secret.name}: ").strip()
         if value:
             return value
         if not secret.required:
@@ -210,13 +205,20 @@ def _check_phase(package: Package, run_id: str, wait: bool, timeout_s: float) ->
             doctor_rows = maybe_rows if isinstance(maybe_rows, list) else []
     secrets_check = readiness.get("secrets")
     if not (isinstance(secrets_check, dict) and secrets_check.get("ok") is True):
+        _print_start_over(package)
         return PARTLY_SET
     detail, fix = _first_failing(readiness, doctor_rows)
+    _print_start_over(package)
     if detail:
         print(detail)
     if fix:
         print(fix)
     return FAILED
+
+
+def _print_start_over(package: Package) -> None:
+    """How to redo the sign-in from scratch after the check did not pass."""
+    print(f"to start over: facet auth logout {package.name}")
 
 
 def _first_failing(readiness: dict[str, object], doctor_rows: list[object]) -> tuple[str, str]:

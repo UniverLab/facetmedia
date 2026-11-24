@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
 import questionary
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from facetmedia.registry_types import Registry
 
 __all__ = [
-    "ALL_CHOICE",
+    "ALL_SIGNED_IN",
     "AUTH_VERB",
     "LOGIN_VERB",
     "LOGOUT_VERB",
@@ -75,9 +75,6 @@ NOTHING_WITH_SECRETS: Final[str] = (
 #: Printed when a package holds no stored sign-in secret to remove.
 NOTHING_STORED: Final[str] = "nothing stored"
 _SELECT_MESSAGE: Final[str] = "Choose an account — arrows move, enter picks [default: done]:"
-_PICK_SECRETS_MESSAGE: Final[str] = (
-    "Choose the credentials to remove — space toggles, enter confirms:"
-)
 _DONE: Final[object] = object()
 
 
@@ -227,11 +224,8 @@ def _installed(registry: Registry, home: Home) -> list[Package]:
     ]
 
 
-#: The extra choice that guides every package instead of picking rows.
-ALL_CHOICE: Final[str] = "all"
-_SELECT_PACKAGES_MESSAGE: Final[str] = (
-    "Choose packages to sign in to — space toggles, enter confirms:"
-)
+#: Printed when every package declaring a secret is already fully signed in.
+ALL_SIGNED_IN: Final[str] = "every package is signed in; sign out with facet auth logout <package>"
 
 
 def _package_state(home: Home, package: Package) -> str:
@@ -243,65 +237,6 @@ def _package_state(home: Home, package: Package) -> str:
     if not any(flags):
         return "not set"
     return "partly set"
-
-
-def _offer_line(package: Package, state: str) -> str:
-    """One offered package: name, version and its stored state."""
-    return f"{package.name} {package.version} ({state})"
-
-
-def _expand_picked(picked: Sequence[object], names: list[str]) -> list[str]:
-    """The chosen package names in offering order; done or blank chooses none."""
-    if not picked or any(value is _DONE for value in picked):
-        return []
-    if ALL_CHOICE in [str(value) for value in picked]:
-        return list(names)
-    wanted = {str(value) for value in picked}
-    return [name for name in names if name in wanted]
-
-
-def _select_packages_styled(packages: list[Package], states: dict[str, str]) -> list[str]:
-    """The checkbox choice, in offering order, or an empty list on done."""
-    choices = [
-        questionary.Choice(title=_offer_line(package, states[package.name]), value=package.name)
-        for package in packages
-    ]
-    choices.append(questionary.Choice(title=ALL_CHOICE, value=ALL_CHOICE))
-    choices.append(questionary.Choice(title="done", value=_DONE))
-    try:
-        picked = questionary.checkbox(_SELECT_PACKAGES_MESSAGE, choices=choices).unsafe_ask()
-    except EOFError:
-        return []
-    return _expand_picked(list(picked or []), [package.name for package in packages])
-
-
-def _select_packages_plain(packages: list[Package], states: dict[str, str]) -> list[str]:
-    """The numbered comma-separated choice, or an empty list on done."""
-    names = [package.name for package in packages]
-    rows: list[tuple[str, str | None]] = [
-        (_offer_line(package, states[package.name]), package.name) for package in packages
-    ]
-    rows += [(ALL_CHOICE, ALL_CHOICE), ("done", None)]
-    for index, (label, _value) in enumerate(rows, 1):
-        print(f"{index}. {label}")
-    try:
-        answer = input(f"Choose packages [1-{len(rows)}, comma separated]: ").strip()
-    except EOFError:
-        return []
-    if not answer or answer == "done":
-        return []
-    if answer == ALL_CHOICE:
-        return list(names)
-    if answer in names:
-        return [answer]
-    return _expand_picked(_parse_rows(answer, rows), names)
-
-
-def _select_packages(packages: list[Package], states: dict[str, str]) -> list[str]:
-    """The chosen package names, or an empty list on done, blank, or EOF."""
-    if theme.styled():
-        return _select_packages_styled(packages, states)
-    return _select_packages_plain(packages, states)
 
 
 def _select_styled(packages: list[Package]) -> str | None:
@@ -346,31 +281,40 @@ def _select(packages: list[Package]) -> str | None:
     return _select_plain([package.name for package in packages])
 
 
-def pick(args: argparse.Namespace) -> list[str] | None:
-    """The packages to guide, chosen at the terminal, or ``None`` for nothing.
+def pick(args: argparse.Namespace) -> str | None:
+    """The package to guide, chosen at the terminal, or ``None`` for nothing.
 
-    Every installed package that declares a secret is offered with its
-    stored state; the person multi-picks rows, or the ``all`` row for every
-    package.  An empty answer or ``done`` prints ``nothing changed``.
+    Only installed packages that declare a secret and are not fully signed
+    in are offered, one at a time with nothing preselected; the ``done``
+    row leaves.  An empty answer, ``done``, or ``EOF`` prints
+    ``nothing changed``; when nothing is offered because every package is
+    signed in, that is said instead.
     """
     registry = load_active_registry()
     home = Home.from_env()
     _refused(args, sorted(registry.packages))
     banner.print_text()
-    offered = [package for package in _installed(registry, home) if package.secrets]
-    if not offered:
+    with_secrets = [package for package in _installed(registry, home) if package.secrets]
+    if not with_secrets:
         print(NOTHING_WITH_SECRETS)
         return None
-    states = {package.name: _package_state(home, package) for package in offered}
+    offered = [
+        package
+        for package in with_secrets
+        if _package_state(home, package) in ("not set", "partly set")
+    ]
+    if not offered:
+        print(ALL_SIGNED_IN)
+        return None
     try:
-        chosen = _select_packages(offered, states)
+        chosen = _select(offered)
     except KeyboardInterrupt:
         print(NOTHING_CHANGED)
         return None
-    if not chosen:
+    if chosen is None:
         print(NOTHING_CHANGED)
         return None
-    return [resolve_wizard(name).name for name in chosen]
+    return resolve_wizard(chosen).name
 
 
 def handle(package_name: str, run_id: str) -> dict[str, object]:
@@ -426,30 +370,23 @@ def _logout_refused(args: argparse.Namespace, known: list[str]) -> None:
         )
 
 
-def _logout_choosable(args: argparse.Namespace, package: Package) -> None:
-    """Removal asks which credentials: never ``--json``, and never without a terminal."""
-    detail = f"choosing {package.name}'s stored credentials to remove needs a terminal"
-    hint = f"facet secret rm {package.name} <name>"
-    if bool(getattr(args, "json", False)):
-        raise FacetError("invalid_input", detail, hint=hint, details={"package": package.name})
-    if not _terminal():
-        raise FacetError(
-            "confirmation_required", detail, hint=hint, details={"package": package.name}
-        )
-
-
 def _logout_target(args: argparse.Namespace, target: str | None) -> Package | None:
-    """The package to sign out of: the named one, or one chosen at the terminal."""
+    """The package to sign out of: the named one, or one chosen at the terminal.
+
+    Without a name only packages holding at least one stored secret are
+    offered, one at a time with nothing preselected; the ``done`` row leaves.
+    """
     if target is not None:
         return _resolve(target)
     registry = load_active_registry()
     _logout_refused(args, sorted(registry.packages))
     banner.print_text()
-    installed = _installed(registry, Home.from_env())
-    if not installed:
+    home = Home.from_env()
+    offered = [package for package in _installed(registry, home) if _stored(home, package)]
+    if not offered:
         print(NOTHING_SELECTED)
         return None
-    chosen = _select(installed)
+    chosen = _select(offered)
     if chosen is None:
         print(NOTHING_SELECTED)
         return None
@@ -460,58 +397,6 @@ def _stored(home: Home, package: Package) -> list[str]:
     """The package's declared secret names that currently hold a value."""
     rows = secrets.rows(home, [package])
     return [str(row["name"]) for row in rows if row.get("set") is True]
-
-
-def _rows(names: list[str]) -> list[tuple[str, str | None]]:
-    """One row per stored secret, then ``done``; the done row has no name."""
-    return [(name, name) for name in names] + [("done", None)]
-
-
-def _parse_rows(answer: str, rows: list[tuple[str, str | None]]) -> list[str]:
-    """The names behind the 1-based row numbers in ``answer``, in order, without repeats."""
-    picked: list[str] = []
-    for token in answer.replace(",", " ").split():
-        if not token.isdigit():
-            continue
-        index = int(token)
-        if not 1 <= index <= len(rows):
-            continue
-        value = rows[index - 1][1]
-        if value is not None and value not in picked:
-            picked.append(value)
-    return picked
-
-
-def _choose_styled(names: list[str]) -> list[str]:
-    """The checkbox choice, or an empty list on EOF or the done row."""
-    choices = [
-        questionary.Choice(title=label, value=label if value is not None else _DONE)
-        for label, value in _rows(names)
-    ]
-    try:
-        picked = questionary.checkbox(_PICK_SECRETS_MESSAGE, choices=choices).unsafe_ask()
-    except EOFError:
-        return []
-    return [str(name) for name in picked or [] if name is not _DONE]
-
-
-def _choose_plain(names: list[str]) -> list[str]:
-    """The numbered comma-separated choice; blank, EOF or the done row removes nothing."""
-    rows = _rows(names)
-    for index, (label, _value) in enumerate(rows, 1):
-        print(f"{index}. {label}")
-    try:
-        answer = input(f"Choose credentials to remove [1-{len(rows)}, comma separated]: ").strip()
-    except EOFError:
-        return []
-    return _parse_rows(answer, rows)
-
-
-def _choose_secrets(names: list[str]) -> list[str]:
-    """The stored secret names to remove, chosen at the terminal."""
-    if theme.styled():
-        return _choose_styled(names)
-    return _choose_plain(names)
 
 
 def _remove_stored(
@@ -532,10 +417,11 @@ def _remove_stored(
 
 
 def logout(args: argparse.Namespace, target: str | None) -> dict[str, object] | None:
-    """Remove a package's stored sign-in secrets locally; ``None`` when nothing was chosen.
+    """Remove every stored sign-in secret of the package at once, locally.
 
-    Nothing leaves this machine: no network call, no revocation.  Re-authenticating
-    with ``facet auth login <package>`` is the way back.  A package with nothing
+    ``None`` only when no package was chosen.  Nothing leaves this machine:
+    no network call, no revocation.  Re-authenticating with
+    ``facet auth login <package>`` is the way back.  A package with nothing
     stored is a no-op that still reports its empty ``removed`` list.
     """
     package = _logout_target(args, target)
@@ -550,10 +436,5 @@ def logout(args: argparse.Namespace, target: str | None) -> dict[str, object] | 
     }
     if not names:
         return done
-    _logout_choosable(args, package)
-    chosen = _choose_secrets(names)
-    if not chosen:
-        print(NOTHING_SELECTED)
-        return None
-    done["removed"] = _remove_stored(home, package, chosen, args)
+    done["removed"] = _remove_stored(home, package, names, args)
     return done

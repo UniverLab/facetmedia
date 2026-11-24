@@ -575,36 +575,45 @@ A name the manifest did not declare fails a sign-in with `invalid_input`:
 a sign-in can never store a credential the package did not declare.
 
 With no package, when standard input and output are both terminals,
-`facet auth` and `facet auth login` run a guided wizard. It lists every
-installed package that declares a secret, each with its stored state (`set`,
-`partly set`, `not set`), and lets the person multi-pick rows — or the `all`
-row for every package. A blank answer or `done` leaves with
-`nothing changed`. Then, per package in manifest order, the wizard asks for
-every secret the `auth` verb does not produce: it prints the secret's
-description and where to get it, reads the value with echo off, and stores
-it through the same path `facet secret set` uses. A value already stored is
-kept unless the person asks to replace it; a required secret may not be left
-empty, an optional one is skipped with an empty answer. Afterwards the
-package's `auth` verb runs when it has one; a failure prints the one-line
-reason and offers `retry`, `skip` or `quit`, keeping the secrets already
-stored. Packages with no `auth` verb get the typed prompts and the check
-only. Each package ends with one summary line — `signed in`, `partly set`,
-`failed` or `skipped` — from `facet doctor <package> --full`, whose detail
-and fix print on a failure. When no installed package declares a secret, it
-says so, names `facet pull <package>` first, and exits `0`.
+`facet auth` and `facet auth login` run a guided wizard. It offers each
+installed package that declares a secret and is not fully signed in, one
+at a time: a single choice with nothing preselected, ending in a `done`
+row. A package that is already signed in is never offered. After the
+chosen package's flow ends, the menu shows again with the states
+recomputed, until the person picks `done`, cancels, or nothing is offered.
+When every package declaring a secret is signed in, it prints
+`every package is signed in; sign out with facet auth logout <package>`
+and exits `0`. For the chosen package the wizard asks only for the typed
+secrets the `auth` verb does not produce that are not already stored: it
+prints the secret's description and where to get it, reads the value with
+echo off, strips surrounding whitespace, and stores it through the same
+path `facet secret set` uses. A value already stored is kept silently and
+never asked about; a required secret may not be left empty, an optional
+one is skipped with an empty answer. Afterwards the package's `auth` verb
+runs when it has one; a failure prints the one-line reason and offers
+`retry`, `skip` or `quit`, keeping the secrets already stored. Packages
+with no `auth` verb get the typed prompts and the check only. Each package
+ends with one summary line — `signed in`, `partly set`, `failed` or
+`skipped` — from `facet doctor <package> --full`. When the check ends
+`failed` or `partly set`, the printed hint starts with
+`to start over: facet auth logout <package>`, followed by the check's
+detail and fix. When no installed package declares a secret, it says so,
+names `facet pull <package>` first, and exits `0`.
 
 With a package, at a terminal and without `--json`, the same per-package
-flow runs for that package alone. With `--json`, or off a terminal, it
-behaves exactly as before: the package's `auth` verb runs once and stores
-what it returns, with no prompts and no doctor check. With `--json` and no
-package neither prompts: the missing `<package>` is `invalid_input`,
-exit 2. Off a terminal, both also never prompt: `confirmation_required`,
-exit 11, with a hint to name the package plus the
-`facet secret set <package> <name>` command for each typed secret still
-missing. Cancelling at any prompt stops cleanly: `nothing changed` when
-nothing was stored in this run, otherwise the names stored, and exit `0`.
-A value is never printed, logged or passed on; runners still receive secrets
-only through their environment.
+flow runs for that package alone — unless it is already signed in, which
+prints `<package> is already signed in; sign out first with facet auth
+logout <package>` and exits `0` without running anything. With `--json`,
+or off a terminal, it behaves exactly as before: the package's `auth`
+verb runs once and stores what it returns, with no prompts and no doctor
+check. With `--json` and no package neither prompts: the missing
+`<package>` is `invalid_input`, exit 2. Off a terminal, both also never
+prompt: `confirmation_required`, exit 11, with a hint to name the package
+plus the `facet secret set <package> <name>` command for each typed
+secret still missing. Cancelling at any prompt stops cleanly:
+`nothing changed` when nothing was stored in this run, otherwise the names
+stored, and exit `0`. A value is never printed, logged or passed on;
+runners still receive secrets only through their environment.
 
 ```console
 $ facet auth login youtube
@@ -623,17 +632,17 @@ case, so the tokens it wrote exist only in the encrypted vault afterwards.
 
 ### `facet auth logout [<package>]`
 
-Removes a package's stored sign-in secrets. With a package it resolves that
-package the same way the login path does — it must exist, be installed and
-declare an `auth` verb — then offers the secrets currently set and removes
-the chosen ones through `facet secret rm`'s path. With no package, at a
-terminal, it first offers the installed packages, then that package's set
-secrets. At a terminal the secrets are a multi-select with `done` as the
-last choice: a checkbox when facet can style the terminal, otherwise a
-numbered list that takes comma-separated row numbers. A blank answer, EOF
-or `done` removes nothing and exits `0`.
-Removing nothing is a clean no-op, and a package holding no stored secret
-prints `<package>: nothing stored` and exits `0`.
+Removes every stored sign-in secret of a package at once, with no
+per-secret questions. With a package it resolves that package the same way
+the login path does — it must exist, be installed and declare an `auth`
+verb — then removes every declared secret that currently holds a value in
+one step through `facet secret rm`'s path. With no package, at a terminal,
+it first offers each installed package holding at least one stored secret,
+one at a time: a single choice with nothing preselected, ending in a
+`done` row. A blank answer, EOF or `done` removes nothing and exits `0`,
+and a package holding no stored secret stays a no-op that reports
+`removed: []`. Afterwards it prints `<package>: removed a, b, c`, then the
+local-only notice and the `facet auth login <package>` hint.
 
 Logout is local only. It removes stored secrets and never calls the network,
 so it never revokes anything server-side: a token already issued stays valid
@@ -641,31 +650,28 @@ at the provider until it expires. Signing back in is `facet auth login
 <package>`.
 
 ```console
-$ facet auth logout youtube
-1. oauth-token
-2. done
-Choose credentials to remove [1-2, comma separated]: 1
-youtube: removed oauth-token
+$ facet auth logout x
+x: removed oauth-token, oauth-secret
 removed on this machine only; nothing was revoked on the server
-sign back in with `facet auth login youtube`
+sign back in with `facet auth login x`
 ```
 
-`logout` asks which credentials to remove, so it never prompts under
-`--json`: with no package the missing `<package>` is `invalid_input`, exit
-2, and with one it is `invalid_input` too, with a hint to
-`facet secret rm <package> <name>`. Off a terminal it refuses with
-`confirmation_required`, exit 11, instead of guessing. As a locking verb it
-accepts `--no-wait` and `--wait-timeout`.
+With a package `logout` never prompts, so it also works under `--json`
+(the data keeps its `package`, `removed`, `path` shape); with no package
+the missing `<package>` is `invalid_input`, exit 2, and off a terminal it
+refuses with `confirmation_required`, exit 11, instead of guessing. As a
+locking verb it accepts `--no-wait` and `--wait-timeout`.
 
 Lock: exclusive; `login` holds it around each store and the sign-in,
 `logout` around the removals. Exit codes: `0` (including a cancelled choice,
 `nothing changed`, `nothing stored`, or no package declaring a secret); `2`
 an unknown package, a returned name the manifest did not declare, bare
 `facet auth --json` or `facet auth login --json` (missing `<package>`), or
-`facet auth logout --json`; `7` the package is not installed; `9` the verb
-crashed or returned no `secrets` map; `11` bare `facet auth`, `facet auth
-login` or `facet auth logout` with no terminal to choose on. With a package,
-`--json` or off a terminal still refuses a package with no `auth` verb.
+bare `facet auth logout --json`; `7` the package is not installed; `9` the
+verb crashed or returned no `secrets` map; `11` bare `facet auth`,
+`facet auth login` or `facet auth logout` with no terminal to choose on.
+With a package, `--json` or off a terminal still refuses a package with no
+`auth` verb.
 
 ## `facet doctor`
 

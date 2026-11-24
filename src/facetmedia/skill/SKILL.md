@@ -35,10 +35,10 @@ each package row adds `facet` and `weight`. `facet describe <capability>
 prints that package's how-to), plus `secrets`: one `{name, description,
 required, set, obtain, produced_by}` row per credential the package declares
 — never a value (`obtain` says where to get it, `produced_by: "auth"` means
-the `auth` verb mints it). When a required secret is missing, run the guided
-`facet auth login [<package>]`, or store it with `facet secret set <package>
-<name>`. `facet auth logout [<package>]` removes stored secrets locally,
-revoking nothing server-side.
+the `auth` verb mints it). `facet auth login [<package>]` (`facet auth <package>` is an alias; bare `facet auth` = `facet auth login`) signs tools in.
+At a terminal with no package it offers one package at a time — a single choice with nothing preselected and no `all` row, ending in `done` — and only packages declaring a secret that are not already fully signed in (`set` packages are hidden). After each flow the menu repeats with states recomputed until `done`, cancel or none left; when all are `set` it prints `every package is signed in; sign out with facet auth logout <package>`.
+It asks only for typed secrets not already stored (the `auth` verb mints the rest), strips surrounding whitespace from typed values, keeps stored values silently with no keep-or-replace question, and ends `signed in`/`partly set`/`failed`/`skipped`; on `failed`/`partly set` the hint starts `to start over: facet auth logout <package>`. Naming an already-signed-in package at a terminal prints `<package> is already signed in; sign out first with facet auth logout <package>` and exits `0`; with `--json` or off a terminal it just runs the `auth` verb once. Store a secret directly with `facet secret set <package> <name>`.
+`facet auth logout [<package>]` removes every stored secret of that package at once, with no per-secret question — even an all-typed package like `x` — then prints `<package>: removed a, b, c`, the local-only notice and a `facet auth login <package>` hint; with no package it offers only packages holding a stored secret, and nothing stored is a no-op (`removed: []`). Nothing is revoked server-side.
 
 `summary` and a facet's name are English by default. When the registry
 declares localized texts, `facet describe --json` carries them under `i18n`,
@@ -115,7 +115,7 @@ and the network may keep it as a draft or private. Follow these rules:
   `unknown`) and report exactly that; never call a draft or a private post
   published. `facet check <receipt>` reads it back.
 - **Credentials are the person's.** Tell them what to create in the account
-  and which `facet secret set <package> <name>` or `facet auth <package>` to run — in their own terminal (`facet auth` alone lists offering packages). Never ask for a secret in the conversation and
+  and which `facet secret set <package> <name>` or `facet auth <package>` to run — in their own terminal (`facet auth` alone opens the guided single-choice menu, see **Auth** above). Never ask for a secret in the conversation and
   never pass one to `facet secret set` yourself; check with `facet doctor`.
   Credentials live in an encrypted vault under the facet home (`facet secret
   passphrase` sets or removes a passphrase). The encryption protects against
