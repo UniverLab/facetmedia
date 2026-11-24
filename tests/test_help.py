@@ -306,3 +306,30 @@ def test_help_with_no_color_is_byte_identical_to_a_pipe(
         styled = _styled_help(argv, capsys)
         assert styled == plain
         assert "╭" not in styled
+
+
+def test_styled_help_uses_senal_accent(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    senal = "38;2;232;197;71"
+    _styled_tty(monkeypatch)
+    monkeypatch.setenv("COLORTERM", "truecolor")
+
+    top = _styled_help([], capsys)
+    assert senal in top
+    for title in ("start", "make and check", "maintain"):
+        assert title in top
+    for verb in ("update", "pull", "run", "doctor"):
+        assert verb in top
+    # panel titles and verbs carry Señal
+    min_senal_marks = 4
+    assert top.count(f"\x1b[1;{senal}m") >= min_senal_marks
+
+    pull = _styled_help(["pull"], capsys)
+    assert senal in pull
+    assert "--package" in pull
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    plain = _styled_help([], capsys)
+    assert senal not in plain
+    assert "╭" not in plain

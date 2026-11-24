@@ -2,10 +2,11 @@
 
 All styling comes from this module and nowhere else: the named styles in
 ``STYLES`` and the console built by :func:`console`.  The facet brand manual
-sets one accent, Señal, that marks only what is verified (a check that
-passed, a measure in range, an accepted licence), one secondary text colour,
-Hueso tenue, for reasons, paths, sizes, times and hints, and otherwise the
-terminal's own default foreground: the terminal's background is the person's.
+sets one accent, Señal, that marks what the person should act on (commands,
+flags, prompts, the selected row) and what is verified (a check that passed, a
+measure in range, an accepted licence), one secondary text colour, Hueso tenue,
+for reasons, paths, sizes, times and hints, and otherwise the terminal's own
+default foreground: the terminal's background is the person's.
 
 Colours are written as hex and rich downgrades them to the terminal's own
 palette; ``accent``, ``banner``, ``error`` and ``warn`` stay ``bold`` so the
@@ -22,16 +23,17 @@ import os
 import sys
 from typing import Final, TextIO
 
+import questionary
 from rich.console import Console
 from rich.theme import Theme
 
-#: Señal, the brand's one accent: it marks only what is verified.
+#: Señal, the brand's one accent: what to act on and what is verified.
 SENAL: Final[str] = "#e8c547"
 #: Hueso tenue, the secondary text colour.
 HUESO_TENUE: Final[str] = "#9a938a"
 
 STYLES: Final[dict[str, str]] = {
-    "accent": "bold",
+    "accent": f"bold {SENAL}",
     "muted": HUESO_TENUE,
     "ok": SENAL,
     "warn": "bold",
@@ -61,9 +63,40 @@ def console(stream: TextIO | None = None) -> Console:
     calm and greppable.
     """
     out = stream if stream is not None else sys.stdout
+    on = styled(out)
+    theme = Theme(dict(STYLES))
+    for style in theme.styles.values():
+        style._ansi = None
     return Console(
         file=out,
-        theme=Theme(dict(STYLES)),
-        no_color=not styled(out),
+        theme=theme,
+        no_color=not on,
+        force_terminal=on,
         highlight=False,
     )
+
+
+def menu_style() -> questionary.Style:
+    """The questionary style: Señal on the actionable row, default elsewhere."""
+    return questionary.Style(
+        [
+            ("pointer", f"fg:{SENAL} bold"),
+            ("highlighted", f"fg:{SENAL} bold"),
+            ("selected", f"fg:{SENAL}"),
+            ("qmark", ""),
+            ("question", ""),
+            ("answer", ""),
+            ("accent", f"fg:{SENAL} bold"),
+            ("separator", ""),
+            ("instruction", ""),
+            ("text", ""),
+        ]
+    )
+
+
+def render(markup: str, stream: TextIO | None = None) -> str:
+    """Render ``markup`` for ``stream`` and return it as a string."""
+    target = console(stream)
+    with target.capture() as capture:
+        target.print(markup, end="", soft_wrap=True)
+    return capture.get()

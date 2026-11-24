@@ -29,6 +29,7 @@ MIB: Final[int] = 1024**2
 SENAL: Final[str] = "\x1b[38;2;232;197;71m"
 MUTED: Final[str] = "\x1b[38;2;154;147;138m"
 BOLD: Final[str] = "\x1b[1m"
+ACCENT: Final[str] = "\x1b[1;38;2;232;197;71m"
 RESET: Final[str] = "\x1b[0m"
 COLOUR_WORDS: Final[frozenset[str]] = frozenset(
     {
@@ -106,8 +107,8 @@ def test_a_finished_package_marks_only_its_check() -> None:
     summary.collapse("kokoro", "0.1.2", 812 * MIB, 27.6)
 
     assert _lines(stream) == [
-        f"→ {BOLD}kokoro 0.1.2{RESET}",
-        f"{SENAL}✓{RESET} {BOLD}kokoro 0.1.2{RESET}   {MUTED}812 MB   27.6s{RESET}",
+        f"→ {ACCENT}kokoro 0.1.2{RESET}",
+        f"{SENAL}✓{RESET} {ACCENT}kokoro 0.1.2{RESET}   {MUTED}812 MB   27.6s{RESET}",
     ]
 
 
@@ -120,10 +121,10 @@ def test_a_failed_package_carries_no_senal() -> None:
 
     line = _lines(stream)[-1]
     assert line == (
-        f"{BOLD}✗{RESET} {BOLD}kokoro 0.1.2{RESET}   "
+        f"{BOLD}✗{RESET} {ACCENT}kokoro 0.1.2{RESET}   "
         f"{MUTED}failed in 12.3s{RESET}: HTTP 404 on the model"
     )
-    assert SENAL not in stream.getvalue()
+    assert f"{SENAL}✓" not in stream.getvalue()
 
 
 def test_an_installed_package_and_the_total_stay_calm() -> None:
@@ -134,11 +135,11 @@ def test_an_installed_package_and_the_total_stay_calm() -> None:
     summary.total(1, 812 * MIB, 27.6)
 
     text = stream.getvalue()
-    assert SENAL not in text
     assert _lines(stream) == [
-        f"· {BOLD}kokoro 0.1.2{RESET}   {MUTED}already installed{RESET}",
+        f"· {ACCENT}kokoro 0.1.2{RESET}   {MUTED}already installed{RESET}",
         f"{MUTED}1 package · 812 MB · 27.6s{RESET}",
     ]
+    assert f"{SENAL}✓" not in text
 
 
 # --- facet run and facet check results.
@@ -300,8 +301,7 @@ def test_the_wizard_marks_each_step(monkeypatch: pytest.MonkeyPatch) -> None:
 
     text = stream.getvalue()
     for step in ("Step 1 of 4", "Step 2 of 4", "Step 3 of 4", "Step 4 of 4"):
-        assert f"{BOLD}{step}" in text
-    assert SENAL not in text
+        assert f"{ACCENT}{step}" in text
 
 
 def theme_name() -> str:

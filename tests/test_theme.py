@@ -17,7 +17,7 @@ from facetmedia import theme
 SENAL = "#e8c547"
 HUESO_TENUE = "#9a938a"
 EXPECTED_STYLES = {
-    "accent": "bold",
+    "accent": f"bold {SENAL}",
     "banner": "bold",
     "error": "bold",
     "muted": HUESO_TENUE,
@@ -159,3 +159,31 @@ def test_console_strips_the_markup_without_a_tty() -> None:
     theme.console(stream).print("[ok]✓[/] kokoro [muted]812 MB[/]")
 
     assert stream.getvalue() == "✓ kokoro 812 MB\n"
+
+
+def test_menu_style_marks_actionable_rows_with_senal() -> None:
+    style = theme.menu_style()
+    rules = dict(style.style_rules)
+    assert rules["pointer"] == f"fg:{SENAL} bold"
+    assert rules["highlighted"] == f"fg:{SENAL} bold"
+    assert rules["selected"] == f"fg:{SENAL}"
+    assert rules["accent"] == f"fg:{SENAL} bold"
+
+
+def test_render_uses_accent_on_a_styled_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    stream = _TtyBuffer()
+
+    rendered = theme.render("[accent]name[/]", stream)
+
+    assert "38;2;232;197;71" in rendered
+    assert "name" in rendered
+    assert "\x1b[" in rendered
+
+
+def test_render_is_plain_without_a_tty() -> None:
+    stream = io.StringIO()
+
+    rendered = theme.render("[accent]name[/] [muted]hint[/]", stream)
+
+    assert rendered == "name hint"

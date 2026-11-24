@@ -18,7 +18,9 @@ from __future__ import annotations
 import getpass
 from typing import Final
 
-from facetmedia import auth, doctor, lock, secrets
+from rich.markup import escape
+
+from facetmedia import auth, doctor, lock, secrets, theme
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry_types import Package, Secret
@@ -100,7 +102,8 @@ def run_package(
     if continued is None:
         return None
     label = _check_phase(package, run_id, wait, timeout_s) if continued else SKIPPED
-    print(f"{package.name}: {label}")
+    style = "ok" if label == SIGNED_IN else "bold"
+    theme.console().print(f"[{style}]{escape(package.name)}: {escape(label)}[/]", soft_wrap=True)
     return label
 
 
@@ -132,15 +135,20 @@ def _typed_phase(
 
 def _announce_secret(package: Package, secret: Secret) -> None:
     """What the secret is and where the person gets it; never a value."""
-    print(f"{package.name} {secret.name}: {secret.description}")
+    console = theme.console()
+    console.print(
+        f"[accent]{escape(package.name)} {escape(secret.name)}:[/] {escape(secret.description)}",
+        soft_wrap=True,
+    )
     if secret.obtain:
-        print(f"  where to get it: {secret.obtain}")
+        console.print(f"  [muted]where to get it:[/] {escape(secret.obtain)}", soft_wrap=True)
 
 
 def _read_value(package: Package, secret: Secret) -> str:
     """The typed value with echo off, stripped; empty is a skip only when optional."""
     while True:
-        value = getpass.getpass(f"{package.name} {secret.name}: ").strip()
+        prompt = theme.render(f"[accent]{escape(package.name)} {escape(secret.name)}:[/] ")
+        value = getpass.getpass(prompt).strip()
         if value:
             return value
         if not secret.required:
@@ -181,7 +189,10 @@ def _auth_phase(
 def _ask_auth_choice(package: Package) -> str:
     """The failure loop: ``retry`` (the default), ``skip`` or ``quit``."""
     while True:
-        answer = input(f"{package.name}: retry, skip or quit? [retry/skip/quit]: ")
+        prompt = theme.render(
+            f"[accent]{escape(package.name)}:[/] retry, skip or quit? [retry/skip/quit]: "
+        )
+        answer = input(prompt)
         choice = answer.strip().lower() or "retry"
         if choice in ("retry", "skip", "quit"):
             return choice
@@ -218,7 +229,9 @@ def _check_phase(package: Package, run_id: str, wait: bool, timeout_s: float) ->
 
 def _print_start_over(package: Package) -> None:
     """How to redo the sign-in from scratch after the check did not pass."""
-    print(f"to start over: facet auth logout {package.name}")
+    theme.console().print(
+        f"[muted]to start over: facet auth logout {escape(package.name)}[/]", soft_wrap=True
+    )
 
 
 def _first_failing(readiness: dict[str, object], doctor_rows: list[object]) -> tuple[str, str]:

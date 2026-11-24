@@ -242,11 +242,19 @@ def _package_state(home: Home, package: Package) -> str:
 def _select_styled(packages: list[Package]) -> str | None:
     """The styled questionary choice, or ``None`` on done."""
     prompts = [
-        questionary.Choice(title=f"{package.name} {package.version}", value=package.name)
+        questionary.Choice(
+            title=[
+                ("class:accent", package.name),
+                ("", f" {package.version}"),
+            ],
+            value=package.name,
+        )
         for package in packages
     ]
     prompts.append(questionary.Choice(title="done", value=_DONE))
-    picked = questionary.select(_SELECT_MESSAGE, choices=prompts).unsafe_ask()
+    picked = questionary.select(
+        _SELECT_MESSAGE, choices=prompts, style=theme.menu_style()
+    ).unsafe_ask()
     return None if picked is _DONE else str(picked)
 
 

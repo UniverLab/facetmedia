@@ -235,3 +235,46 @@ def test_secretless_package_exits_zero(
     assert main(["secret", "set"]) == 0
     out = capsys.readouterr().out
     assert "no secrets declared" in out
+
+
+SENAL_SGR = "38;2;232;197;71"
+
+
+def test_styled_secret_wizard_uses_accent_menu_style(
+    use_registry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _secret_registry(use_registry, "a", secrets_count=1)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
+    calls: list[object] = []
+    real_menu_style = __import__("facetmedia.theme", fromlist=["menu_style"]).menu_style
+
+    def spy_menu_style() -> object:
+        style = real_menu_style()
+        calls.append(style)
+        return style
+
+    monkeypatch.setattr("facetmedia.theme.menu_style", spy_menu_style)
+    fake_tty(monkeypatch, ["\r", "\x1b[B\r"])
+    assert main(["secret", "set"]) == 0
+    assert calls
+    rules = dict(calls[0].style_rules)  # type: ignore[union-attr]
+    assert rules["highlighted"] == "fg:#e8c547 bold"
+
+
+def test_no_color_secret_wizard_output_has_no_ansi(
+    use_registry, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _secret_registry(use_registry, "a", secrets_count=1)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setattr("builtins.input", lambda _prompt="": (_ for _ in ()).throw(EOFError))
+    assert main(["secret", "set"]) == 0
+    out = capsys.readouterr().out
+    assert "\x1b" not in out
+    assert "nothing selected" in out

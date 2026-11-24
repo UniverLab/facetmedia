@@ -122,22 +122,23 @@ def _styled_group_name(name: str) -> str:
 class FacetHelpFormatter(RawDescriptionRichHelpFormatter):
     """Styled help for a person at a terminal.
 
-    Calm colours only (see ``facetmedia.theme``): the default foreground with
-    ``bold`` and ``dim``.  Used only when standard output is a styled TTY;
-    everywhere else the plain ``RawDescriptionHelpFormatter`` keeps the output
-    byte-identical to what it is today.
+    Calm colours from ``facetmedia.theme``: the Señal accent marks commands,
+    flags, metavars and group headings; the rest stays the terminal default
+    foreground with ``bold`` and ``dim``.  Used only when standard output is a
+    styled TTY; everywhere else the plain ``RawDescriptionHelpFormatter`` keeps
+    the output byte-identical to what it is today.
     """
 
     group_name_formatter: ClassVar[Callable[[str], str]] = _styled_group_name
     styles: ClassVar[dict[str, Any]] = {
-        "argparse.args": "bold",
-        "argparse.groups": "bold",
+        "argparse.args": f"bold {theme.SENAL}",
+        "argparse.groups": f"bold {theme.SENAL}",
         "argparse.help": "default",
-        "argparse.metavar": "default",
+        "argparse.metavar": f"bold {theme.SENAL}",
         "argparse.prog": "default",
         "argparse.default": "dim",
         "argparse.text": "default",
-        "argparse.syntax": "bold",
+        "argparse.syntax": f"bold {theme.SENAL}",
     }
     help_markup: ClassVar[bool] = False
     text_markup: ClassVar[bool] = False
@@ -153,10 +154,13 @@ class FacetHelpFormatter(RawDescriptionRichHelpFormatter):
     def _add_group_panels(self) -> None:
         """One titled panel per verb group, then the maintainers line."""
         for title, verbs in _VERB_GROUPS:
-            body = "\n".join(
-                f"{verb:<9} {_VERB_HELP.get(verb) or _GROUP_HELP[verb]}" for verb in verbs
-            )
-            self.add_renderable(Panel(Text(body, style="argparse.text"), title=title))
+            body = Text()
+            for index, verb in enumerate(verbs):
+                if index:
+                    body.append("\n")
+                body.append(f"{verb:<9}", style=f"bold {theme.SENAL}")
+                body.append(f" {_VERB_HELP.get(verb) or _GROUP_HELP[verb]}")
+            self.add_renderable(Panel(body, title=Text(title, style=f"bold {theme.SENAL}")))
         super().add_text("maintainers: facet registry validate <registry-dir>")
 
 

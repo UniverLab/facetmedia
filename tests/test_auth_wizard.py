@@ -1101,3 +1101,103 @@ def test_secret_list_prints_obtain_next_to_description(use_registry, monkeypatch
     out = capsys.readouterr().out
     assert "the test token" in out
     assert "the provider console" in out
+
+
+SENAL_SGR = "38;2;232;197;71"
+MUTED_SGR = "38;2;154;147;138"
+
+
+def test_styled_wizard_marks_prompts_signed_in_and_hints(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", False)
+    manifest = root / "packages" / "a" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + 'obtain = "the [provider] console"\n',
+        encoding="utf-8",
+    )
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_doctor(monkeypatch, 1, detail="missing: m1", fix="facet pull a")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    entered = iter(["s3cr3t"])
+    prompts: list[str] = []
+
+    def fake_getpass(prompt: str = "") -> str:
+        prompts.append(prompt)
+        return next(entered)
+
+    monkeypatch.setattr(getpass, "getpass", fake_getpass)
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert prompts and SENAL_SGR in prompts[0]
+    assert SENAL_SGR in out
+    assert MUTED_SGR in out
+    assert "a token:" in out
+    assert "where to get it:" in out
+    assert "the [provider] console" in out
+    assert "to start over: facet auth logout a" in out
+    assert "\x1b[1ma: failed\x1b[0m" in out
+
+
+def test_styled_auth_menu_uses_accent_and_menu_style(use_registry, monkeypatch) -> None:
+    root = _auth_registry(use_registry, "a", False)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    captured: list[dict[str, object]] = []
+
+    class _FakeQuestion:
+        def unsafe_ask(self) -> object:
+            from facetmedia import auth as auth_module  # noqa: PLC0415
+
+            return auth_module._DONE
+
+    def fake_select(message: str, **kwargs: object) -> _FakeQuestion:
+        captured.append({"message": message, **kwargs})
+        return _FakeQuestion()
+
+    monkeypatch.setattr("facetmedia.auth.questionary.select", fake_select)
+    assert main(["auth"]) == 0
+    assert captured
+    choices = captured[0]["choices"]
+    assert isinstance(choices, list)
+    assert choices[0].title[0] == ("class:accent", "a")
+    style = captured[0]["style"]
+    rules = dict(style.style_rules)  # type: ignore[attr-defined]
+    assert rules["highlighted"] == "fg:#e8c547 bold"
+    assert rules["pointer"] == "fg:#e8c547 bold"
+    assert rules["selected"] == "fg:#e8c547"
+
+
+def test_styled_wizard_marks_signed_in_with_senal(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(monkeypatch, 0)
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "a: signed in" in out
+    assert SENAL_SGR in out
+
+
+def test_no_color_wizard_output_has_no_ansi(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(monkeypatch, 0)
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "\x1b" not in out
+    assert "a: signed in" in out

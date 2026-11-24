@@ -83,13 +83,21 @@ def _pick_package(packages: list[Package]) -> Package | None:
 
 def _select_styled_package(packages: list[Package]) -> Package | None:
     choices = [
-        questionary.Choice(title=f"{package.name} {package.version}", value=package)
+        questionary.Choice(
+            title=[
+                ("class:accent", package.name),
+                ("", f" {package.version}"),
+            ],
+            value=package,
+        )
         for package in packages
     ]
     choices.append(questionary.Choice(title="done", value=_DONE))
     try:
         picked = questionary.select(
-            "Choose a package — arrows move, enter picks [default: done]:", choices=choices
+            "Choose a package — arrows move, enter picks [default: done]:",
+            choices=choices,
+            style=theme.menu_style(),
         ).unsafe_ask()
     except (EOFError, KeyboardInterrupt):
         return None
@@ -128,7 +136,9 @@ def _select_styled_secret(rows: list[dict[str, object]]) -> str | None:
     choices.append(questionary.Choice(title="done", value=_DONE))
     try:
         picked = questionary.select(
-            "Choose a credential — arrows move, enter picks [default: done]:", choices=choices
+            "Choose a credential — arrows move, enter picks [default: done]:",
+            choices=choices,
+            style=theme.menu_style(),
         ).unsafe_ask()
     except (EOFError, KeyboardInterrupt):
         return None
