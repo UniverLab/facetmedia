@@ -400,6 +400,7 @@ def runner_env(home: Home, package: Package) -> dict[str, str]:
         env_vars["PATH"] = str(bin_dir) + os.pathsep + env_vars.get("PATH", "")
     if not package.requirements.gpu:
         env_vars["CUDA_VISIBLE_DEVICES"] = ""
+    env_vars["PYTHONUNBUFFERED"] = "1"
     return env_vars
 
 
@@ -677,6 +678,7 @@ def _server_env(inv: Invocation, port: int) -> dict[str, str]:
         if DATA_TOKEN in value:
             data_dir.mkdir(parents=True, exist_ok=True)
         env_vars[key] = _substitute(value, ((DATA_TOKEN, str(data_dir)), (PORT_TOKEN, str(port))))
+    env_vars["PYTHONUNBUFFERED"] = "1"
     return env_vars
 
 
@@ -767,6 +769,7 @@ def _stream(stream: IO[str], tail: deque[str], values: Sequence[str] = ()) -> No
             masked = secrets_module.mask(line, values)
             tail.append(masked)
             sys.stderr.write(masked)
+            sys.stderr.flush()
             logger.info("%s", masked.rstrip("\n"))
 
 

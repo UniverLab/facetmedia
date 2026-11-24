@@ -14,12 +14,14 @@ import hashlib
 import io
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -33,7 +35,7 @@ from facetmedia.cli import main
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import load_registry
-from facetmedia.registry_types import HostApp
+from facetmedia.registry_types import HostApp, Server
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "registry"
 EXIT_INVALID_INPUT = 2
@@ -1150,6 +1152,85 @@ def test_runner_env_hides_the_gpu_when_the_manifest_says_so(tmp_path: Path) -> N
     env_vars = runner.runner_env(Home(tmp_path), package)
     assert env_vars["CUDA_VISIBLE_DEVICES"] == ""
     assert env_vars["FACET_MODELS"].endswith("/models/direct")
+
+
+def test_runner_env_runs_the_runner_unbuffered(tmp_path: Path) -> None:
+    package = load_registry(FIXTURES).packages["echo"]
+    assert runner.runner_env(Home(tmp_path), package)["PYTHONUNBUFFERED"] == "1"
+
+
+def _server_invocation(tmp_path: Path, env: tuple[tuple[str, str], ...] = ()) -> runner.Invocation:
+    package = load_registry(FIXTURES).packages["echo"]
+    hosted = dataclasses.replace(
+        package,
+        server=Server(
+            repo="https://example.com/server.git",
+            rev="v1",
+            requirements="requirements.txt",
+            launch=("serve",),
+            health_url="http://127.0.0.1:{PORT}/health",
+            env=env,
+        ),
+    )
+    return runner.Invocation(hosted, Home(tmp_path), tmp_path, tmp_path, "run-1")
+
+
+def test_server_env_keeps_the_runner_unbuffered(tmp_path: Path) -> None:
+    assert runner._server_env(_server_invocation(tmp_path), 8123)["PYTHONUNBUFFERED"] == "1"
+
+
+def test_server_env_wins_over_a_manifest_pythonunbuffered(tmp_path: Path) -> None:
+    inv = _server_invocation(tmp_path, env=(("PYTHONUNBUFFERED", "0"),))
+    assert runner._server_env(inv, 8123)["PYTHONUNBUFFERED"] == "1"
+
+
+def test_runner_env_overrides_an_inherited_pythonunbuffered_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTHONUNBUFFERED", "0")
+    package = load_registry(FIXTURES).packages["echo"]
+    assert runner.runner_env(Home(tmp_path), package)["PYTHONUNBUFFERED"] == "1"
+    assert runner._server_env(_server_invocation(tmp_path), 8123)["PYTHONUNBUFFERED"] == "1"
+
+
+def test_stream_shows_each_line_before_the_runner_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A runner line is on facet's stderr while the runner still runs."""
+    secret = "live-stream-secret-value"
+    read_fd, write_fd = os.pipe()
+    write_file = os.fdopen(write_fd, "w", buffering=8192)
+    monkeypatch.setattr(sys, "stderr", write_file)
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            f"print('signed in {secret}', flush=True); import time; time.sleep(30)",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    assert process.stdout is not None
+    tail: deque[str] = deque(maxlen=10)
+    worker = threading.Thread(target=runner._stream, args=(process.stdout, tail, (secret,)))
+    worker.start()
+    try:
+        seen = ""
+        deadline = time.monotonic() + 10
+        while "***" not in seen and time.monotonic() < deadline:
+            ready, _, _ = select.select([read_fd], [], [], 0.5)
+            if ready:
+                seen += os.read(read_fd, 65536).decode("utf-8")
+        assert "***" in seen
+        assert secret not in seen
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait(timeout=10)
+        worker.join(timeout=10)
+        write_file.close()
+        os.close(read_fd)
 
 
 # --- the SDK's unit tests.

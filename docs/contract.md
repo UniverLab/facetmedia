@@ -55,7 +55,8 @@ the package provides that verb), and `error.details` carries
 its own set secrets as `FACET_SECRET_<NAME>` environment variables and no
 other package's; any occurrence of one of those values in the runner's
 stdout or stderr is replaced with the fixed mask `***` before facet keeps,
-logs or shows it.
+logs or shows it. A runner's stdout/stderr streams live to facet's stderr
+while it runs (PYTHONUNBUFFERED=1); masked output stays masked.
 
 Every runner request carries `renewals_file`: the path of a per-call, empty
 file (UTF-8, one `name=value` line per renewal) where a verb may record a
