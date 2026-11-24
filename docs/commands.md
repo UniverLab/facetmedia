@@ -613,7 +613,10 @@ prompt: `confirmation_required`, exit 11, with a hint to name the package
 plus the `facet secret set <package> <name>` command for each typed
 secret still missing. Cancelling at any prompt stops cleanly:
 `nothing changed` when nothing was stored in this run, otherwise the names
-stored, and exit `0`. A value is never printed, logged or passed on;
+stored, and exit `0`. Interrupting while the browser sign-in is still
+waiting is the same clean cancel — no `retry` question is asked, and a
+second Ctrl-C pressed while the runner is being stopped never becomes an
+internal error. A value is never printed, logged or passed on;
 runners still receive secrets only through their environment.
 
 ```console
