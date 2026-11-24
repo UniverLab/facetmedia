@@ -31,7 +31,7 @@ from typing import Final
 
 import uv
 
-from facetmedia import __version__, licenses, lock, prune, shared
+from facetmedia import __version__, licenses, lock, progress, prune, shared
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.doctor import host as doctor_host
 from facetmedia.doctor import node as doctor_node
@@ -730,12 +730,50 @@ def _doctor_errors(
 # --- the doctor command itself.
 
 
+def _draw_progress(
+    index: int, package: str, total: int, depth: str, width: int, stream: object
+) -> int:
+    """Draw one transient ``checking <package> (n/total)`` line; return its width.
+
+    The line is raw text with no theme codes so ``len`` measures what the
+    terminal shows; it is padded to ``width`` so a shorter line leaves no
+    residue of the previous one.  One frame of :data:`progress.SPINNER`
+    advances per package, never on a timer.
+    """
+    frame = progress.SPINNER[index % len(progress.SPINNER)]
+    text = f"{frame} checking {package} ({index + 1}/{total})"
+    if depth == "full":
+        text += ", full"
+    line = f"\r{text}"
+    write = getattr(stream, "write", None)
+    flush = getattr(stream, "flush", None)
+    if callable(write):
+        write(line + " " * max(0, width - len(text)))
+    if callable(flush):
+        flush()
+    return max(width, len(text))
+
+
+def _erase_progress(width: int, stream: object) -> None:
+    """Erase the transient progress line, if one was drawn."""
+    if not width:
+        return
+    write = getattr(stream, "write", None)
+    flush = getattr(stream, "flush", None)
+    if callable(write):
+        write("\r" + " " * width + "\r")
+    if callable(flush):
+        flush()
+
+
 def execute(
     target: str,
     depth: str,
     run_id: str,
     wait: bool = True,
     timeout_s: float = 3600.0,
+    *,
+    progress: bool = False,
 ) -> tuple[dict[str, object], int]:
     """Run the doctor; returns the ``--json`` data and the process exit code."""
     if depth not in DOCTOR_TIMEOUTS:
@@ -745,11 +783,20 @@ def execute(
     selected, capability_id = _select(target, home)
     sections: dict[str, PackageSection] = {}
     classes: list[str] = _facet_classes(facet_entries)
+    total = len(selected)
+    width = 0
+    stream = sys.stderr
     with lock.hold("shared", "facet doctor", wait, timeout_s):
-        for package, capability in selected:
-            section = _package_section(package, home, run_id, depth, capability)
-            sections[package.name] = section
-            classes.extend(_section_classes(section, named=bool(target)))
+        try:
+            for index, (package, capability) in enumerate(selected):
+                if progress:
+                    width = _draw_progress(index, package.name, total, depth, width, stream)
+                section = _package_section(package, home, run_id, depth, capability)
+                sections[package.name] = section
+                classes.extend(_section_classes(section, named=bool(target)))
+        finally:
+            if progress:
+                _erase_progress(width, stream)
     healthy = not classes
     data: dict[str, object] = {
         "healthy": healthy,

@@ -22,8 +22,9 @@ from typing import Any
 import pytest
 
 from facetmedia import doctor as doctor_module
+from facetmedia import progress as progress_module
 from facetmedia import shared as shared_module
-from facetmedia.cli import main
+from facetmedia.cli import _handle_doctor, main
 from facetmedia.env import browser as env_browser
 from facetmedia.env import ffmpeg as env_ffmpeg
 from facetmedia.home import Home
@@ -1327,3 +1328,162 @@ def test_doctor_healthy_reports_ok_true_and_exits_zero(
     assert code == 0
     assert envelope["ok"] is True
     assert data["healthy"] is True
+
+
+# --- Progress: one live ``checking`` line per package on a terminal.
+
+
+class _FakeStderr:
+    """A stderr stand-in with a controllable terminal flag."""
+
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+        self.chunks: list[str] = []
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def write(self, text: str) -> int:
+        self.chunks.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    @property
+    def text(self) -> str:
+        return "".join(self.chunks)
+
+
+def _stub_doctor_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, names: list[str], fail_on: str | None = None
+) -> None:
+    """Stub the doctor's disk work: facet checks, selection, sections, lock."""
+    monkeypatch.setenv("FACET_HOME", str(tmp_path))
+    monkeypatch.setattr(doctor_module, "facet_checks", lambda home: [])
+    pairs = [(SimpleNamespace(name=name), "cap") for name in names]
+    monkeypatch.setattr(doctor_module, "_select", lambda target, home: (pairs, None))
+
+    def section(package: Any, home: Any, run_id: str, depth: str, capability: str) -> Any:
+        if fail_on is not None and package.name == fail_on:
+            raise KeyboardInterrupt
+        return doctor_module.PackageSection(
+            installed=True,
+            readiness={},
+            doctor=[],
+            failures=[],
+            doctor_failure=None,
+            needs_pull=False,
+            warnings=[],
+        )
+
+    monkeypatch.setattr(doctor_module, "_package_section", section)
+    monkeypatch.setattr(doctor_module.lock, "hold", lambda *a: contextlib.nullcontext())
+
+
+def _assert_erased(text: str) -> None:
+    """The transient line ends erased: ``\r``, only spaces, ``\r``."""
+    end = text.rfind("\r")
+    start = text.rfind("\r", 0, end)
+    assert end > 0 and start >= 0 and end > start
+    gap = text[start + 1 : end]
+    assert gap and not gap.strip()
+
+
+def test_doctor_progress_draws_one_line_per_package_and_erases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    names = ["aaa", "b", "cccccccc"]
+    _stub_doctor_run(monkeypatch, tmp_path, names)
+    fake = _FakeStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    data, code = doctor_module.execute("echo", "quick", "run", progress=True)
+
+    assert code == 0
+    assert set(data["packages"]) == set(names)
+    assert fake.text.count("checking ") == len(names)
+    for index, name in enumerate(names):
+        assert f"checking {name} ({index + 1}/{len(names)})" in fake.text
+    assert ", full" not in fake.text
+    assert any(frame in fake.text for frame in progress_module.SPINNER)
+    _assert_erased(fake.text)
+
+
+def test_doctor_progress_full_depth_marks_slow_packages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    names = ["aaa", "b"]
+    _stub_doctor_run(monkeypatch, tmp_path, names)
+    fake = _FakeStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    doctor_module.execute("echo", "full", "run", progress=True)
+
+    assert "checking aaa (1/2), full" in fake.text
+    assert "checking b (2/2), full" in fake.text
+    _assert_erased(fake.text)
+
+
+def test_doctor_execute_without_progress_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_doctor_run(monkeypatch, tmp_path, ["aaa", "b"])
+    fake = _FakeStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    doctor_module.execute("echo", "quick", "run")
+
+    assert fake.text == ""
+
+
+def test_doctor_progress_erases_on_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_doctor_run(monkeypatch, tmp_path, ["aaa", "b"], fail_on="b")
+    fake = _FakeStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    with pytest.raises(KeyboardInterrupt):
+        doctor_module.execute("echo", "quick", "run", progress=True)
+
+    assert "checking aaa (1/2)" in fake.text
+    _assert_erased(fake.text)
+
+
+def test_handle_doctor_enables_progress_only_on_a_terminal_without_json(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("FACET_HOME", str(tmp_path))
+    seen: list[bool] = []
+
+    def fake_execute(
+        target: Any, depth: str, run_id: str, *args: Any, progress: bool = False
+    ) -> Any:
+        seen.append(progress)
+        return ({"healthy": True, "facet": {}, "packages": {}}, 0)
+
+    monkeypatch.setattr(doctor_module, "execute", fake_execute)
+
+    def run_case(tty: bool, as_json: bool) -> _FakeStderr:
+        fake = _FakeStderr(tty=tty)
+        monkeypatch.setattr(sys, "stderr", fake)
+        args = SimpleNamespace(
+            target="",
+            quick=False,
+            full=False,
+            json=as_json,
+            run_id="r",
+            wait=True,
+            wait_timeout=1.0,
+        )
+        assert _handle_doctor(args) == 0
+        return fake
+
+    assert run_case(tty=False, as_json=False).text == ""
+    assert seen == [False]
+    assert run_case(tty=True, as_json=True).text == ""
+    assert seen == [False, False]
+    run_case(tty=True, as_json=False)
+    assert seen == [False, False, True]
+    capsys.readouterr()

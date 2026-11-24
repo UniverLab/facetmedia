@@ -413,7 +413,8 @@ def _handle_doctor(args: argparse.Namespace) -> int:
     if args.quick and args.full:
         raise FacetError("invalid_input", "--quick and --full cannot be combined")
     depth = "full" if args.full else "quick"
-    data, code = doctor.execute(args.target, depth, args.run_id, *_lock_params(args))
+    show = (not args.json) and progress._isatty(sys.stderr)
+    data, code = doctor.execute(args.target, depth, args.run_id, *_lock_params(args), progress=show)
     ok = data.get("healthy") is True
     envelope = contract.ok(data)
     envelope["ok"] = ok

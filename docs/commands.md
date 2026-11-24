@@ -678,7 +678,10 @@ repairs.
 
 Flags: `--full` (the full depth), `--quick` (accepted; the default; both
 flags together are `invalid_input`, exit 2), plus a target: nothing (facet
-and every installed package), a package name, or a capability id. The
+and every installed package), a package name, or a capability id. On a
+terminal, stderr carries one live `checking <package> (n/total)` line per
+package (`, full` with `--full`), erased before the report is printed;
+a pipe and `--json` stay silent. The
 `secrets` check lists every credential the package declares with whether it
 is set — never a value — and fails on a required one that is not stored with
 the exact `facet secret set` or `facet auth` command; it never gates a pull
