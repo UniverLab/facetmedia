@@ -168,6 +168,8 @@ def _auth_phase(
             with lock.hold("exclusive", "facet auth", wait, timeout_s):
                 data = auth.handle(package.name, run_id)
         except FacetError as exc:
+            if exc.message == "the auth run was interrupted; the runner was terminated":
+                return None
             print(f"{package.name}: sign-in failed: {exc.message.splitlines()[0]}")
             choice = _ask_auth_choice(package)
             if choice == "retry":

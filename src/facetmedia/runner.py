@@ -755,6 +755,20 @@ def _trapped() -> Iterator[None]:
             signal.signal(sig, handler)
 
 
+@contextmanager
+def _muted() -> Iterator[None]:
+    """Ignore SIGINT/SIGTERM in this thread while inside; restore after."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def _stream(stream: IO[str], tail: deque[str], values: Sequence[str] = ()) -> None:
     """Drain the runner's merged output into the tail, stderr and the log.
 
@@ -798,14 +812,15 @@ def _wait(inv: Invocation, process: subprocess.Popen[str], verb: str, tail: dequ
 
 def _kill_group(process: subprocess.Popen[str]) -> None:
     """SIGTERM the runner's process group, SIGKILL it after the grace period."""
-    pgid = process.pid
-    _signal_group(pgid, signal.SIGTERM)
-    deadline = time.monotonic() + KILL_GRACE_S
-    while _group_alive(pgid) and time.monotonic() < deadline:
-        time.sleep(POLL_S)
-    _signal_group(pgid, signal.SIGKILL)
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        process.wait(timeout=KILL_GRACE_S)
+    with _muted():
+        pgid = process.pid
+        _signal_group(pgid, signal.SIGTERM)
+        deadline = time.monotonic() + KILL_GRACE_S
+        while _group_alive(pgid) and time.monotonic() < deadline:
+            time.sleep(POLL_S)
+        _signal_group(pgid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=KILL_GRACE_S)
 
 
 def _signal_group(pgid: int, sig: int) -> None:

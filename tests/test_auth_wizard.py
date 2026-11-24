@@ -804,6 +804,30 @@ def test_skipped_when_the_person_skips_the_sign_in(use_registry, monkeypatch, ca
     }
 
 
+def test_interrupted_signin_cancels_without_retry(
+    use_registry, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+
+    def interrupted(package_name: str, run_id: str) -> dict[str, object]:
+        raise FacetError("runner_failed", "the auth run was interrupted; the runner was terminated")
+
+    monkeypatch.setattr(auth_module, "handle", interrupted)
+    stub_doctor(monkeypatch, 0)
+    plain_prompts(monkeypatch, [], [])
+
+    def fail_on_prompt(_prompt: object = "") -> str:
+        raise AssertionError("retry offered after an interrupted sign-in")
+
+    monkeypatch.setattr("builtins.input", fail_on_prompt)
+    assert wizard_module.run_packages(["a"], run_id="run-1") == {}
+    out = capsys.readouterr().out
+    assert auth_module.NOTHING_CHANGED in out
+    assert values_missing(home)
+
+
 # --- stored values, stripping, retry, quit, and no-echo reading
 
 

@@ -1029,6 +1029,43 @@ def test_runner_timeout_kills_the_group_and_exits_9(
     _assert_group_gone(pgid)
 
 
+def test_second_sigint_inside_kill_group_returns_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second Ctrl-C inside ``_kill_group`` never escapes as an error."""
+    package = load_registry(FIXTURES).packages["echo"]
+    inv = runner.Invocation(package, Home(tmp_path), tmp_path, tmp_path, "run-1")
+
+    class _FakeProcess:
+        pid = 424242
+
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.waits += 1
+            if self.waits == 1:
+                raise runner.RunnerInterruptedError(signal.SIGINT)
+            return 0
+
+    sent: list[int] = []
+    monkeypatch.setattr(runner, "_signal_group", lambda pgid, sig: sent.append(sig))
+    alive = iter([True, False])
+    monkeypatch.setattr(runner, "_group_alive", lambda pgid: next(alive))
+
+    def fake_sleep(seconds: float) -> None:
+        # The trap turns a signal into a raise; an ignored signal stays silent.
+        if signal.getsignal(signal.SIGINT) is not signal.SIG_IGN:
+            raise runner.RunnerInterruptedError(signal.SIGINT)
+
+    monkeypatch.setattr(runner.time, "sleep", fake_sleep)
+    with pytest.raises(FacetError) as excinfo:
+        runner._wait(inv, _FakeProcess(), "auth", deque())  # type: ignore[arg-type]
+    assert excinfo.value.code == "runner_failed"
+    assert excinfo.value.message == "the auth run was interrupted; the runner was terminated"
+    assert sent == [signal.SIGTERM, signal.SIGKILL]
+
+
 # --- the runner protocol's unit tests (no subprocess, no network).
 
 
