@@ -22,7 +22,7 @@ from facetmedia.contract import FacetError
 
 PROTOCOL_VERSION: Final[int] = 1
 DEFAULT_INVOCATION_TEMPLATE: Final[str] = (
-    "{{python}} -I {{entry}} {{verb}} --input {{input}} --result {{result}}"
+    "{{python}} -I -u {{entry}} {{verb}} --input {{input}} --result {{result}}"
 )
 
 CAPABILITY_KINDS: Final[frozenset[str]] = frozenset(

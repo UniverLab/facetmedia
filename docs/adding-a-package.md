@@ -147,7 +147,7 @@ entry = "runner.py"   # relative to the package directory for every engine but b
 ```
 
 `invocation_template` may be omitted; the default is
-`{{python}} -I {{entry}} {{verb}} --input {{input}} --result {{result}}`.
+`{{python}} -I -u {{entry}} {{verb}} --input {{input}} --result {{result}}`.
 
 ### `[requirements]`
 

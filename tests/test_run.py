@@ -1077,6 +1077,7 @@ def test_build_argv_substitutes_the_default_template(tmp_path: Path) -> None:
     assert argv == [
         "/env/venv/bin/python",
         "-I",
+        "-u",
         "/env/package/runner.py",
         "run",
         "--input",
@@ -1084,6 +1085,44 @@ def test_build_argv_substitutes_the_default_template(tmp_path: Path) -> None:
         "--result",
         "/tmp/out",
     ]
+
+
+def test_default_template_starts_python_unbuffered(tmp_path: Path) -> None:
+    """`-u` sits right after `-I`: isolated mode ignores `PYTHONUNBUFFERED`."""
+    package = load_registry(FIXTURES).packages["echo"]
+    argv = runner.build_argv(
+        package, Home(tmp_path), Path("/env"), "run", Path("/tmp/in"), Path("/tmp/out")
+    )
+    assert argv[argv.index("-I") + 1] == "-u"
+
+
+def test_default_template_streams_a_line_before_the_runner_exits(tmp_path: Path) -> None:
+    """A print without flush is visible while the runner still sleeps."""
+    package = load_registry(FIXTURES).packages["echo"]
+    staged = tmp_path / "env" / "package"
+    staged.mkdir(parents=True)
+    staged.joinpath(package.entry).write_text(
+        "import time\nprint('hello')\ntime.sleep(30)\n", encoding="utf-8"
+    )
+    argv = runner.build_argv(
+        package,
+        Home(tmp_path),
+        tmp_path / "env",
+        "run",
+        tmp_path / "in",
+        tmp_path / "out",
+    )
+    argv[0] = sys.executable
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, encoding="utf-8")
+    try:
+        assert process.stdout is not None
+        ready, _, _ = select.select([process.stdout], [], [], 10)
+        assert ready, "no runner line within 10s"
+        assert process.stdout.readline().strip() == "hello"
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait(timeout=10)
 
 
 def test_model_paths_map_ids_onto_models_direct(tmp_path: Path) -> None:

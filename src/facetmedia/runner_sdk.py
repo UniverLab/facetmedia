@@ -3,7 +3,7 @@
 ``facet pull`` copies this module into every package environment as
 ``facet_runner_sdk``; a package runner is then only tool code.  The runner
 declares one function per verb and calls :meth:`Runner.main`; facet calls it
-as ``python -I <entry> <verb> --input <request.json> --result <result.json>``
+as ``python -I -u <entry> <verb> --input <request.json> --result <result.json>``
 (from the manifest's ``transport.invocation_template``) and reads the result
 file the SDK writes.
 

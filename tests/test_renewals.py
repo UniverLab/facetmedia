@@ -13,7 +13,7 @@ from facetmedia.contract import FacetError
 from facetmedia.home import Home, log_file
 from facetmedia.registry_types import Package, Requirements, Secret
 
-_TEMPLATE = "{{python}} -I {{entry}} {{verb}} --input {{input}} --result {{result}}"
+_TEMPLATE = "{{python}} -I -u {{entry}} {{verb}} --input {{input}} --result {{result}}"
 
 
 def _package(tmp_path: Path, names: tuple[str, ...] = ("tok",)) -> Package:
