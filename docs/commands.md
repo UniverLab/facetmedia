@@ -29,7 +29,7 @@ The two verbs that look similar answer two different questions:
 | `facet skill` | print the skill for facet or one package | none |
 | `facet config` | store where a host application lives | none |
 | `facet secret` | store, list, remove and rekey a tool's credentials | `set`, `rm` and `passphrase` exclusive; `list` none |
-| `facet auth` | sign a tool in with its browser flow, or sign it out (`login`, `logout`) | exclusive |
+| `facet auth` | guide a tool's sign-in step by step, or sign it out (`login`, `logout`) | exclusive |
 | `facet doctor` | check facet, the tool chain and this machine | shared |
 | `facet check` | re-verify an asset against its record | per manifest |
 | `facet run` | turn a piece into verified assets with records | per manifest |
@@ -410,7 +410,7 @@ instead, and `example_path` is then `null`; when there is one it is the
 example's path relative to the package directory
 (`examples/demo.toml`). `i18n` carries the capability's localized
 summaries by language tag (`{"es": {"summary": "…"}}`), `{}` when the
-manifest declares none; `summary` stays the English default. `secrets` carries one `{name, description, required, set}` row per credential the capability's package declares — never a value. Lock: none.
+manifest declares none; `summary` stays the English default. `secrets` carries one `{name, description, required, set, obtain, produced_by}` row per credential the capability's package declares — never a value (`obtain` says where to get it; `produced_by: "auth"` means the package's `auth` verb mints it). Lock: none.
 
 Exit codes: `0`; `2` an unknown capability id, listing the known ids in
 `details.known`; a package name lists its capability ids in
@@ -516,7 +516,9 @@ the vault and removes them; a migration interrupted halfway loses nothing.
   `nothing selected` and exits `0` with nothing stored; a package that
   declares no secrets says so and exits `0`.
 - `facet secret list [<package>]` — every declared secret of one package, or
-  of every package that declares any, with whether each is set.
+  of every package that declares any, with whether each is set. A secret that
+  says where to get it adds an `obtain:` line, and one the browser sign-in
+  mints adds a `produced by:` line.
 - `facet secret rm <package> <name>` — remove one; a secret that is not
   stored is a no-op with exit 0.
 - `facet secret passphrase` — set, change or remove the vault passphrase by
@@ -548,8 +550,9 @@ is no passphrase, since that program can derive the same key.
 
 A name the package did not declare is `invalid_input`, and so is an empty
 secret value. Neither `list` nor any failure ever prints a stored value: a
-row carries the name, the description, whether the secret is required, and
-whether it is set.
+row carries the name, the description, whether the secret is required,
+whether it is set, and — when the manifest declares them — where to get it
+(`obtain`) and whether the `auth` verb mints it (`produced_by`).
 
 Lock: `set`, `rm` and `passphrase` take it exclusively; `list` takes none.
 
