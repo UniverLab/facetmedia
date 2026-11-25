@@ -25,6 +25,7 @@ from facetmedia import (
     license_accept,
     licenses,
     lock,
+    masked_input,
     plan,
     post,
     preview,
@@ -113,13 +114,13 @@ def _secret_package(name: str) -> Package:
 
 
 def _secret_value(args: argparse.Namespace) -> str:
-    """The value from the terminal's hidden prompt, or from stdin — never argv.
+    """The value from the terminal's masked prompt, or from stdin — never argv.
 
     A value on the command line would land in the shell's history and in the
     process list, so facet never looks for one there.
     """
     if sys.stdin.isatty():
-        value = getpass.getpass(f"{args.package} {args.name}: ")
+        value = masked_input.read_masked(f"{args.package} {args.name}: ")
     else:
         value = sys.stdin.readline().rstrip("\n")
     if not value:

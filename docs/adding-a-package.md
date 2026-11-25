@@ -275,7 +275,8 @@ or multi-line `obtain`, any `produced_by` other than `"auth"`, and any
 unknown key inside an entry.
 
 A value is stored by a person, never by the package: `facet secret set
-<package> <name>` reads it from a hidden prompt or from stdin, `facet secret
+<package> <name>` reads it from a masked prompt at a terminal (one `*` per
+character, never the value) or from stdin, `facet secret
 list [<package>]` shows only names and whether each is set, and `facet
 secret rm <package> <name>` removes one. Every package's credentials live in
 one encrypted vault, `<home>/secrets/vault.enc` (owner-only, mode `0600`,

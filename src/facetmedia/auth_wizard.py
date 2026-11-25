@@ -11,17 +11,17 @@ full doctor.  The run ends with one summary line per package:
 ``failed`` or ``skipped``.
 
 A value is never printed, logged or passed on: typed answers arrive with
-echo off and travel only through the existing secret store.
+masked echo (one ``*`` per character) and travel only through the
+existing secret store.
 """
 
 from __future__ import annotations
 
-import getpass
 from typing import Final
 
 from rich.markup import escape
 
-from facetmedia import auth, doctor, lock, secrets, theme
+from facetmedia import auth, doctor, lock, masked_input, secrets, theme
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry_types import Package, Secret
@@ -149,10 +149,10 @@ def _announce_secret(package: Package, secret: Secret) -> None:
 
 
 def _read_value(package: Package, secret: Secret) -> str:
-    """The typed value with echo off, stripped; empty is a skip only when optional."""
+    """The typed value with masked echo, stripped; empty is a skip only when optional."""
     while True:
         prompt = theme.render(f"[accent]{escape(package.name)} {escape(secret.name)}:[/] ")
-        value = getpass.getpass(prompt).strip()
+        value = masked_input.read_masked(prompt).strip()
         if value:
             return value
         if not secret.required:

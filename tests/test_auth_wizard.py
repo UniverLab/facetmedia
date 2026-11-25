@@ -2,7 +2,7 @@
 
 Bare ``facet auth`` offers every installed package that declares a secret
 and is not fully signed in, one at a time with nothing preselected: typed
-secrets first (echo off, with where to get them, skipping stored ones
+secrets first (masked echo, with where to get them, skipping stored ones
 silently), then the package's browser sign-in when it has one, then the
 full doctor check with one summary line per package. After each package the
 menu shows again with the states recomputed, until the person picks done.
@@ -34,6 +34,7 @@ from prompt_toolkit.output import DummyOutput
 from facetmedia import auth as auth_module
 from facetmedia import auth_wizard as wizard_module
 from facetmedia import installed as installed_module
+from facetmedia import masked_input as masked_module
 from facetmedia import secrets
 from facetmedia.cli import main
 from facetmedia.contract import EXIT_CODES, FacetError
@@ -224,7 +225,7 @@ def values_missing(home: Home) -> bool:
 
 
 def plain_prompts(monkeypatch: pytest.MonkeyPatch, inputs: list[str], entered: list[str]) -> None:
-    """Drive the wizard off styling: ``input`` answers and ``getpass`` values."""
+    """Drive the wizard off styling: ``input`` answers and masked secret values."""
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setattr(sys, "stdin", _TtyIn(""))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
@@ -236,7 +237,7 @@ def plain_prompts(monkeypatch: pytest.MonkeyPatch, inputs: list[str], entered: l
 
     monkeypatch.setattr("builtins.input", ask)
     values = iter(entered)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt="": next(values))
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", lambda _prompt="": next(values))
 
 
 def failing_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,6 +248,7 @@ def failing_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("builtins.input", fail)
     monkeypatch.setattr(getpass, "getpass", fail)
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", fail)
 
 
 def stub_runner(monkeypatch: pytest.MonkeyPatch, values: dict[str, str]) -> None:
@@ -350,7 +352,7 @@ def test_styled_select_picks_one_package(use_registry, monkeypatch, capsys) -> N
     stub_runner(monkeypatch, {"token": "wizard-token"})
     stub_doctor(monkeypatch, 0)
     entered = iter(["typed-token"])
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt="": next(entered))
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", lambda _prompt="": next(entered))
     # Enter submits the highlighted row (a); the guided package is then set,
     # so the recomputed menu offers nothing and the loop ends with no prompt.
     fake_tty(monkeypatch, ["\r"])
@@ -458,6 +460,10 @@ def test_all_signed_in_menu_names_sign_out(use_registry, monkeypatch, capsys) ->
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
     monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("prompted with none offered"))
     monkeypatch.setattr(getpass, "getpass", lambda _p="": pytest.fail("prompted with none offered"))
+    monkeypatch.setattr(
+        "facetmedia.masked_input.read_masked",
+        lambda _p="": pytest.fail("prompted with none offered"),
+    )
     assert main(["auth"]) == 0
     assert auth_module.ALL_SIGNED_IN in capsys.readouterr().out
 
@@ -491,6 +497,9 @@ def test_named_login_on_a_signed_in_package_refuses_without_running(
     monkeypatch.setattr("facetmedia.runner.call", lambda *a, **k: pytest.fail("the auth verb ran"))
     monkeypatch.setattr("builtins.input", lambda _p="": pytest.fail("prompted when signed in"))
     monkeypatch.setattr(getpass, "getpass", lambda _p="": pytest.fail("prompted when signed in"))
+    monkeypatch.setattr(
+        "facetmedia.masked_input.read_masked", lambda _p="": pytest.fail("prompted when signed in")
+    )
     assert main(["auth", "login", "a"]) == 0
     out = capsys.readouterr().out
     assert "a is already signed in; sign out first with facet auth logout a" in out
@@ -536,6 +545,14 @@ def test_logout_removes_every_stored_secret_at_once(use_registry, monkeypatch, c
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
     monkeypatch.setattr("builtins.input", lambda _prompt="": pytest.fail("asked which secrets"))
     monkeypatch.setattr(getpass, "getpass", lambda _prompt="": pytest.fail("asked which secrets"))
+    monkeypatch.setattr(
+        "facetmedia.masked_input.read_masked",
+        lambda _prompt="": pytest.fail("asked which secrets"),
+    )
+    monkeypatch.setattr(
+        "facetmedia.masked_input.read_masked",
+        lambda _prompt="": pytest.fail("asked which secrets"),
+    )
     assert main(["auth", "logout", "a"]) == 0
     out = capsys.readouterr().out
     assert removed == ["token", "handle"]
@@ -872,6 +889,10 @@ def test_stored_typed_secret_is_kept_silently(use_registry, monkeypatch, capsys)
     monkeypatch.setattr(
         getpass, "getpass", lambda _prompt="": pytest.fail("asked for a stored value")
     )
+    monkeypatch.setattr(
+        "facetmedia.masked_input.read_masked",
+        lambda _prompt="": pytest.fail("asked for a stored value"),
+    )
     stub_runner(monkeypatch, {"token": "wizard-token"})
     stub_doctor(monkeypatch, 0)
     assert main(["auth", "login", "a"]) == 0
@@ -1000,10 +1021,13 @@ def test_typed_prompt_names_description_and_origin(use_registry, monkeypatch, ca
     stub_doctor(monkeypatch, 0)
     seen: list[str] = []
     plain_prompts(monkeypatch, [], ["s3cr3t"])
-    real_getpass = getpass.getpass
-    monkeypatch.setattr(
-        getpass, "getpass", lambda prompt="": seen.append(str(prompt)) or real_getpass(prompt)
-    )
+    real_read_masked = masked_module.read_masked
+
+    def recording(prompt: str = "") -> str:
+        seen.append(str(prompt))
+        return real_read_masked(prompt)
+
+    monkeypatch.setattr(masked_module, "read_masked", recording)
     assert main(["auth", "login", "a"]) == 0
     out = capsys.readouterr().out
     assert "the test token" in out
@@ -1171,11 +1195,11 @@ def test_styled_wizard_marks_prompts_signed_in_and_hints(use_registry, monkeypat
     entered = iter(["s3cr3t"])
     prompts: list[str] = []
 
-    def fake_getpass(prompt: str = "") -> str:
+    def fake_read_masked(prompt: str = "") -> str:
         prompts.append(prompt)
         return next(entered)
 
-    monkeypatch.setattr(getpass, "getpass", fake_getpass)
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", fake_read_masked)
     assert main(["auth", "login", "a"]) == 0
     out = capsys.readouterr().out
     assert prompts and SENAL_SGR in prompts[0]

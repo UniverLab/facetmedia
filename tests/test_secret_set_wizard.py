@@ -125,7 +125,7 @@ def test_guided_completion_stores_all_required(
     make_installed(home, root, "a")
     monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
     values = iter(["val0", "val1"])
-    monkeypatch.setattr("facetmedia.cli.getpass.getpass", lambda prompt: next(values))
+    monkeypatch.setattr("facetmedia.cli.masked_input.read_masked", lambda prompt: next(values))
     # pick package, pick key0, pick key1 -> all required set, exits
     fake_tty(monkeypatch, ["\r", "\r", "\r"])
     assert main(["secret", "set"]) == 0
@@ -164,7 +164,7 @@ def test_undeclared_name_refused(
     monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
     monkeypatch.setattr(sys, "stdin", _TtyIn(""))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
-    monkeypatch.setattr("facetmedia.cli.getpass.getpass", lambda prompt: "x")
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", lambda prompt: "x")
     assert main(["secret", "set", "a", "nope", "--json"]) == EXIT_INVALID_INPUT
     error = json.loads(capsys.readouterr().out)["error"]
     assert error["code"] == "invalid_input"
@@ -180,7 +180,7 @@ def test_empty_value_refused(
     monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
     monkeypatch.setattr(sys, "stdin", _TtyIn(""))
     monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
-    monkeypatch.setattr("facetmedia.cli.getpass.getpass", lambda prompt: "")
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", lambda prompt: "")
     assert main(["secret", "set", "a", "key0", "--json"]) == EXIT_INVALID_INPUT
     error = json.loads(capsys.readouterr().out)["error"]
     assert error["code"] == "invalid_input"

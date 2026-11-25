@@ -503,7 +503,8 @@ use, facet migrates any legacy per-package plain files under `secrets/` into
 the vault and removes them; a migration interrupted halfway loses nothing.
 
 - `facet secret set <package> <name>` — store one declared secret. The value
-  is read from a hidden prompt at a terminal and from stdin otherwise; it is
+  is read from a masked prompt at a terminal (one `*` per character, never
+  the value) and from stdin otherwise; it is
   never taken from the command line, where the shell's history and the
   process list would keep it. With no package and no name, when standard
   input and output are both terminals, `facet secret set` walks the person
@@ -591,7 +592,8 @@ When every package declaring a secret is signed in, it prints
 and exits `0`. For the chosen package the wizard asks only for the typed
 secrets the `auth` verb does not produce that are not already stored: it
 prints the secret's description and where to get it, reads the value with
-echo off, strips surrounding whitespace, and stores it through the same
+masked echo (one `*` per character, never the value), strips surrounding
+whitespace, and stores it through the same
 path `facet secret set` uses. A value already stored is kept silently and
 never asked about; a required secret may not be left empty, an optional
 one is skipped with an empty answer. Afterwards the package's `auth` verb
