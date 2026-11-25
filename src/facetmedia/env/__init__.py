@@ -370,8 +370,9 @@ def _preflight(package: Package, home: Home, run_id: str) -> None:
     """The FR2 checks, in order, before any disk or network write.
 
     The checks themselves live in ``facetmedia.doctor`` so ``facet doctor``
-    reports exactly what ``pull`` refuses; the package doctor (which needs an
-    installed environment) is skipped until one is there.
+    reports every failing check; ``pull`` refuses all but secret rows.  The
+    package doctor (which needs an installed environment) is skipped until one
+    is there.
     """
     require_linux()
     if package.browser is not None:

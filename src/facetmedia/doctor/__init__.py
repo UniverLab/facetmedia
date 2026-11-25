@@ -14,7 +14,7 @@ check comes with a ``fix`` a person or agent can run.  Its sections are
   depth (may run the tool once on a throwaway output; up to 30 s).
 
 ``pull`` and ``run`` gate with the same readiness functions plus the quick
-package doctor, through :func:`requirement_errors`.
+package doctor (excluding secret rows), through :func:`requirement_errors`.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from typing import Final
 
 import uv
 
-from facetmedia import __version__, licenses, lock, progress, prune, shared
+from facetmedia import __version__, licenses, lock, progress, prune, secrets, shared
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.doctor import host as doctor_host
 from facetmedia.doctor import node as doctor_node
@@ -177,7 +177,7 @@ class PackageSection:
 def requirement_errors(
     package: Package, home: Home, run_id: str, *, timeout_warns: bool = False
 ) -> tuple[list[FacetError], list[str]]:
-    """The gate ``pull`` and ``run`` run first: readiness plus the quick doctor.
+    """The gate ``pull`` and ``run`` run first: readiness plus non-secret doctor checks.
 
     Returns the failures in the spec's order plus the gate's warnings; an
     empty error list means the machine can do it.  The package doctor runs
@@ -187,9 +187,9 @@ def requirement_errors(
     carries on with instead of a failure.
     """
     _, failures, doctor_failures, doc_warnings = run_check(package, home, "", run_id, depth="quick")
-    errors: list[FacetError] = []
-    warnings: list[str] = list(doc_warnings)
-    for error in failures + doctor_failures:
+    errors, warnings = list(failures), list(doc_warnings)
+    ignored = secrets.secret_names(package)
+    for error in [e for e in doctor_failures if e.details.get("check") not in ignored]:
         warning = _timeout_warning(error) if timeout_warns else None
         if warning is None:
             errors.append(error)

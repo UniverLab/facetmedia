@@ -323,7 +323,11 @@ Nothing is written or downloaded before the doctor's readiness checks
 (compatibility, platform, RAM, disk, GPU, host libraries — plus the
 package's own `doctor` verb at quick depth when it is already installed)
 and the licence check pass; a model needing acceptance fails with the
-exact `facet license accept <model>` command instead. A backend-owned
+exact `facet license accept <model>` command instead. A `doctor` row that
+names one of the package's declared `[[secrets]]` credentials never fails
+the pull: after the installed line the pull prints
+`sign in with facet auth login <package>` while one of its required
+secrets is still not stored. A backend-owned
 model (`backend = true`, served by the backend, never fetched) needs no
 download and is reported as `backend-owned`, but its terms still gate the
 run. An interrupted pull

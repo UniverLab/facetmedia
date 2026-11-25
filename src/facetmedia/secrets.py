@@ -41,6 +41,7 @@ __all__ = [
     "remove",
     "require_ready",
     "rows",
+    "secret_names",
     "set_value",
     "store_file",
     "vault_file",
@@ -260,6 +261,11 @@ def env_for(home: Home, package: Package) -> dict[str, str]:
         for secret in package.secrets
         if secret.name in values
     }
+
+
+def secret_names(package: Package) -> frozenset[str]:
+    """Every declared secret name for ``package``, required or not."""
+    return frozenset(secret.name for secret in package.secrets)
 
 
 def missing_required(home: Home, package: Package) -> tuple[Secret, ...]:

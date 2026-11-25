@@ -21,7 +21,7 @@ import questionary
 from rich.markup import escape
 from rich.table import Table
 
-from facetmedia import config, env, lock, probes, theme
+from facetmedia import config, env, lock, probes, secrets, theme
 from facetmedia.contract import FacetError, emit, ok
 from facetmedia.home import Home
 from facetmedia.introspect import announce_skipped
@@ -392,7 +392,14 @@ def _legacy_pull(
         summary.collapse(package.name, package.version, _bytes(report), elapsed)
     if not summary.enabled:
         _announce_pull(report, bool(package.models))
+    _announce_signin(package, home)
     return 0
+
+
+def _announce_signin(package: Package, home: Home) -> None:
+    """Print the sign-in hint when at least one required secret is not stored."""
+    if secrets.missing_required(home, package):
+        print(f"sign in with facet auth login {package.name}")
 
 
 def _announce_pull(report: dict[str, object], has_models: bool) -> None:
@@ -561,6 +568,8 @@ def _install_all(
         if entry.noop:
             summary.noop(entry.name, entry.version)
             installed.append({"name": entry.name, "version": entry.version})
+            if not args.json:
+                _announce_signin(entry.package, home)
             continue
         try:
             downloaded += _pull_entry(args, home, entry, summary, reporter)
@@ -613,6 +622,8 @@ def _pull_entry(
         summary.failed(entry.name, entry.version, time.monotonic() - began, one_line(error))
         raise
     summary.collapse(entry.name, entry.version, _bytes(report), time.monotonic() - began)
+    if not args.json:
+        _announce_signin(entry.package, home)
     return _bytes(report)
 
 
