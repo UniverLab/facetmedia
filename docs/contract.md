@@ -38,11 +38,12 @@ removes the passphrase; without a terminal the passphrase comes from
 A stored secret never appears in any output: not in `data`, not in an
 error's `message`, `hint` or `details`, not in a record, a preview or a log.
 Every surface reports a secret's name, its one-line description and whether
-it is set — never a value. `obtain` says where to get the value and
-`produced_by: "auth"` marks a secret the package's `auth` verb mints; both
-travel beside the description and are `null` unless the manifest declares
-them. `facet secret list` answers
-`{"secrets": [{"description": "…", "name": "app-password", "obtain": null, "package": "bluesky", "produced_by": null, "required": true, "set": true}]}`,
+it is set — never a value. `obtain` says where to get the value, `link`
+names the exact page to open for it, and `produced_by: "auth"` marks a
+secret the package's `auth` verb mints; all three travel beside the
+description and are `null` unless the manifest declares them. `facet secret
+list` answers
+`{"secrets": [{"description": "…", "link": null, "name": "app-password", "obtain": null, "package": "bluesky", "produced_by": null, "required": true, "set": true}]}`,
 and `facet describe` carries the same rows under `data.secrets` for the
 capability's package.
 
