@@ -613,9 +613,10 @@ With a package, at a terminal and without `--json`, the same per-package
 flow runs for that package alone — unless it is already signed in, which
 prints `<package> is already signed in; sign out first with facet auth
 logout <package>` and exits `0` without running anything. An outdated
-package prints `<package> is outdated; run facet pull <package>, then try again`
-and exits `0` without running anything or asking for secrets, the same in
-`--json` and off a terminal. With `--json`,
+package exits `0` without running anything or asking for secrets — printing
+`<package> is outdated; run facet pull <package>, then try again` at a
+terminal or off a terminal, and returning `{"package": "<package>", "outdated": true}`
+under `--json`. With `--json`,
 or off a terminal, it behaves exactly as before: the package's `auth`
 verb runs once and stores what it returns, with no prompts and no doctor
 check. With `--json` and no package neither prompts: the missing
@@ -649,8 +650,9 @@ case, so the tokens it wrote exist only in the encrypted vault afterwards.
 
 Removes every stored sign-in secret of a package at once, with no
 per-secret questions. With a package it resolves that package the same way
-the login path does — it must exist, be installed and declare an `auth`
-verb — then removes every declared secret that currently holds a value in
+the login path does — it must exist, be installed (including an outdated
+version) and declare an `auth` verb — then removes every declared secret
+that currently holds a value in
 one step through `facet secret rm`'s path. With no package, at a terminal,
 it first offers each installed package holding at least one stored secret,
 one at a time: a single choice with nothing preselected, ending in a
