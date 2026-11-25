@@ -322,7 +322,9 @@ def auth(req: Request) -> dict:
 ```
 
 Announce the sign-in address with `announce_url`: facet prints it unmasked
-so the person can copy it, and opens it once in their browser. Any other
+so the person can copy it, and opens it once in their browser. The address
+must start with `https://`; anything else is refused with `ValueError`
+and nothing is printed. Any other
 line the runner prints is masked exactly as before, so a secret the runner
 received never leaves facet unmasked. The address may carry the package's
 `client-id`, but a runner must never put a client secret or a token in it:
@@ -367,7 +369,8 @@ not stored, `facet run` fails before the runner starts with
 `machine_cannot`, naming the exact `facet secret set` or `facet auth`
 command. Any occurrence of one of the package's stored values in what its
 runner prints is replaced with the fixed mask `***` before facet keeps or
-shows it.
+shows it — except a sign-in address announced with `announce_url`, which
+facet shows unmasked on stderr and still keeps and logs masked.
 
 A verb that refreshes a token must keep the new value so the next run does not
 force the user to sign in again. Call `renew_secret(name, value)` right after

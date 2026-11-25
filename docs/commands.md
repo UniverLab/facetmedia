@@ -573,8 +573,13 @@ Signs tools in interactively, and signs them out again.
 `facet auth <package>` is its alias, so every doc, skill and hook that names
 it keeps working, and bare `facet auth` behaves exactly like
 `facet auth login`. A package may provide an `auth` verb for flows that need
-a browser — OAuth for X, YouTube or TikTok: the verb prints a URL, opens the
-browser, listens on a loopback port, and writes the tokens it obtained.
+a browser — OAuth for X, YouTube or TikTok: the verb announces its
+sign-in address with `announce_url` (see
+[adding-a-package.md](adding-a-package.md#the-auth-verb)), facet prints it
+unmasked after `open this address and sign in:` so it can be copied, and
+opens it once in the browser at a terminal, printing `opened in your
+browser`. Under `--json` or off a terminal nothing is opened. The verb then
+listens on a loopback port and writes the tokens it obtained.
 A name the manifest did not declare fails a sign-in with `invalid_input`:
 a sign-in can never store a credential the package did not declare.
 
@@ -931,7 +936,9 @@ secret and the exact `facet secret set <package> <name>` — or
 `facet auth <package>` when the package provides that verb. The runner
 receives its own set secrets as `FACET_SECRET_<NAME>` variables and never
 another package's, and any stored value it prints is replaced with `***`
-before facet keeps or shows that output.
+before facet keeps or shows that output — except a sign-in address the
+runner announces with `announce_url`, which facet shows unmasked on stderr
+(and still keeps and logs masked).
 
 ```console
 $ facet run ffmpeg.normalize normalize.toml
