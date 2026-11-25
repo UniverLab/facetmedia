@@ -594,9 +594,13 @@ one is skipped with an empty answer. Afterwards the package's `auth` verb
 runs when it has one; a failure prints the one-line reason and offers
 `retry`, `skip` or `quit`, keeping the secrets already stored. Packages
 with no `auth` verb get the typed prompts and the check only. Each package
-ends with one summary line — `signed in`, `partly set`, `failed` or
-`skipped` — from `facet doctor <package> --full`. When the check ends
-`failed` or `partly set`, the printed hint starts with
+ends with one summary line — `signed in`, `signed in (package out of date)`,
+`partly set`, `failed` or `skipped` — from `facet doctor <package> --full`.
+When only the installed package is out of date, it prints
+`package out of date: facet pull <package>` before
+`<package>: signed in (package out of date)` and does not suggest
+logging out. When the check ends `failed` or `partly set`, the printed
+hint starts with
 `to start over: facet auth logout <package>`, followed by the check's
 detail and fix. When no installed package declares a secret, it says so,
 names `facet pull <package>` first, and exits `0`.

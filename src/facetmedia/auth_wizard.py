@@ -7,7 +7,8 @@ every typed secret that is not already stored (one the ``auth`` verb does
 not produce), telling the person what it is and where to get it, runs the
 package's ``auth`` verb when it has one, and checks the result with the
 full doctor.  The run ends with one summary line per package:
-``signed in``, ``partly set``, ``failed`` or ``skipped``.
+``signed in``, ``signed in (package out of date)``, ``partly set``,
+``failed`` or ``skipped``.
 
 A value is never printed, logged or passed on: typed answers arrive with
 echo off and travel only through the existing secret store.
@@ -29,6 +30,7 @@ __all__ = [
     "FAILED",
     "PARTLY_SET",
     "SIGNED_IN",
+    "SIGNED_IN_OUTDATED",
     "SKIPPED",
     "run_package",
     "run_packages",
@@ -36,6 +38,8 @@ __all__ = [
 
 #: The full doctor passed: the package is signed in.
 SIGNED_IN: Final[str] = "signed in"
+#: The package is signed in, but its installed copy is older than the registry's.
+SIGNED_IN_OUTDATED: Final[str] = "signed in (package out of date)"
 #: The doctor's secrets check fails: a required secret is still unset.
 PARTLY_SET: Final[str] = "partly set"
 #: The secrets check passes but the doctor does not: the package fails.
@@ -102,7 +106,7 @@ def run_package(
     if continued is None:
         return None
     label = _check_phase(package, run_id, wait, timeout_s) if continued else SKIPPED
-    style = "ok" if label == SIGNED_IN else "bold"
+    style = "ok" if label in (SIGNED_IN, SIGNED_IN_OUTDATED) else "bold"
     theme.console().print(f"[{style}]{escape(package.name)}: {escape(label)}[/]", soft_wrap=True)
     return label
 
@@ -220,6 +224,9 @@ def _check_phase(package: Package, run_id: str, wait: bool, timeout_s: float) ->
     if not (isinstance(secrets_check, dict) and secrets_check.get("ok") is True):
         _print_start_over(package)
         return PARTLY_SET
+    if _only_installed_outdated(readiness, doctor_rows):
+        print(f"package out of date: facet pull {package.name}")
+        return SIGNED_IN_OUTDATED
     detail, fix = _first_failing(readiness, doctor_rows)
     _print_start_over(package)
     if detail:
@@ -234,6 +241,17 @@ def _print_start_over(package: Package) -> None:
     theme.console().print(
         f"[muted]to start over: facet auth logout {escape(package.name)}[/]", soft_wrap=True
     )
+
+
+def _only_installed_outdated(readiness: dict[str, object], doctor_rows: list[object]) -> bool:
+    """True when the only failing package check is the ``installed`` readiness entry."""
+    installed = readiness.get("installed")
+    if not (isinstance(installed, dict) and installed.get("ok") is not True):
+        return False
+    for name, entry in readiness.items():
+        if name != "installed" and isinstance(entry, dict) and entry.get("ok") is not True:
+            return False
+    return not any(isinstance(row, dict) and row.get("ok") is not True for row in doctor_rows)
 
 
 def _first_failing(readiness: dict[str, object], doctor_rows: list[object]) -> tuple[str, str]:

@@ -246,6 +246,8 @@ def stub_doctor(
     secrets_ok: bool = True,
     detail: str = "",
     fix: str = "",
+    readiness: dict[str, object] | None = None,
+    doctor_rows: list[object] | None = None,
 ) -> None:
     """The full doctor reports the given exit code for the guided package."""
 
@@ -253,16 +255,21 @@ def stub_doctor(
         target: str, depth: str, run_id: str, wait: bool = True, timeout_s: float = 3600.0
     ) -> tuple[dict[str, object], int]:
         assert depth == "full"
-        readiness: dict[str, object] = {
-            "secrets": {"ok": secrets_ok, "detail": "token: set", "fix": ""}
-        }
-        if detail or fix or not secrets_ok or code != 0:
-            readiness["models"] = {"ok": code == 0, "detail": detail, "fix": fix}
+        if readiness is not None:
+            pkg_readiness = readiness
+        else:
+            pkg_readiness = {"secrets": {"ok": secrets_ok, "detail": "token: set", "fix": ""}}
+            if detail or fix or not secrets_ok or code != 0:
+                pkg_readiness["models"] = {"ok": code == 0, "detail": detail, "fix": fix}
         data: dict[str, object] = {
             "healthy": code == 0,
             "facet": {},
             "packages": {
-                target: {"installed": True, "readiness": readiness, "doctor": []},
+                target: {
+                    "installed": True,
+                    "readiness": pkg_readiness,
+                    "doctor": doctor_rows if doctor_rows is not None else [],
+                },
             },
         }
         return data, code
@@ -1225,3 +1232,124 @@ def test_no_color_wizard_output_has_no_ansi(use_registry, monkeypatch, capsys) -
     out = capsys.readouterr().out
     assert "\x1b" not in out
     assert "a: signed in" in out
+
+
+def test_outdated_package_reports_signed_in_outdated(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(
+        monkeypatch,
+        1,
+        readiness={
+            "secrets": {"ok": True},
+            "installed": {"ok": False, "detail": "old", "fix": "other"},
+        },
+        doctor_rows=[],
+    )
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    pull_line = "package out of date: facet pull a"
+    label_line = f"a: {wizard_module.SIGNED_IN_OUTDATED}"
+    assert pull_line in out
+    assert label_line in out
+    assert out.index(pull_line) < out.index(label_line)
+    assert "to start over:" not in out
+    assert "other" not in out
+
+
+def test_outdated_plus_other_readiness_failure_stays_failed(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(
+        monkeypatch,
+        1,
+        readiness={
+            "secrets": {"ok": True},
+            "installed": {"ok": False, "detail": "old", "fix": "facet pull a"},
+            "models": {"ok": False, "detail": "missing", "fix": "facet pull a"},
+        },
+        doctor_rows=[],
+    )
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert f"a: {wizard_module.FAILED}" in out
+    assert "to start over:" in out
+    assert "package out of date:" not in out
+
+
+def test_outdated_plus_doctor_row_failure_stays_failed(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(
+        monkeypatch,
+        1,
+        readiness={
+            "secrets": {"ok": True},
+            "installed": {"ok": False, "detail": "old", "fix": "facet pull a"},
+        },
+        doctor_rows=[{"name": "runner", "ok": False, "detail": "d", "fix": "f"}],
+    )
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert f"a: {wizard_module.FAILED}" in out
+    assert "to start over:" in out
+    assert "package out of date:" not in out
+
+
+def test_outdated_with_unset_secrets_stays_partly_set(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(
+        monkeypatch,
+        1,
+        readiness={
+            "secrets": {"ok": False, "detail": "missing", "fix": "facet secret set a token"},
+            "installed": {"ok": False, "detail": "old", "fix": "facet pull a"},
+        },
+        doctor_rows=[],
+    )
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert f"a: {wizard_module.PARTLY_SET}" in out
+    assert "to start over:" in out
+    assert "package out of date:" not in out
+
+
+def test_styled_wizard_marks_signed_in_outdated_with_senal(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(
+        monkeypatch,
+        1,
+        readiness={
+            "secrets": {"ok": True},
+            "installed": {"ok": False, "detail": "old", "fix": "facet pull a"},
+        },
+        doctor_rows=[],
+    )
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert f"a: {wizard_module.SIGNED_IN_OUTDATED}" in out
+    assert SENAL_SGR in out
