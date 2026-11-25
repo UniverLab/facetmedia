@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import IO, Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
-from facetmedia import config, renewals, secrets
+from facetmedia import config, renewals, runner_open, secrets
 from facetmedia.contract import FacetError
 from facetmedia.env import binary as env_binary
 from facetmedia.home import Home, log_file, uv_env
@@ -123,6 +123,7 @@ class Invocation:
     run_id: str
     timeout_s: float | None = None
     start_server: bool = True
+    allow_open: bool = True
 
 
 @dataclass(frozen=True)
@@ -553,8 +554,9 @@ def _run_client(
     except OSError as exc:
         raise _failure(inv, tail, f"cannot start the runner: {exc}") from exc
     assert process.stdout is not None
+    values = _secret_values(inv)
     reader = threading.Thread(
-        target=_stream, args=(process.stdout, tail, _secret_values(inv)), daemon=True
+        target=_stream, args=(process.stdout, tail, values, inv.allow_open), daemon=True
     )
     reader.start()
     try:
@@ -641,7 +643,7 @@ def _launch_server(
         raise _failure(inv, tail, f"cannot start the server: {exc}") from exc
     assert process.stdout is not None
     reader = threading.Thread(
-        target=_stream, args=(process.stdout, tail, _secret_values(inv)), daemon=True
+        target=_stream, args=(process.stdout, tail, _secret_values(inv), False), daemon=True
     )
     reader.start()
     try:
@@ -769,18 +771,16 @@ def _muted() -> Iterator[None]:
             signal.signal(sig, handler)
 
 
-def _stream(stream: IO[str], tail: deque[str], values: Sequence[str] = ()) -> None:
+def _stream(
+    stream: IO[str], tail: deque[str], values: Sequence[str] = (), allow_open: bool = True
+) -> None:
     """Drain the runner's merged output into the tail, stderr and the log.
-
-    Every stored value the runner received is replaced with the fixed mask
-    before the line is kept, shown or logged: output the runner prints can
-    never carry a credential out of facet.
-    """
-    from facetmedia import secrets as secrets_module  # noqa: PLC0415
-
+    Announced addresses go through runner_open unmasked; all else is masked."""
     with stream:
         for line in stream:
-            masked = secrets_module.mask(line, values)
+            if runner_open.handle_line(line, tail, values, allow_open):
+                continue
+            masked = secrets.mask(line, values)
             tail.append(masked)
             sys.stderr.write(masked)
             sys.stderr.flush()

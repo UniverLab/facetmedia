@@ -851,7 +851,7 @@ def test_interrupted_signin_cancels_without_retry(
     home = Home.from_env()
     make_installed(home, root, "a")
 
-    def interrupted(package_name: str, run_id: str) -> dict[str, object]:
+    def interrupted(package_name: str, run_id: str, allow_open: bool = True) -> dict[str, object]:
         raise FacetError("runner_failed", "the auth run was interrupted; the runner was terminated")
 
     monkeypatch.setattr(auth_module, "handle", interrupted)

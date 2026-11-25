@@ -1309,6 +1309,161 @@ def test_stream_shows_each_line_before_the_runner_exits(
         os.close(read_fd)
 
 
+class _TtyStderr:
+    """Capture facet's stderr with a controllable terminal flag."""
+
+    def __init__(self, tty: bool) -> None:
+        self.writes: list[str] = []
+        self._tty = tty
+
+    def write(self, text: str) -> int:
+        self.writes.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def _announce_line(url: str) -> str:
+    return f"{runner_sdk.ANNOUNCE_MARKER}{url}\n"
+
+
+def test_stream_shows_announced_address_unmasked_but_logs_it_masked(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The marker line reaches stderr whole; the tail and log stay masked."""
+    secret = "sign-in-client-id-value"
+    url = f"https://accounts.example.invalid/sign-in?client_id={secret}"
+    stderr = _TtyStderr(tty=False)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    caplog.set_level("INFO", logger="facetmedia")
+    tail: deque[str] = deque(maxlen=10)
+    runner._stream(io.StringIO(_announce_line(url)), tail, (secret,), False)
+    shown = "".join(stderr.writes)
+    assert "open this address and sign in:\n" in shown
+    assert f"{url}\n" in shown
+    assert "opened in your browser" not in shown
+    tailed = "".join(tail)
+    assert secret not in tailed
+    assert runner_sdk.ANNOUNCE_MARKER not in tailed
+    assert "***" in tailed
+    assert secret not in caplog.text
+    assert runner_sdk.ANNOUNCE_MARKER not in caplog.text
+
+
+def test_stream_masks_a_plain_line_exactly_as_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A line without the marker is masked, kept and shown masked."""
+    secret = "plain-line-secret-value"
+    stderr = _TtyStderr(tty=False)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    tail: deque[str] = deque(maxlen=10)
+    runner._stream(io.StringIO(f"printed {secret}\n"), tail, (secret,), True)
+    assert "".join(stderr.writes) == "printed ***\n"
+    assert "".join(tail) == "printed ***\n"
+
+
+def test_announce_url_refuses_a_plain_http_address(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(ValueError, match="https://"):
+        runner_sdk.announce_url("http://accounts.example.invalid/sign-in")
+    assert capsys.readouterr().out == ""
+
+
+def test_announce_url_prints_the_marker_and_the_address(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    url = "https://accounts.example.invalid/sign-in?client_id=abc"
+    runner_sdk.announce_url(url)
+    assert capsys.readouterr().out == f"{runner_sdk.ANNOUNCE_MARKER}{url}\n"
+
+
+def test_stream_opens_the_announced_address_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful open prints the confirmation line on stderr."""
+    opened: list[str] = []
+
+    def fake_open(address: str) -> bool:
+        opened.append(address)
+        return True
+
+    monkeypatch.setattr("webbrowser.open", fake_open)
+    secret = "browser-client-id-value"
+    url = f"https://accounts.example.invalid/sign-in?client_id={secret}"
+    stderr = _TtyStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    tail: deque[str] = deque(maxlen=10)
+    runner._stream(io.StringIO(_announce_line(url)), tail, (secret,), True)
+    assert opened == [url]
+    shown = "".join(stderr.writes)
+    assert url in shown
+    assert "opened in your browser\n" in shown
+    assert secret not in "".join(tail)
+
+
+def test_stream_stays_silent_when_no_browser_takes_the_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused open prints nothing extra beyond the address itself."""
+    monkeypatch.setattr("webbrowser.open", lambda _address: False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    secret = "refused-client-id-value"
+    url = f"https://accounts.example.invalid/sign-in?client_id={secret}"
+    stderr = _TtyStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    tail: deque[str] = deque(maxlen=10)
+    runner._stream(io.StringIO(_announce_line(url)), tail, (secret,), True)
+    shown = "".join(stderr.writes)
+    assert url in shown
+    assert "opened in your browser" not in shown
+
+
+def test_stream_never_opens_off_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Off a terminal the address is shown but no open is attempted."""
+    opened: list[str] = []
+
+    def fail_open(address: str) -> bool:
+        opened.append(address)
+        raise AssertionError("must not open off a terminal")
+
+    monkeypatch.setattr("webbrowser.open", fail_open)
+    secret = "off-terminal-client-id"
+    url = f"https://accounts.example.invalid/sign-in?client_id={secret}"
+    stderr = _TtyStderr(tty=False)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    tail: deque[str] = deque(maxlen=10)
+    runner._stream(io.StringIO(_announce_line(url)), tail, (secret,), True)
+    assert url in "".join(stderr.writes)
+    assert opened == []
+
+
+def test_stream_never_opens_when_the_run_disallows_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """allow_open=False (the --json path) shows the address but never opens."""
+    opened: list[str] = []
+
+    def fail_open(address: str) -> bool:
+        opened.append(address)
+        raise AssertionError("must not open when disallowed")
+
+    monkeypatch.setattr("webbrowser.open", fail_open)
+    secret = "disallowed-client-id"
+    url = f"https://accounts.example.invalid/sign-in?client_id={secret}"
+    stderr = _TtyStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    tail: deque[str] = deque(maxlen=10)
+    runner._stream(io.StringIO(_announce_line(url)), tail, (secret,), False)
+    assert url in "".join(stderr.writes)
+    assert opened == []
+
+
 # --- the SDK's unit tests.
 
 

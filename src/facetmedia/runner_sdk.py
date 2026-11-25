@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final, NoReturn
 
-__all__ = ["Request", "Runner", "SecretNotSet", "renew_secret", "secret"]
+__all__ = ["Request", "Runner", "SecretNotSet", "announce_url", "renew_secret", "secret"]
 
 PROTOCOL_VERSION: Final[int] = 1
 #: The environment prefix ``facet`` exports a declared secret under.
@@ -35,6 +35,9 @@ NO_DOCTOR: Final[dict[str, Any]] = {
     "fix": "report it to the package's maintainer",
 }
 
+#: The marker a runner prefixes a sign-in address with so facet shows it
+#: unmasked and opens it in the browser (see :func:`announce_url`).
+ANNOUNCE_MARKER: Final[str] = "\x1ffacet-open\x1f"
 #: The renewals file for the verb being handled, set by :meth:`Runner.run`.
 _current_renewals_file: str = ""
 #: The package name for the verb being handled, set by :meth:`Runner.run`.
@@ -221,6 +224,18 @@ def renew_secret(name: str, value: str) -> None:
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(f"{name}={value}\n")
         handle.flush()
+
+
+def announce_url(url: str) -> None:
+    """Print a sign-in address for facet to show unmasked and open.
+
+    The address may carry the package's ``client-id`` but must never carry
+    a client secret or a token.  An address that does not start with
+    ``https://`` is refused with a ``ValueError`` and nothing is printed.
+    """
+    if not url.startswith("https://"):
+        raise ValueError("announce_url needs an https:// address")
+    print(f"{ANNOUNCE_MARKER}{url}", flush=True)
 
 
 def _mapping(value: Any) -> dict[str, Any]:

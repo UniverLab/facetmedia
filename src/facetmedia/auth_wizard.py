@@ -55,6 +55,7 @@ def run_packages(
     run_id: str,
     wait: bool = True,
     timeout_s: float = 3600.0,
+    allow_open: bool = True,
 ) -> dict[str, str]:
     """Guide each named package in order; returns one label per package.
 
@@ -76,6 +77,7 @@ def run_packages(
                 wait=wait,
                 timeout_s=timeout_s,
                 stored=stored,
+                allow_open=allow_open,
             )
             if label is None:
                 cancelled = True
@@ -99,11 +101,12 @@ def run_package(
     wait: bool = True,
     timeout_s: float = 3600.0,
     stored: list[str] | None = None,
+    allow_open: bool = True,
 ) -> str | None:
     """Guide one package; ``None`` when the person quit the whole wizard."""
     kept: list[str] = stored if stored is not None else []
     _typed_phase(package, home, wait, timeout_s, kept)
-    continued = _auth_phase(package, run_id, wait, timeout_s, kept)
+    continued = _auth_phase(package, run_id, wait, timeout_s, kept, allow_open)
     if continued is None:
         return None
     label = _check_phase(package, run_id, wait, timeout_s) if continued else SKIPPED
@@ -177,7 +180,12 @@ def _read_value(package: Package, secret: Secret) -> str:
 
 
 def _auth_phase(
-    package: Package, run_id: str, wait: bool, timeout_s: float, stored: list[str]
+    package: Package,
+    run_id: str,
+    wait: bool,
+    timeout_s: float,
+    stored: list[str],
+    allow_open: bool = True,
 ) -> bool | None:
     """Run the package's ``auth`` verb: True to check, False on skip, None on quit."""
     if not secrets.has_auth_verb(package):
@@ -185,7 +193,7 @@ def _auth_phase(
     while True:
         try:
             with lock.hold("exclusive", "facet auth", wait, timeout_s):
-                data = auth.handle(package.name, run_id)
+                data = auth.handle(package.name, run_id, allow_open)
         except FacetError as exc:
             if exc.message == "the auth run was interrupted; the runner was terminated":
                 return None

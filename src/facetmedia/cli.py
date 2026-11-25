@@ -256,7 +256,13 @@ def _handle_auth_login(args: argparse.Namespace, target: str | None) -> int:
         picked = auth.pick(args)
         if picked is None:
             return 0
-        auth_wizard.run_packages([picked], run_id=args.run_id, wait=wait, timeout_s=timeout_s)
+        auth_wizard.run_packages(
+            [picked],
+            run_id=args.run_id,
+            wait=wait,
+            timeout_s=timeout_s,
+            allow_open=not args.json,
+        )
 
 
 def _handle_named_login(args: argparse.Namespace, target: str, wait: bool, timeout_s: float) -> int:
@@ -272,7 +278,13 @@ def _handle_named_login(args: argparse.Namespace, target: str, wait: bool, timeo
             f"sign out first with facet auth logout {package.name}"
         )
         return 0
-    auth_wizard.run_packages([package.name], run_id=args.run_id, wait=wait, timeout_s=timeout_s)
+    auth_wizard.run_packages(
+        [package.name],
+        run_id=args.run_id,
+        wait=wait,
+        timeout_s=timeout_s,
+        allow_open=not args.json,
+    )
     return 0
 
 
@@ -291,7 +303,7 @@ def _handle_auth_verb(args: argparse.Namespace, target: str) -> int:
             print(f"{package.name} is outdated; run facet pull {package.name}, then try again")
         return 0
     with lock.hold("exclusive", "facet auth", *_lock_params(args)):
-        data = auth.handle(target, args.run_id)
+        data = auth.handle(target, args.run_id, allow_open=not args.json)
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         stored = data["secrets"]

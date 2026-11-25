@@ -372,7 +372,7 @@ def pick(args: argparse.Namespace) -> str | None:
         return resolve_wizard(chosen).name
 
 
-def handle(package_name: str, run_id: str) -> dict[str, object]:
+def handle(package_name: str, run_id: str, allow_open: bool = True) -> dict[str, object]:
     """Run the package's ``auth`` verb once, store what it returns, and forget the rest."""
     package = _resolve(package_name)
     home = Home.from_env()
@@ -385,6 +385,7 @@ def handle(package_name: str, run_id: str) -> dict[str, object]:
         temp_dir,
         run_id,
         timeout_s=None,
+        allow_open=allow_open,
     )
     request = runner.make_request(
         AUTH_VERB,

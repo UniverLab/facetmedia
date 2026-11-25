@@ -309,16 +309,24 @@ A flow that needs a browser registers an `auth` verb, and `facet auth
 <package>` runs it interactively:
 
 ```python
-from facet_runner_sdk import Request, Runner
+from facet_runner_sdk import Request, Runner, announce_url
 
 runner = Runner()
 
 
 @runner.verb("auth")
 def auth(req: Request) -> dict:
-    token = sign_in_through_the_browser()  # print a URL, open it, listen on loopback
+    announce_url("https://accounts.example.com/sign-in?client_id=...")
+    token = wait_for_the_browser_flow()  # listen on loopback for the redirect
     return {"secrets": {"oauth-token": token}}
 ```
+
+Announce the sign-in address with `announce_url`: facet prints it unmasked
+so the person can copy it, and opens it once in their browser. Any other
+line the runner prints is masked exactly as before, so a secret the runner
+received never leaves facet unmasked. The address may carry the package's
+`client-id`, but a runner must never put a client secret or a token in it:
+announcing one is still showing it to the person, only without the mask.
 
 The verb's only channel back is the result file, so it returns a `secrets`
 map: each key must be a name the manifest declared, and a key it did not
