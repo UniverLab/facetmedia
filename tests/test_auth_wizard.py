@@ -33,6 +33,7 @@ from prompt_toolkit.output import DummyOutput
 
 from facetmedia import auth as auth_module
 from facetmedia import auth_wizard as wizard_module
+from facetmedia import installed as installed_module
 from facetmedia import secrets
 from facetmedia.cli import main
 from facetmedia.contract import EXIT_CODES, FacetError
@@ -94,6 +95,21 @@ def make_installed(home: Home, registry_root: Path, name: str) -> None:
     env_dir.mkdir(parents=True)
     (env_dir / ".complete").write_text(package.lock_sha256, encoding="utf-8")
     (env_dir / ".package").write_text(package_fingerprint(package), encoding="utf-8")
+
+
+def make_outdated(home: Home, registry_root: Path, name: str, old: str = "0.1.0") -> None:
+    """An environment at ``old`` while the registry now holds 0.1.1."""
+    env_dir = home.env_dir(name, old)
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".complete").write_text("old-lock", encoding="utf-8")
+    (env_dir / ".package").write_text("old-package", encoding="utf-8")
+    installed_module.record(home, name, old)
+    manifest = registry_root / "packages" / name / "package.toml"
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(
+        text.replace(f'version = "{old}"', 'version = "0.1.1"', 1),
+        encoding="utf-8",
+    )
 
 
 def _write_runner(registry_root: Path, name: str, source: str) -> None:
@@ -1353,3 +1369,114 @@ def test_styled_wizard_marks_signed_in_outdated_with_senal(
     out = capsys.readouterr().out
     assert f"a: {wizard_module.SIGNED_IN_OUTDATED}" in out
     assert SENAL_SGR in out
+
+
+def test_outdated_login_menu_suffix(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    _append_secret(root, "a", "handle", "the account handle")
+    home = Home.from_env()
+    make_outdated(home, root, "a")
+    package = load_registry(root).packages["a"]
+    secrets.set_value(home, package, "token", "t")
+    plain_prompts(monkeypatch, [""], [])
+    assert main(["auth"]) == 0
+    out = capsys.readouterr().out
+    assert "1. a, outdated: facet pull a" in out
+
+
+def test_outdated_logout_menu_suffix(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_outdated(home, root, "a")
+    package = load_registry(root).packages["a"]
+    secrets.set_value(home, package, "token", "t")
+    plain_prompts(monkeypatch, [""], [])
+    assert main(["auth", "logout"]) == 0
+    out = capsys.readouterr().out
+    assert "1. a, outdated: facet pull a" in out
+
+
+def test_outdated_login_choice_pull_line(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    _append_secret(root, "a", "handle", "the account handle")
+    home = Home.from_env()
+    make_outdated(home, root, "a")
+    package = load_registry(root).packages["a"]
+    secrets.set_value(home, package, "token", "t")
+    monkeypatch.setattr(
+        "facetmedia.runner.call",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runner called")),
+    )
+    plain_prompts(monkeypatch, ["1", ""], [])
+    assert main(["auth"]) == 0
+    out = capsys.readouterr().out
+    assert "a is outdated; run facet pull a, then try again" in out
+    assert out.count("1. a, outdated: facet pull a") > 1
+    assert "nothing changed" in out
+
+
+def test_outdated_logout_removes_secrets(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_outdated(home, root, "a")
+    package = load_registry(root).packages["a"]
+    secrets.set_value(home, package, "token", "t")
+    assert main(["auth", "logout", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "a: removed token" in out
+    package = load_registry(root).packages["a"]
+    assert secrets.env_for(home, package) == {}
+
+
+def test_no_env_any_version_not_listed(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    package = load_registry(root).packages["a"]
+    secrets.set_value(home, package, "token", "t")
+    plain_prompts(monkeypatch, [""], [])
+    assert main(["auth"]) == 0
+    out = capsys.readouterr().out
+    assert "1. a" not in out
+    assert auth_module.NOTHING_WITH_SECRETS in out
+
+    capsys.readouterr()
+    plain_prompts(monkeypatch, [""], [])
+    assert main(["auth", "logout"]) == 0
+    out = capsys.readouterr().out
+    assert "1. a" not in out
+    assert auth_module.NOTHING_SELECTED in out
+
+
+def test_outdated_named_login_prints_pull_line(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_outdated(home, root, "a")
+    monkeypatch.setattr(
+        "facetmedia.runner.call",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runner called")),
+    )
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "a is outdated; run facet pull a, then try again" in out
+
+    capsys.readouterr()
+    assert main(["auth", "login", "a", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["data"] == {"package": "a", "outdated": True}
+
+
+def test_outdated_logout_menu_removes_secrets(use_registry, monkeypatch, capsys) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    home = Home.from_env()
+    make_outdated(home, root, "a")
+    package = load_registry(root).packages["a"]
+    secrets.set_value(home, package, "token", "t")
+    plain_prompts(monkeypatch, ["1"], [])
+    assert main(["auth", "logout"]) == 0
+    out = capsys.readouterr().out
+    assert "1. a, outdated: facet pull a" in out
+    assert "a: removed token" in out
+    package = load_registry(root).packages["a"]
+    assert secrets.env_for(home, package) == {}

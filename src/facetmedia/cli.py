@@ -246,6 +246,9 @@ def _handle_named_login(args: argparse.Namespace, target: str, wait: bool, timeo
     """Guide the named package, refusing one that is already fully signed in."""
     package = auth.resolve_wizard(target)
     home = Home.from_env()
+    if auth._is_outdated(package, home):
+        print(f"{package.name} is outdated; run facet pull {package.name}, then try again")
+        return 0
     if auth._package_state(home, package) == "set":
         print(
             f"{package.name} is already signed in; "
@@ -262,6 +265,14 @@ def _handle_auth_verb(args: argparse.Namespace, target: str) -> int:
     The ``--json`` and off-terminal path: exactly the old ``facet auth``
     behaviour, with no prompts and no doctor check.
     """
+    package = auth.resolve_wizard(target)
+    home = Home.from_env()
+    if auth._is_outdated(package, home):
+        data = {"package": package.name, "outdated": True}
+        contract.emit(contract.ok(data), args.json)
+        if not args.json:
+            print(f"{package.name} is outdated; run facet pull {package.name}, then try again")
+        return 0
     with lock.hold("exclusive", "facet auth", *_lock_params(args)):
         data = auth.handle(target, args.run_id)
     contract.emit(contract.ok(data), args.json)

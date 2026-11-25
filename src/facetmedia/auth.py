@@ -26,6 +26,7 @@ import questionary
 
 from facetmedia import banner, lock, renewals, runner, secrets, theme
 from facetmedia import env as env_module
+from facetmedia import installed as installed_module
 from facetmedia.contract import FacetError
 from facetmedia.home import Home
 from facetmedia.registry import Package, load_active_registry
@@ -92,19 +93,22 @@ def _resolve_base(package_name: str) -> Package:
     return package
 
 
-def _require_installed(package: Package) -> None:
+def _require_installed(package: Package, *, allow_outdated: bool = False) -> None:
     """Refuse a package whose environment is not on this machine."""
     home = Home.from_env()
-    if not env_module.is_installed(package, home):
-        raise FacetError(
-            "not_installed",
-            f"{package.name} {package.version} is not installed",
-            hint=f"facet pull {package.name}",
-            details={"package": package.name},
-        )
+    if env_module.is_installed(package, home):
+        return
+    if allow_outdated and _is_outdated(package, home):
+        return
+    raise FacetError(
+        "not_installed",
+        f"{package.name} {package.version} is not installed",
+        hint=f"facet pull {package.name}",
+        details={"package": package.name},
+    )
 
 
-def _resolve(package_name: str) -> Package:
+def _resolve(package_name: str, *, allow_outdated: bool = False) -> Package:
     """The package to sign in to: it must exist, be compatible and be installed."""
     package = _resolve_base(package_name)
     if not has_auth_verb(package):
@@ -114,7 +118,7 @@ def _resolve(package_name: str) -> Package:
             hint=f"facet secret set {package.name} <name>",
             details={"package": package.name},
         )
-    _require_installed(package)
+    _require_installed(package, allow_outdated=allow_outdated)
     return package
 
 
@@ -123,9 +127,10 @@ def resolve_wizard(package_name: str) -> Package:
 
     Packages without a browser sign-in get the typed prompts and the check
     only, so the wizard resolves them where the verb runner refuses them.
+    An outdated package is allowed: the caller decides what to do with it.
     """
     package = _resolve_base(package_name)
-    _require_installed(package)
+    _require_installed(package, allow_outdated=True)
     return package
 
 
@@ -215,6 +220,33 @@ def _refused(args: argparse.Namespace, known: list[str]) -> None:
         )
 
 
+def _version_present(home: Home, name: str, version: str) -> bool:
+    """Whether an environment for ``name`` at ``version`` is on disk."""
+    return (home.envs_dir / name / version).is_dir() or (home.bin_dir / name / version).is_dir()
+
+
+def _is_outdated(package: Package, home: Home) -> bool:
+    """Installed at some version, but not the registry's current one."""
+    if env_module.is_installed(package, home):
+        return False
+    installed_version = installed_module.version_of(home, package.name)
+    if installed_version is None or installed_version == package.version:
+        return False
+    return _version_present(home, package.name, installed_version)
+
+
+def _installed_any_version(registry: Registry, home: Home) -> list[tuple[Package, bool]]:
+    """Installed packages with their outdated flag, sorted by name."""
+    found: list[tuple[Package, bool]] = []
+    for name in sorted(registry.packages):
+        package = registry.packages[name]
+        if env_module.is_installed(package, home):
+            found.append((package, False))
+        elif _is_outdated(package, home):
+            found.append((package, True))
+    return found
+
+
 def _installed(registry: Registry, home: Home) -> list[Package]:
     """Every installed package, sorted by name."""
     return [
@@ -239,17 +271,21 @@ def _package_state(home: Home, package: Package) -> str:
     return "partly set"
 
 
-def _select_styled(packages: list[Package]) -> str | None:
+def _outdated_suffix(name: str, outdated: bool) -> str:
+    return f", outdated: facet pull {name}" if outdated else ""
+
+
+def _select_styled(packages: list[tuple[Package, bool]]) -> str | None:
     """The styled questionary choice, or ``None`` on done."""
     prompts = [
         questionary.Choice(
             title=[
                 ("class:accent", package.name),
-                ("", f" {package.version}"),
+                ("", f" {package.version}{_outdated_suffix(package.name, outdated)}"),
             ],
             value=package.name,
         )
-        for package in packages
+        for package, outdated in packages
     ]
     prompts.append(questionary.Choice(title="done", value=_DONE))
     picked = questionary.select(
@@ -258,10 +294,11 @@ def _select_styled(packages: list[Package]) -> str | None:
     return None if picked is _DONE else str(picked)
 
 
-def _select_plain(names: list[str]) -> str | None:
+def _select_plain(packages: list[tuple[Package, bool]]) -> str | None:
     """The numbered-list choice, or ``None`` on done, blank, EOF, or a miss."""
-    for index, name in enumerate(names, 1):
-        print(f"{index}. {name}")
+    names = [package.name for package, _ in packages]
+    for index, (package, outdated) in enumerate(packages, 1):
+        print(f"{index}. {package.name}{_outdated_suffix(package.name, outdated)}")
     try:
         answer = input(f"Choose an account [1-{len(names)}, default: done]: ").strip()
     except EOFError:
@@ -282,11 +319,11 @@ def _match_answer(answer: str, names: list[str]) -> str | None:
     return names[index - 1] if 1 <= index <= len(names) else None
 
 
-def _select(packages: list[Package]) -> str | None:
+def _select(packages: list[tuple[Package, bool]]) -> str | None:
     """The chosen package name, or ``None`` on done, blank, or EOF."""
     if theme.styled():
         return _select_styled(packages)
-    return _select_plain([package.name for package in packages])
+    return _select_plain(packages)
 
 
 def pick(args: argparse.Namespace) -> str | None:
@@ -294,35 +331,45 @@ def pick(args: argparse.Namespace) -> str | None:
 
     Only installed packages that declare a secret and are not fully signed
     in are offered, one at a time with nothing preselected; the ``done``
-    row leaves.  An empty answer, ``done``, or ``EOF`` prints
-    ``nothing changed``; when nothing is offered because every package is
-    signed in, that is said instead.
+    row leaves.  An outdated package is listed with a pull hint; choosing it
+    prints the hint and returns to the menu.  An empty answer, ``done``, or
+    ``EOF`` prints ``nothing changed``; when nothing is offered because every
+    package is signed in, that is said instead.
     """
     registry = load_active_registry()
     home = Home.from_env()
     _refused(args, sorted(registry.packages))
     banner.print_text()
-    with_secrets = [package for package in _installed(registry, home) if package.secrets]
+    with_secrets = [
+        (package, outdated)
+        for package, outdated in _installed_any_version(registry, home)
+        if package.secrets
+    ]
     if not with_secrets:
         print(NOTHING_WITH_SECRETS)
         return None
     offered = [
-        package
-        for package in with_secrets
+        (package, outdated)
+        for package, outdated in with_secrets
         if _package_state(home, package) in ("not set", "partly set")
     ]
     if not offered:
         print(ALL_SIGNED_IN)
         return None
-    try:
-        chosen = _select(offered)
-    except KeyboardInterrupt:
-        print(NOTHING_CHANGED)
-        return None
-    if chosen is None:
-        print(NOTHING_CHANGED)
-        return None
-    return resolve_wizard(chosen).name
+    outdated_by_name = {package.name: outdated for package, outdated in offered}
+    while True:
+        try:
+            chosen = _select(offered)
+        except KeyboardInterrupt:
+            print(NOTHING_CHANGED)
+            return None
+        if chosen is None:
+            print(NOTHING_CHANGED)
+            return None
+        if outdated_by_name.get(chosen):
+            print(f"{chosen} is outdated; run facet pull {chosen}, then try again")
+            continue
+        return resolve_wizard(chosen).name
 
 
 def handle(package_name: str, run_id: str) -> dict[str, object]:
@@ -383,14 +430,19 @@ def _logout_target(args: argparse.Namespace, target: str | None) -> Package | No
 
     Without a name only packages holding at least one stored secret are
     offered, one at a time with nothing preselected; the ``done`` row leaves.
+    An outdated package is listed with a pull hint and can still be signed out.
     """
     if target is not None:
-        return _resolve(target)
+        return _resolve(target, allow_outdated=True)
     registry = load_active_registry()
     _logout_refused(args, sorted(registry.packages))
     banner.print_text()
     home = Home.from_env()
-    offered = [package for package in _installed(registry, home) if _stored(home, package)]
+    offered = [
+        (package, outdated)
+        for package, outdated in _installed_any_version(registry, home)
+        if _stored(home, package)
+    ]
     if not offered:
         print(NOTHING_SELECTED)
         return None
@@ -398,7 +450,7 @@ def _logout_target(args: argparse.Namespace, target: str | None) -> Package | No
     if chosen is None:
         print(NOTHING_SELECTED)
         return None
-    return _resolve(chosen)
+    return _resolve(chosen, allow_outdated=True)
 
 
 def _stored(home: Home, package: Package) -> list[str]:

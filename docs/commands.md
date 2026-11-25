@@ -579,7 +579,11 @@ With no package, when standard input and output are both terminals,
 `facet auth` and `facet auth login` run a guided wizard. It offers each
 installed package that declares a secret and is not fully signed in, one
 at a time: a single choice with nothing preselected, ending in a `done`
-row. A package that is already signed in is never offered. After the
+row. A package that is already signed in is never offered. A package whose
+installed version is older than the registry's is listed with the suffix
+`, outdated: facet pull <package>`; choosing it prints
+`<package> is outdated; run facet pull <package>, then try again`, returns
+to the menu, and runs nothing and asks for no secret. After the
 chosen package's flow ends, the menu shows again with the states
 recomputed, until the person picks `done`, cancels, or nothing is offered.
 When every package declaring a secret is signed in, it prints
@@ -608,7 +612,10 @@ names `facet pull <package>` first, and exits `0`.
 With a package, at a terminal and without `--json`, the same per-package
 flow runs for that package alone — unless it is already signed in, which
 prints `<package> is already signed in; sign out first with facet auth
-logout <package>` and exits `0` without running anything. With `--json`,
+logout <package>` and exits `0` without running anything. An outdated
+package prints `<package> is outdated; run facet pull <package>, then try again`
+and exits `0` without running anything or asking for secrets, the same in
+`--json` and off a terminal. With `--json`,
 or off a terminal, it behaves exactly as before: the package's `auth`
 verb runs once and stores what it returns, with no prompts and no doctor
 check. With `--json` and no package neither prompts: the missing
@@ -647,7 +654,10 @@ verb — then removes every declared secret that currently holds a value in
 one step through `facet secret rm`'s path. With no package, at a terminal,
 it first offers each installed package holding at least one stored secret,
 one at a time: a single choice with nothing preselected, ending in a
-`done` row. A blank answer, EOF or `done` removes nothing and exits `0`,
+`done` row. A package whose installed version is older than the registry's
+is listed with the same suffix, `, outdated: facet pull <package>`, and
+can still be signed out: the stored secrets it declared are removed
+locally. A blank answer, EOF or `done` removes nothing and exits `0`,
 and a package holding no stored secret stays a no-op that reports
 `removed: []`. Afterwards it prints `<package>: removed a, b, c`, then the
 local-only notice and the `facet auth login <package>` hint.
