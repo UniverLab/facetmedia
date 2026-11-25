@@ -34,8 +34,8 @@ from prompt_toolkit.output import DummyOutput
 from facetmedia import auth as auth_module
 from facetmedia import auth_wizard as wizard_module
 from facetmedia import installed as installed_module
+from facetmedia import introspect, secrets
 from facetmedia import masked_input as masked_module
-from facetmedia import secrets
 from facetmedia.cli import main
 from facetmedia.contract import EXIT_CODES, FacetError
 from facetmedia.env.package_marker import package_fingerprint
@@ -1504,3 +1504,158 @@ def test_outdated_logout_menu_removes_secrets(use_registry, monkeypatch, capsys)
     assert "a: removed token" in out
     package = load_registry(root).packages["a"]
     assert secrets.env_for(home, package) == {}
+
+
+# --- secret links
+
+LINK = "https://console.example.com/keys/new"
+
+CAPABILITY_TOML = """
+[capabilities.text]
+summary = "The test capability."
+kind = "text"
+models = []
+
+[capabilities.text.preview]
+viewer = "generic"
+"""
+
+
+def _linked_registry(use_registry, with_verb: bool = True) -> Path:
+    """Package ``a`` with a typed secret carrying an obtain hint and a link."""
+    root = _auth_registry(use_registry, "a", with_verb)
+    manifest = root / "packages" / "a" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + 'obtain = "the provider console"\n'
+        + f'link = "{LINK}"\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+@pytest.mark.parametrize("link", [LINK, "https://example.com/" + "k" * 180])
+def test_manifest_accepts_a_valid_link(use_registry, link: str) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    manifest = root / "packages" / "a" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + f'link = "{link}"\n',
+        encoding="utf-8",
+    )
+    assert _secret_problems(root) == []
+    by_name = {secret.name: secret for secret in load_registry(root).packages["a"].secrets}
+    assert by_name["token"].link == link
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        '"http://console.example.com/keys"',
+        '"https://console.example.com/my keys"',
+        '"https://console.example.com/ke\\nys"',
+        '"%s"' % ("https://example.com/" + "k" * 181),
+    ],
+)
+def test_manifest_rejects_bad_link_values(use_registry, link: str) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    manifest = root / "packages" / "a" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + f"link = {link}\n",
+        encoding="utf-8",
+    )
+    assert _secret_problems(root) == [("secrets[0].link", "value")]
+
+
+def test_typed_prompt_names_the_link_to_open(
+    use_registry, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root = _linked_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(monkeypatch, 0)
+    plain_prompts(monkeypatch, [], ["s3cr3t"])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "where to get it: the provider console" in out
+    assert f"open: {LINK}" in out
+    assert "s3cr3t" not in out
+
+
+def test_typed_prompt_prints_no_open_line_without_a_link(
+    use_registry, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    manifest = root / "packages" / "a" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + 'obtain = "the provider console"\n',
+        encoding="utf-8",
+    )
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(monkeypatch, 0)
+    plain_prompts(monkeypatch, [], ["s3cr3t"])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "where to get it: the provider console" in out
+    assert "open:" not in out
+
+
+def test_styled_wizard_marks_the_link_with_accent(
+    use_registry, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root = _linked_registry(use_registry, with_verb=False)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_doctor(monkeypatch, 1, detail="missing: m1", fix="facet pull a")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    entered = iter(["s3cr3t"])
+
+    def fake_read_masked(prompt: str = "") -> str:
+        return next(entered)
+
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", fake_read_masked)
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "open:" in out
+    assert LINK in out
+    assert SENAL_SGR in out
+
+
+def test_rows_secret_list_and_describe_carry_the_link(
+    use_registry, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root = _linked_registry(use_registry)
+    manifest = root / "packages" / "a" / "package.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + CAPABILITY_TOML,
+        encoding="utf-8",
+    )
+    home = Home.from_env()
+    package = load_registry(root).packages["a"]
+    (row,) = secrets.rows(home, [package])
+    assert row["link"] == LINK
+    assert main(["secret", "list", "a"]) == 0
+    plain = capsys.readouterr().out
+    assert "  obtain: the provider console" in plain
+    assert f"  link: {LINK}" in plain
+    assert main(["secret", "list", "a", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"]["secrets"] == [
+        {
+            "package": "a",
+            "name": "token",
+            "description": "the test token",
+            "required": True,
+            "set": False,
+            "obtain": "the provider console",
+            "link": LINK,
+            "produced_by": None,
+        }
+    ]
+    data = introspect.describe_data("a.text")
+    assert [entry["link"] for entry in data["secrets"]] == [LINK]

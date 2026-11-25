@@ -228,8 +228,8 @@ def remove(home: Home, package: Package, name: str) -> dict[str, object]:
 def rows(home: Home, packages: Iterable[Package]) -> list[dict[str, object]]:
     """One row per declared secret: its name, description, and whether it is set.
 
-    ``obtain`` and ``produced_by`` travel beside the description; a value
-    never does.
+    ``obtain``, ``link`` and ``produced_by`` travel beside the description;
+    a value never does.
     """
     store = _load_store(home)
     found: list[dict[str, object]] = []
@@ -243,6 +243,7 @@ def rows(home: Home, packages: Iterable[Package]) -> list[dict[str, object]]:
                 "required": secret.required,
                 "set": secret.name in values,
                 "obtain": secret.obtain,
+                "link": secret.link,
                 "produced_by": secret.produced_by,
             }
             for secret in package.secrets

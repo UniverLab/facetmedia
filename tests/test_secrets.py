@@ -829,6 +829,7 @@ def test_describe_reports_each_secret_and_never_its_value(clean_store: tuple[Hom
             "required": True,
             "set": True,
             "obtain": None,
+            "link": None,
             "produced_by": None,
         },
         {
@@ -837,6 +838,7 @@ def test_describe_reports_each_secret_and_never_its_value(clean_store: tuple[Hom
             "required": False,
             "set": False,
             "obtain": None,
+            "link": None,
             "produced_by": None,
         },
     ]
@@ -889,3 +891,99 @@ def test_has_auth_verb_finds_the_registration(clean_store: tuple[Home, Path]) ->
     assert secrets.has_auth_verb(loaded.packages["poster"]) is True
     assert secrets.has_auth_verb(loaded.packages["echo"]) is False
     assert secrets.auth_hint(loaded.packages["echo"], "token") == "facet secret set echo token"
+
+
+# --- secret links
+
+
+class _TtyOut:
+    """Wrap stdout so ``isatty()`` is True while writes still get captured."""
+
+    def __init__(self, wrapped: object) -> None:
+        self._wrapped = wrapped
+
+    def isatty(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+
+def _hinted_home(
+    scratch_registry: tuple[Home, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Home, Path]:
+    """A fresh home pointed at a scratch registry whose secret names its hints."""
+    _facet_home, registry = scratch_registry
+    manifest = registry / "packages" / "poster" / "package.toml"
+    text = manifest.read_text(encoding="utf-8")
+    text = text.replace(
+        'name = "app-password"\n',
+        'name = "app-password"\n'
+        'obtain = "Account settings > Security"\n'
+        'link = "https://account.example.com/security/app"\n',
+        1,
+    )
+    manifest.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+    monkeypatch.delenv(secrets.PASSPHRASE_ENV, raising=False)
+    return Home.from_env(), registry
+
+
+def _tty_set(monkeypatch: pytest.MonkeyPatch, value: str = SECRET_VALUE) -> None:
+    """Both stdio are terminals; the masked prompt answers ``value``."""
+    monkeypatch.setattr(sys, "stdin", _Terminal(""))
+    monkeypatch.setattr(sys, "stdout", _TtyOut(sys.stdout))
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", lambda prompt="": value)
+
+
+def test_secret_set_prints_hints_on_a_terminal(
+    scratch_registry: tuple[Home, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    facet_home, registry = _hinted_home(scratch_registry, tmp_path, monkeypatch)
+    _tty_set(monkeypatch)
+    assert main(["secret", "set", "poster", "app-password"]) == 0
+    out = capsys.readouterr().out
+    assert "where to get it: Account settings > Security" in out
+    assert "open: https://account.example.com/security/app" in out
+    assert SECRET_VALUE not in out
+    assert secrets.env_for(facet_home, _poster(registry)) == {
+        "FACET_SECRET_APP_PASSWORD": SECRET_VALUE
+    }
+
+
+def test_secret_set_prints_no_hints_off_a_terminal(
+    scratch_registry: tuple[Home, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _hinted_home(scratch_registry, tmp_path, monkeypatch)
+    _stdin(monkeypatch, f"{SECRET_VALUE}\n")
+    assert main(["secret", "set", "poster", "app-password"]) == 0
+    out = capsys.readouterr().out
+    assert "where to get it:" not in out
+    assert "open:" not in out
+
+
+def test_secret_set_prints_no_hints_without_obtain_or_link(
+    scratch_registry: tuple[Home, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _facet_home, registry = scratch_registry
+    monkeypatch.setenv("FACET_HOME", str(tmp_path / "facet-home"))
+    monkeypatch.setenv("FACET_REGISTRY", str(registry))
+    monkeypatch.delenv(secrets.PASSPHRASE_ENV, raising=False)
+    _tty_set(monkeypatch)
+    assert main(["secret", "set", "poster", "app-password"]) == 0
+    out = capsys.readouterr().out
+    assert "where to get it:" not in out
+    assert "open:" not in out

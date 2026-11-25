@@ -113,12 +113,15 @@ def _secret_package(name: str) -> Package:
     return package
 
 
-def _secret_value(args: argparse.Namespace) -> str:
+def _secret_value(args: argparse.Namespace, package: Package | None = None) -> str:
     """The value from the terminal's masked prompt, or from stdin — never argv.
 
     A value on the command line would land in the shell's history and in the
-    process list, so facet never looks for one there.
+    process list, so facet never looks for one there.  At a terminal the
+    prompt first names where the value comes from, in the auth wizard's style.
     """
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        _announce_secret_origin(args, package)
     if sys.stdin.isatty():
         value = masked_input.read_masked(f"{args.package} {args.name}: ")
     else:
@@ -126,6 +129,17 @@ def _secret_value(args: argparse.Namespace) -> str:
     if not value:
         raise FacetError("invalid_input", f"{args.package} {args.name}: the value is empty")
     return value
+
+
+def _announce_secret_origin(args: argparse.Namespace, package: Package | None) -> None:
+    """Print where the named secret comes from; silence keeps unknown names unchanged."""
+    resolved = package if package is not None else load_active_registry().package(args.package)
+    if resolved is None:
+        return
+    secret = next((entry for entry in resolved.secrets if entry.name == args.name), None)
+    if secret is None:
+        return
+    auth_wizard.announce_secret_hints(secret)
 
 
 def _handle_secret_set(args: argparse.Namespace) -> int:
@@ -137,7 +151,7 @@ def _handle_secret_set(args: argparse.Namespace) -> int:
         raise FacetError("invalid_input", f"the following arguments are required: {missing}")
     package = _secret_package(args.package)
     with lock.hold("exclusive", "facet secret set", *_lock_params(args)):
-        data = secrets.set_value(Home.from_env(), package, args.name, _secret_value(args))
+        data = secrets.set_value(Home.from_env(), package, args.name, _secret_value(args, package))
     contract.emit(contract.ok(data), args.json)
     if not args.json:
         print(f"{data['package']} {data['name']} set")
@@ -182,6 +196,8 @@ def _announce_secret_list(rows: list[dict[str, object]]) -> None:
         print(f"{row['package']} {row['name']}{required} {state}: {row['description']}")
         if isinstance(row.get("obtain"), str) and row["obtain"]:
             print(f"  obtain: {row['obtain']}")
+        if isinstance(row.get("link"), str) and row["link"]:
+            print(f"  link: {row['link']}")
         if isinstance(row.get("produced_by"), str) and row["produced_by"]:
             print(f"  produced by: {row['produced_by']}")
 

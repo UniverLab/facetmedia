@@ -32,6 +32,7 @@ __all__ = [
     "SIGNED_IN",
     "SIGNED_IN_OUTDATED",
     "SKIPPED",
+    "announce_secret_hints",
     "run_package",
     "run_packages",
 ]
@@ -137,6 +138,21 @@ def _typed_phase(
         print(f"{package.name} {secret.name} set")
 
 
+def announce_secret_hints(secret: Secret) -> None:
+    """Where the person gets the value: the hint line, then the page to open.
+
+    Each line is one unwrapped line so a terminal can make the address
+    clickable; the address itself uses the accent style when styled.
+    """
+    if not secret.obtain and not secret.link:
+        return
+    console = theme.console()
+    if secret.obtain:
+        console.print(f"  [muted]where to get it:[/] {escape(secret.obtain)}", soft_wrap=True)
+    if secret.link:
+        console.print(f"  [muted]open:[/] [accent]{escape(secret.link)}[/]", soft_wrap=True)
+
+
 def _announce_secret(package: Package, secret: Secret) -> None:
     """What the secret is and where the person gets it; never a value."""
     console = theme.console()
@@ -144,8 +160,7 @@ def _announce_secret(package: Package, secret: Secret) -> None:
         f"[accent]{escape(package.name)} {escape(secret.name)}:[/] {escape(secret.description)}",
         soft_wrap=True,
     )
-    if secret.obtain:
-        console.print(f"  [muted]where to get it:[/] {escape(secret.obtain)}", soft_wrap=True)
+    announce_secret_hints(secret)
 
 
 def _read_value(package: Package, secret: Secret) -> str:

@@ -249,6 +249,7 @@ def describe_data(capability_id: str) -> dict[str, Any]:
                 "required": row["required"],
                 "set": row["set"],
                 "obtain": row["obtain"],
+                "link": row["link"],
                 "produced_by": row["produced_by"],
             }
             for row in secrets.rows(home, [package])

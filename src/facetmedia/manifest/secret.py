@@ -24,12 +24,14 @@ if TYPE_CHECKING:
 
 _SECRET_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[a-z][a-z0-9-]*\Z")
 _SECRET_KEYS: Final[frozenset[str]] = frozenset(
-    {"name", "description", "required", "obtain", "produced_by"}
+    {"name", "description", "required", "obtain", "link", "produced_by"}
 )
 #: The only ``produced_by`` value: the package's ``auth`` verb mints it.
 PRODUCED_BY_AUTH: Final[str] = "auth"
 #: The longest ``obtain`` hint a person can read at a glance.
 OBTAIN_LIMIT: Final[int] = 300
+#: The longest ``link`` address a terminal can make clickable.
+LINK_LIMIT: Final[int] = 200
 
 
 def read_secrets(loader: RegistryLoader, raw: object, file: str) -> tuple[Secret, ...]:
@@ -68,6 +70,7 @@ def _read_secret(
     description = loader.string(item, "description", file, prefix, required=True)
     required = loader.boolean(item, "required", file, prefix, default=False)
     obtain = _read_obtain(loader, item, file, prefix)
+    link = _read_link(loader, item, file, prefix)
     produced_by = _read_produced_by(loader, item, file, prefix)
     if len(loader.problems) != before or name is None or description is None:
         return None
@@ -76,6 +79,7 @@ def _read_secret(
         description=description,
         required=required,
         obtain=obtain,
+        link=link,
         produced_by=produced_by,
     )
 
@@ -95,6 +99,24 @@ def _read_obtain(
         or "\r" in value
     ):
         loader.add(file, f"{prefix}obtain", "value")
+        return None
+    return value
+
+
+def _read_link(
+    loader: RegistryLoader, item: Mapping[str, Any], file: str, prefix: str
+) -> str | None:
+    """The exact page to open for the value: absent, or one short ``https`` address."""
+    if "link" not in item:
+        return None
+    value = item["link"]
+    if (
+        not isinstance(value, str)
+        or not value.startswith("https://")
+        or len(value) > LINK_LIMIT
+        or any(char.isspace() for char in value)
+    ):
+        loader.add(file, f"{prefix}link", "value")
         return None
     return value
 

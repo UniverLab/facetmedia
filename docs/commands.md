@@ -519,7 +519,8 @@ the vault and removes them; a migration interrupted halfway loses nothing.
   declares no secrets says so and exits `0`.
 - `facet secret list [<package>]` — every declared secret of one package, or
   of every package that declares any, with whether each is set. A secret that
-  says where to get it adds an `obtain:` line, and one the browser sign-in
+  says where to get it adds an `obtain:` line, one that names its page adds
+  a `link:` line, and one the browser sign-in
   mints adds a `produced by:` line.
 - `facet secret rm <package> <name>` — remove one; a secret that is not
   stored is a no-op with exit 0.
@@ -554,7 +555,8 @@ A name the package did not declare is `invalid_input`, and so is an empty
 secret value. Neither `list` nor any failure ever prints a stored value: a
 row carries the name, the description, whether the secret is required,
 whether it is set, and — when the manifest declares them — where to get it
-(`obtain`) and whether the `auth` verb mints it (`produced_by`).
+(`obtain`), the exact page to open (`link`), and whether the `auth` verb
+mints it (`produced_by`).
 
 Lock: `set`, `rm` and `passphrase` take it exclusively; `list` takes none.
 
