@@ -598,15 +598,16 @@ and the package only speaks to its network. It declares three verbs:
           "post": {
               "network": "bluesky",
               "account": account,
-              "state": "published",  # published|draft|private|scheduled
+              "state": "published",  # published|draft|private|scheduled|unknown
               "posts": [{"id": post_id, "url": public_url}],
               "cost": {"amount": "0", "currency": "USD"},
           },
       }
   ```
 
-- **`verify`** re-reads the post and answers what the network holds now. It
-  passes only when that equals the receipt:
+- **`verify`** re-reads the post and answers what the network holds now
+  (`published`, `draft`, `private`, `scheduled`, or `unknown` when the network
+  forbids read-back). It passes only when that equals the receipt:
 
   ```python
   @runner.verb("verify")

@@ -214,8 +214,10 @@ dry run named, because the runner said nothing facet could read.
 Verification of a `post` asset reads the post back from the network. It
 passes only when the state read back equals the receipt's state and the media
 count matches, so facet never reports `published` for a post the network
-holds as a draft or private. `--no-verify` is refused for an outward
-capability with `invalid_input` (exit 2).
+holds as a draft or private. `unknown` is also a valid read-back state when
+the network forbids read-back: it passes when the receipt's `run` state was
+`unknown` too, and fails verification otherwise. `--no-verify` is refused
+for an outward capability with `invalid_input` (exit 2).
 
 ### Exit codes
 

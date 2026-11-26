@@ -895,12 +895,14 @@ out .
 ```
 
 The receipt names the network, the account, the post ids and URLs, the state
-the network answered (`published`, `draft`, `private`, `scheduled`), the
+the network answered (`published`, `draft`, `private`, `scheduled`, or
+`unknown` when the network forbids read-back), the
 source assets with their record hashes, the cost as the runner reported it,
 and `sent_at`/`verified_at` as ISO 8601 in UTC. Verification reads the post
 back: it passes only when the state and the media count match, so a post the
-network holds as a draft is never reported as published. `--no-verify` is
-refused for an outward capability (exit 2).
+network holds as a draft is never reported as published, while a network that
+forbids read-back passes when both `run` and `verify` answer `unknown`.
+`--no-verify` is refused for an outward capability (exit 2).
 
 Before anything is confirmed or sent, a real run refuses an output folder
 that already holds its receipt: `invalid_input` (exit 2), the hint naming
