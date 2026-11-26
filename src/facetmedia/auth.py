@@ -262,8 +262,8 @@ ALL_SIGNED_IN: Final[str] = "every package is signed in; sign out with facet aut
 
 def _package_state(home: Home, package: Package) -> str:
     """The package's stored state: ``set``, ``partly set`` or ``not set``."""
-    found = secrets.rows(home, [package])
-    flags = [row.get("set") is True for row in found]
+    required_rows = [row for row in secrets.rows(home, [package]) if row.get("required") is True]
+    flags = [row.get("set") is True for row in required_rows]
     if all(flags):
         return "set"
     if not any(flags):

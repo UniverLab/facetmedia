@@ -117,11 +117,14 @@ def _write_runner(registry_root: Path, name: str, source: str) -> None:
     (registry_root / "packages" / name / "runner.py").write_text(source, encoding="utf-8")
 
 
-def _append_secret(registry_root: Path, name: str, secret: str, description: str) -> None:
+def _append_secret(
+    registry_root: Path, name: str, secret: str, description: str, *, required: bool = True
+) -> None:
     manifest = registry_root / "packages" / name / "package.toml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8")
-        + f'\n[[secrets]]\nname = "{secret}"\ndescription = "{description}"\nrequired = true\n',
+        + f'\n[[secrets]]\nname = "{secret}"\ndescription = "{description}"\n'
+        + f"required = {'true' if required else 'false'}\n",
         encoding="utf-8",
     )
 
@@ -1659,3 +1662,63 @@ def test_rows_secret_list_and_describe_carry_the_link(
     ]
     data = introspect.describe_data("a.text")
     assert [entry["link"] for entry in data["secrets"]] == [LINK]
+
+
+def test_package_state_ignores_unset_optional_secret(use_registry) -> None:
+    root = use_registry(["a"])
+    _append_secret(root, "a", "token", "the test token")
+    _append_secret(root, "a", "refresh", "the refresh token", required=False)
+    home = Home.from_env()
+    pkg = load_registry(root).packages["a"]
+    assert auth_module._package_state(home, pkg) == "not set"
+    secrets.set_value(home, pkg, "refresh", "r")
+    assert auth_module._package_state(home, pkg) == "not set"
+    secrets.remove(home, pkg, "refresh")
+    _logged_in(home, root, {"token": "t"})
+    assert auth_module._package_state(home, pkg) == "set"
+
+
+def test_package_state_partly_set_and_all_optional(use_registry) -> None:
+    root = use_registry(["a", "b"])
+    _append_secret(root, "a", "token", "the test token")
+    _append_secret(root, "a", "handle", "the account handle")
+    _append_secret(root, "a", "refresh", "the refresh token", required=False)
+    home = Home.from_env()
+    pkg = load_registry(root).packages["a"]
+    secrets.set_value(home, pkg, "token", "t")
+    assert auth_module._package_state(home, pkg) == "partly set"
+    secrets.set_value(home, pkg, "refresh", "r")
+    assert auth_module._package_state(home, pkg) == "partly set"
+    secrets.set_value(home, pkg, "handle", "h")
+    secrets.remove(home, pkg, "refresh")
+    assert auth_module._package_state(home, pkg) == "set"
+    _append_secret(root, "b", "optional", "optional only", required=False)
+    pkg_b = load_registry(root).packages["b"]
+    assert auth_module._package_state(home, pkg_b) == "set"
+
+
+def test_optional_secret_unset_excluded_from_picker_and_named_login(
+    use_registry, monkeypatch, capsys
+) -> None:
+    root = _auth_registry(use_registry, "a", True)
+    _append_secret(root, "a", "refresh", "the refresh token", required=False)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    _logged_in(home, root, {"token": "t"})
+    monkeypatch.setattr("facetmedia.env.is_installed", lambda package, home: True)
+    monkeypatch.setattr(sys, "stdin", _TtyIn(""))
+    monkeypatch.setattr(sys, "stdout", _TtyProxy(sys.stdout))
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    def fail(_prompt: object = "") -> object:
+        raise AssertionError("prompted when the package should be treated as signed in")
+
+    monkeypatch.setattr("builtins.input", fail)
+    monkeypatch.setattr(getpass, "getpass", fail)
+    monkeypatch.setattr("facetmedia.masked_input.read_masked", fail)
+    monkeypatch.setattr("facetmedia.runner.call", lambda *a, **k: pytest.fail("runner called"))
+    assert main(["auth"]) == 0
+    assert auth_module.ALL_SIGNED_IN in capsys.readouterr().out
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert "a is already signed in; sign out first with facet auth logout a" in out
