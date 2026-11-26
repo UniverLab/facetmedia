@@ -68,8 +68,8 @@ STATES: Final[tuple[str, ...]] = (
     "scheduled",
     "unknown",
 )
-#: What a read-back may answer: the network never holds a post as ``unknown``.
-READ_BACK_STATES: Final[tuple[str, ...]] = STATES[:-1]
+#: What a read-back may answer: ``unknown`` is valid when the network forbids read-back.
+READ_BACK_STATES: Final[tuple[str, ...]] = STATES
 STAMP_FORMAT: Final[str] = "%Y-%m-%dT%H:%M:%SZ"
 COST_FIELDS: Final[tuple[str, ...]] = ("amount", "currency")
 

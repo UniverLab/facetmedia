@@ -19,7 +19,8 @@ import pytest
 from facetmedia import record
 from facetmedia import run as run_module
 from facetmedia.cli import main
-from facetmedia.post import parse_dry_run, sources
+from facetmedia.contract import FacetError
+from facetmedia.post import parse_dry_run, parse_read_back, sources
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "outward-registry"
 EXIT_OK = 0
@@ -423,6 +424,50 @@ def test_a_draft_read_back_fails_and_seals_the_receipt_unknown(
     stored = json.loads((out / "talk.post.json.facet.json").read_text(encoding="utf-8"))
     assert stored["verification"]["status"] == "failed"
     assert stored["verification"]["metrics"]["state"] == "draft"
+
+
+def test_an_unknown_run_with_unknown_read_back_passes_and_keeps_unknown(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    piece: Path,
+) -> None:
+    monkeypatch.setenv("FIXTURE_POST_STATE", "unknown")
+    monkeypatch.setenv("FIXTURE_READ_BACK", "unknown")
+    out = tmp_path / "out"
+    code = _send(piece, out, "--yes", "--json")
+    envelope = _envelope(capsys)
+    assert code == EXIT_OK
+    assert envelope["ok"] is True
+
+    receipt = _receipt(out / "talk.post.json")
+    assert receipt["state"] == "unknown"
+    assert receipt["verified_at"] is not None
+
+
+def test_a_published_run_with_unknown_read_back_fails_and_seals_unknown(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    facet_home: Path,
+    piece: Path,
+) -> None:
+    monkeypatch.setenv("FIXTURE_READ_BACK", "unknown")
+    out = tmp_path / "out"
+    code = _send(piece, out, "--yes", "--json")
+    error = _envelope(capsys)["error"]
+    assert code == EXIT_VERIFICATION_FAILED
+    assert error["code"] == "verification_failed"
+
+    receipt = _receipt(out / "talk.post.json")
+    assert receipt["state"] == "unknown"
+    assert receipt["verified_at"] is None
+
+
+def test_parse_read_back_rejects_invalid_state(tmp_path: Path) -> None:
+    with pytest.raises(FacetError):
+        parse_read_back({"state": "bogus", "media": []}, tmp_path)
 
 
 def test_a_failed_read_back_keeps_the_runs_renewal_warning(
