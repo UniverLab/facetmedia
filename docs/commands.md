@@ -619,7 +619,10 @@ When only the installed package is out of date, it prints
 logging out. When the check ends `failed` or `partly set`, the printed
 hint starts with
 `to start over: facet auth logout <package>`, followed by the check's
-detail and fix. When no installed package declares a secret, it says so,
+detail and fix. The verdict reflects only that package's own readiness
+and doctor checks: an unrelated facet-wide failure (for example orphaned
+environments left by another package) still reports
+`<package>: signed in` with no start-over hint. When no installed package declares a secret, it says so,
 names `facet pull <package>` first, and exits `0`.
 
 With a package, at a terminal and without `--json`, the same per-package
