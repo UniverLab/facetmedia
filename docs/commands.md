@@ -591,7 +591,7 @@ With no package, when standard input and output are both terminals,
 `facet auth` and `facet auth login` run a guided wizard. It offers each
 installed package that declares a secret and is not fully signed in, one
 at a time: a single choice with nothing preselected, ending in a `done`
-row. A package that is already signed in is never offered. A package whose
+row. A package that is already signed in is never offered: signed in means every required secret is stored, so an optional secret left unset does not keep the package on offer. A package whose
 installed version is older than the registry's is listed with the suffix
 `, outdated: facet pull <package>`; choosing it prints
 `<package> is outdated; run facet pull <package>, then try again`, returns
