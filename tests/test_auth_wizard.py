@@ -1372,6 +1372,42 @@ def test_outdated_with_unset_secrets_stays_partly_set(use_registry, monkeypatch,
     assert "package out of date:" not in out
 
 
+def test_login_global_failure_package_ok_signed_in(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    stub_doctor(
+        monkeypatch,
+        5,
+        readiness={
+            "secrets": {"ok": True},
+            "installed": {"ok": True},
+            "models": {"ok": True},
+        },
+        doctor_rows=[],
+    )
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert f"a: {wizard_module.SIGNED_IN}" in out
+    assert "to start over:" not in out
+
+
+def test_login_missing_package_entry_stays_failed(use_registry, monkeypatch, capsys) -> None:
+    root = _produced_registry(use_registry)
+    home = Home.from_env()
+    make_installed(home, root, "a")
+    stub_runner(monkeypatch, {"token": "wizard-token"})
+    monkeypatch.setattr("facetmedia.doctor.execute", lambda *args, **kwargs: ({"packages": {}}, 5))
+    plain_prompts(monkeypatch, [], [])
+    assert main(["auth", "login", "a"]) == 0
+    out = capsys.readouterr().out
+    assert f"a: {wizard_module.PARTLY_SET}" in out
+    assert "to start over:" in out
+    assert wizard_module.SIGNED_IN not in out
+
+
 def test_styled_wizard_marks_signed_in_outdated_with_senal(
     use_registry, monkeypatch, capsys
 ) -> None:

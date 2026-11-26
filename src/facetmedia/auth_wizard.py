@@ -243,6 +243,8 @@ def _check_phase(package: Package, run_id: str, wait: bool, timeout_s: float) ->
             readiness = maybe if isinstance(maybe, dict) else {}
             maybe_rows = found.get("doctor")
             doctor_rows = maybe_rows if isinstance(maybe_rows, list) else []
+    if _package_fully_ok(readiness, doctor_rows):
+        return SIGNED_IN
     secrets_check = readiness.get("secrets")
     if not (isinstance(secrets_check, dict) and secrets_check.get("ok") is True):
         _print_start_over(package)
@@ -257,6 +259,16 @@ def _check_phase(package: Package, run_id: str, wait: bool, timeout_s: float) ->
     if fix:
         print(fix)
     return FAILED
+
+
+def _package_fully_ok(readiness: dict[str, object], doctor_rows: list[object]) -> bool:
+    """True when every package readiness and doctor check passed."""
+    if not readiness:
+        return False
+    for entry in readiness.values():
+        if isinstance(entry, dict) and entry.get("ok") is not True:
+            return False
+    return not any(isinstance(row, dict) and row.get("ok") is not True for row in doctor_rows)
 
 
 def _print_start_over(package: Package) -> None:
