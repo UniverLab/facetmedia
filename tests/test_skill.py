@@ -589,6 +589,14 @@ def test_core_skill_fits_in_150_lines() -> None:
     assert len(skill_module.core_skill_text().splitlines()) < MAX_CORE_SKILL_LINES
 
 
+def test_core_skill_invites_judgment_and_issue_filing() -> None:
+    text = skill_module.core_skill_text()
+    assert "## Judgment & gaps" in text
+    assert "friction" in text
+    assert "UniverLab/facetmedia/issues" in text
+    assert "UniverLab/facetmedia-registry/issues" in text
+
+
 def test_fixture_packages_carry_facets() -> None:
     registry = load_registry(FIXTURES)
     assert {name: package.facet for name, package in registry.packages.items()} == {

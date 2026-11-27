@@ -126,24 +126,16 @@ and the network may keep it as a draft or private. Follow these rules:
 
 ## Fix
 
-When `verify` fails, run `facet preview --json`: it names the field that
-broke and the viewer that shows it. Fix the piece, run again, then `facet
-check <asset>` to re-judge. `facet check` never makes anything; it only
-re-verifies.
+When `verify` fails, run `facet preview --json`: it names the field that broke and the viewer that shows it. Fix the piece, run again, then `facet check <asset>` to re-judge. `facet check` never makes anything; it only re-verifies.
 
 ## Share
 
-Heavy packages wait for each other: only one exclusive package runs at a
-time. `facet run` waits for the lock; pass `--no-wait` to fail at once with
-`lock_busy` instead. Light verbs (`list`, `describe`, `skill`, `preview`)
-never take the lock and work offline from the registry snapshot in use.
+Heavy packages wait for each other: only one exclusive package runs at a time. `facet run` waits for the lock; pass `--no-wait` to fail at once with `lock_busy` instead. Light verbs (`list`, `describe`, `skill`, `preview`) never take the lock and work offline from the registry snapshot in use.
 
 ## Each package's how-to
 
-`facet skill <package>` prints that package's skill: when to use it, one
-complete piece per capability, what `verify` measures, and the pitfalls.
-Start there before writing a piece. `facet license accept` is per model and
-`facet pull image` installs a whole facet, choosing the packages this
-machine can run (`facet pull --package NAME` names one); the skill's
-`## On this machine` section
-says what is true here right now.
+`facet skill <package>` prints that package's skill: when to use it, one complete piece per capability, what `verify` measures, and the pitfalls. Start there before writing a piece. `facet license accept` is per model and `facet pull image` installs a whole facet, choosing the packages this machine can run (`facet pull --package NAME` names one); the skill's `## On this machine` section says what is true here right now.
+
+## Judgment & gaps
+
+Treat facet critically, not passively: if a verb hits friction, an unclear error, a missing input, or forces a recurring manual workaround that belongs inside facet, call it out to the person instead of silently working around it. Invite them to open an issue (with the command, exit code, and what was missing) at `https://github.com/UniverLab/facetmedia/issues` for core CLI, contract, auth, or verify gaps, or `https://github.com/UniverLab/facetmedia-registry/issues` for package, capability, or skill gaps.
